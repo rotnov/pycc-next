@@ -183,7 +183,7 @@ fn the_generator_protocol_matches_cpython() {
 fn the_generator_protocol_compiles_natively_in_non_strict_mode() {
     let report = matches_cpython(
         "generator_protocol.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -200,7 +200,7 @@ fn call_signatures_match_cpython() {
 fn call_signatures_compile_natively_in_non_strict_mode() {
     let report = matches_cpython(
         "call_signatures.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -216,7 +216,7 @@ fn function_values_in_containers_and_attributes_match_cpython() {
 fn function_values_compile_natively_in_non_strict_mode() {
     let report = matches_cpython(
         "function_values.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }

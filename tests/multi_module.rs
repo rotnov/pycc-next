@@ -138,7 +138,7 @@ fn a_program_of_modules_and_packages_matches_cpython() {
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_program_of_modules_and_packages_matches_cpython_in_non_strict_mode() {
-    native_matches_cpython("program", &["--non-strict"]);
+    native_matches_cpython("program", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn a_program_of_modules_and_packages_matches_cpython_as_an_extension() {
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn names_a_package_re_exports_match_cpython() {
     native_matches_cpython("reexports", &[]);
-    native_matches_cpython("reexports", &["--non-strict"]);
+    native_matches_cpython("reexports", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn names_a_package_re_exports_match_cpython_as_an_extension() {
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn an_uncaught_exception_from_another_module_matches_cpython() {
     native_matches_cpython("raises", &[]);
-    native_matches_cpython("raises", &["--non-strict"]);
+    native_matches_cpython("raises", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn an_uncaught_exception_from_another_module_matches_cpython_as_an_extension() {
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn classes_across_modules_match_cpython() {
     native_matches_cpython("classes", &[]);
-    native_matches_cpython("classes", &["--non-strict"]);
+    native_matches_cpython("classes", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn a_circular_import_through_the_entry_module_is_refused_with_the_cycle() {
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_circular_import_matches_cpython() {
     native_matches_cpython("cycle", &[]);
-    native_matches_cpython("cycle", &["--non-strict"]);
+    native_matches_cpython("cycle", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn a_circular_import_matches_cpython_as_an_extension() {
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_call_before_def_across_a_circular_import_is_catchable() {
     native_matches_cpython("cycle_call", &[]);
-    native_matches_cpython("cycle_call", &["--non-strict"]);
+    native_matches_cpython("cycle_call", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn a_call_before_def_across_a_circular_import_is_catchable_as_an_extension() {
 fn a_from_import_of_a_name_not_bound_yet_raises_cpython_s_import_error() {
     for case in ["cycle_error", "cycle_error_pkg"] {
         native_matches_cpython(case, &[]);
-        native_matches_cpython(case, &["--non-strict"]);
+        native_matches_cpython(case, &["--non-strict", "--select", "module"]);
     }
 }
 

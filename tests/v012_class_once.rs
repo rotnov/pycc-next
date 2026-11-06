@@ -82,7 +82,7 @@ fn classes_match_cpython(release: bool, ending: &str) {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .args(if release { &["--release"][..] } else { &[] })
         .output()
         .expect("pycc should spawn");

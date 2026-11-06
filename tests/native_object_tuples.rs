@@ -105,12 +105,12 @@ fn variadic_tuples_match_cpython_in_strict_mode() {
 
 #[test]
 fn variadic_tuples_match_cpython_in_non_strict_mode() {
-    assert_native_matches_cpython("var_tuple.py", &["--non-strict"]);
+    assert_native_matches_cpython("var_tuple.py", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 fn tuples_holding_objects_match_cpython_in_non_strict_mode() {
-    assert_native_matches_cpython("object_tuples.py", &["--non-strict"]);
+    assert_native_matches_cpython("object_tuples.py", &["--non-strict", "--select", "module"]);
 }
 
 /// Tuples of every pooled length and longer, more of them (and of strings)
@@ -120,7 +120,7 @@ fn tuples_holding_objects_match_cpython_in_non_strict_mode() {
 #[test]
 fn recycled_tuple_and_str_blocks_match_cpython() {
     assert_native_matches_cpython("tuple_pools.py", &[]);
-    assert_native_matches_cpython("tuple_pools.py", &["--non-strict"]);
+    assert_native_matches_cpython("tuple_pools.py", &["--non-strict", "--select", "module"]);
 }
 
 /// Builds `module` as an `--ext` extension module into one directory and
@@ -171,7 +171,7 @@ fn tuples_holding_objects_cross_the_ext_boundary_with_their_aliases() {
     assert_ext_matches_source(
         "object_tuples",
         "object_tuples_ext_driver.py",
-        &["--non-strict"],
+        &["--non-strict", "--select", "module"],
     );
 }
 
@@ -282,8 +282,8 @@ mod peak_rss {
 
     #[test]
     fn tuple_operations_do_not_grow_with_the_trip_count() {
-        let small = probe(20_000, &["--non-strict"]);
-        let large = probe(220_000, &["--non-strict"]);
+        let small = probe(20_000, &["--non-strict", "--select", "module"]);
+        let large = probe(220_000, &["--non-strict", "--select", "module"]);
         assert!(
             large - small < GROWTH_LIMIT_KB,
             "peak grew {} kB from 20 000 to 220 000 iterations ({small} -> {large})",

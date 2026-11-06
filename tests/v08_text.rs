@@ -124,7 +124,7 @@ fn str_ops_native_strict() {
 
 #[test]
 fn str_ops_native_non_strict() {
-    native("v08_str_ops", &["--non-strict"]);
+    native("v08_str_ops", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -135,8 +135,8 @@ fn str_ops_ext_strict() {
 
 #[test]
 fn str_ops_ext_non_strict() {
-    ext("v08_str_ops", &["--non-strict"], "import m");
-    ext("v08_str_ops", &["--non-strict"], STR_IDENTITY_DRIVER);
+    ext("v08_str_ops", &["--non-strict", "--select", "module"], "import m");
+    ext("v08_str_ops", &["--non-strict", "--select", "module"], STR_IDENTITY_DRIVER);
 }
 
 /// A `str` the host passes in and gets back, unchanged or replaced, many
@@ -188,24 +188,24 @@ fn typing_unions_native_strict() {
 
 #[test]
 fn typing_unions_native_non_strict() {
-    native("v08_typing_unions", &["--non-strict"]);
+    native("v08_typing_unions", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 fn typing_unions_ext_non_strict() {
-    ext("v08_typing_unions", &["--non-strict"], "import m");
+    ext("v08_typing_unions", &["--non-strict", "--select", "module"], "import m");
 }
 
 /// Non-strict mode: `typing` names pycc does not model are CPython objects,
 /// and annotations naming them compile.
 #[test]
 fn unmodeled_typing_names_native_non_strict() {
-    native("v08_typing_objects", &["--non-strict"]);
+    native("v08_typing_objects", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 fn unmodeled_typing_names_ext_non_strict() {
-    ext("v08_typing_objects", &["--non-strict"], "import m");
+    ext("v08_typing_objects", &["--non-strict", "--select", "module"], "import m");
 }
 
 /// Strict mode keeps refusing a `typing` name pycc does not model.
@@ -260,7 +260,7 @@ fn type_checking_string_annotations_ext_non_strict() {
     build(
         &source,
         &pkg.join("use"),
-        &["--ext", "--non-strict", "--foreign-relative-imports"],
+        &["--ext", "--non-strict", "--select", "module", "--foreign-relative-imports"],
     );
     let driver = "from pkg.use import advance, describe\nfrom pkg.state import State\n\
 s = State('hello world')\nprint(advance(s, 3), advance(s, 4), describe(s, 'x'), s.pos)\n\
@@ -292,7 +292,7 @@ try:\n    advance(s, -100)\nexcept ValueError as e:\n    print('ValueError', e)\
 fn private_value_functions_are_module_attributes() {
     ext(
         "v08_private_functions",
-        &["--non-strict"],
+        &["--non-strict", "--select", "module"],
         "from m import _wrap, _repeat, public\nprint(_wrap('x', 2), _repeat('ab', 3), public('q'))\n\
 import m\nprint(sorted(n for n in dir(m) if n.startswith('_') and not n.startswith('__')))\n",
     );
@@ -305,7 +305,7 @@ fn str_loop_native_strict() {
 
 #[test]
 fn str_loop_native_non_strict() {
-    native("v08_str_loop", &["--non-strict"]);
+    native("v08_str_loop", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -315,28 +315,28 @@ fn str_loop_ext_strict() {
 
 #[test]
 fn str_loop_ext_non_strict() {
-    ext("v08_str_loop", &["--non-strict"], "import m");
+    ext("v08_str_loop", &["--non-strict", "--select", "module"], "import m");
 }
 
 #[test]
 fn cast_of_objects_native_non_strict() {
-    native("v08_cast_objects", &["--non-strict"]);
+    native("v08_cast_objects", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 fn cast_of_objects_ext_non_strict() {
-    ext("v08_cast_objects", &["--non-strict"], "import m");
-    ext("v08_cast_method", &["--non-strict"], "import m");
+    ext("v08_cast_objects", &["--non-strict", "--select", "module"], "import m");
+    ext("v08_cast_method", &["--non-strict", "--select", "module"], "import m");
 }
 
 /// Non-strict mode: `typing` forms a module also uses as values are their
 /// CPython objects.
 #[test]
 fn typing_forms_used_as_values_native_non_strict() {
-    native("v08_typing_values", &["--non-strict"]);
+    native("v08_typing_values", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 fn typing_forms_used_as_values_ext_non_strict() {
-    ext("v08_typing_values", &["--non-strict"], "import m");
+    ext("v08_typing_values", &["--non-strict", "--select", "module"], "import m");
 }

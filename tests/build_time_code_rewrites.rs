@@ -95,7 +95,7 @@ fn rewritten_code_objects_match_cpython_with_and_without_the_table() {
     let source = compiled.join("m.py");
     std::fs::write(&source, MODULE).expect("write the module");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("m"))

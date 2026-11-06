@@ -102,18 +102,18 @@ impl Rendered {
 }
 
 /// The rewrite being built.
-struct Out {
-    text: String,
-    ranges: Vec<Range<u32>>,
-    copied: Vec<(u32, u32, u32)>,
-    mirror_spans: Vec<(Range<u32>, String)>,
-    edited: Vec<(Range<u32>, u32)>,
-    chunks: Vec<CodeChunk>,
+pub(super) struct Out {
+    pub(super) text: String,
+    pub(super) ranges: Vec<Range<u32>>,
+    pub(super) copied: Vec<(u32, u32, u32)>,
+    pub(super) mirror_spans: Vec<(Range<u32>, String)>,
+    pub(super) edited: Vec<(Range<u32>, u32)>,
+    pub(super) chunks: Vec<CodeChunk>,
 }
 
 /// The range of a unit with no text of its own in the rewrite (a lift whose
 /// statement is compiled, or that falls back with it): no offset is in it.
-const NOWHERE: Range<u32> = u32::MAX..u32::MAX;
+pub(super) const NOWHERE: Range<u32> = u32::MAX..u32::MAX;
 
 impl Plan {
     /// The rewritten source.
@@ -374,7 +374,7 @@ impl Plan {
 
     /// Appends compiled unit `index` (a top-level statement, or a lift) to
     /// `out`: its source from `stmts[index].range`, with every edit.
-    fn emit_compiled(
+    pub(super) fn emit_compiled(
         &self,
         out: &mut Out,
         index: usize,

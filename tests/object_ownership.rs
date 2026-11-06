@@ -44,7 +44,7 @@ fn build(dir: &Path, source: &Path, out: &str, ext: bool) {
         .arg(source)
         .arg("-o")
         .arg(dir.join(out))
-        .arg("--non-strict")
+        .args(["--non-strict", "--select", "module"])
         .arg("--release");
     if ext {
         command.arg("--ext");

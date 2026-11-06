@@ -21,7 +21,7 @@ fn an_explicit_super_in_a_lifted_method_compiles() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/explicit_super.py");
     std::fs::copy(&source, dir.join("supers.py")).expect("copy the fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(dir.join("supers.py"))
         .arg("-o")
         .arg(dir.join("supers"))

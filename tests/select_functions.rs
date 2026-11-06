@@ -1,0 +1,217 @@
+//! A non-strict `--ext` build compiles only its selected functions
+//! (docs/design/compile-little.md, sections 2.1-2.4): the module runs as
+//! CPython bytecode and each selected function is patched into the function
+//! CPython made. The module must behave as its source does (output, tracebacks,
+//! `__file__`), and only what was selected is compiled.
+
+use pycc_scratch::ScratchDir;
+use std::path::Path;
+use std::process::{Command, Output};
+
+const FIXTURE: &str = include_str!("fixtures/select_functions.py");
+
+fn python() -> std::ffi::OsString {
+    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into())
+}
+
+fn pycc(args: &[&std::ffi::OsStr]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pycc")).args(args).output().expect("pycc runs")
+}
+
+fn text(o: &Output) -> String {
+    format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
+}
+
+/// `import m; m.main()` from `dir`, with `dir` replaced by `DIR` in the output.
+fn run_main(dir: &Path) -> String {
+    let o = Command::new(python())
+        .args(["-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import m; m.main()"])
+        .arg(dir)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    String::from_utf8_lossy(&o.stdout).replace(dir.to_str().unwrap(), "DIR")
+}
+
+/// Two copies of the fixture as `m.py`: one built with `flags`, one left alone.
+fn build(scratch: &Path, flags: &[&str]) -> (std::path::PathBuf, Output) {
+    let dir = scratch.join("built");
+    let plain = scratch.join("plain");
+    for d in [&dir, &plain] {
+        std::fs::create_dir_all(d).unwrap();
+        std::fs::write(d.join("m.py"), FIXTURE).unwrap();
+    }
+    let py = dir.join("m.py");
+    let out = dir.join("m");
+    let mut args: Vec<&std::ffi::OsStr> = vec!["build".as_ref(), py.as_os_str(), "-o".as_ref(), out.as_os_str()];
+    args.extend(["--ext", "--non-strict", "--report-fallbacks"].map(std::ffi::OsStr::new));
+    args.extend(flags.iter().map(std::ffi::OsStr::new));
+    let o = pycc(&args);
+    assert!(o.status.success(), "{}", text(&o));
+    (dir, o)
+}
+
+fn extension(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".so"))
+}
+
+#[test]
+fn select_all_compiles_every_eligible_function_and_behaves_as_the_source() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let (dir, o) = build(&scratch, &["--select", "all"]);
+    assert!(extension(&dir));
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    let compiled: Vec<&str> = stderr.lines().filter(|l| l.starts_with("compiled: ")).collect();
+    assert_eq!(
+        compiled,
+        [
+            "compiled: m:hot",
+            "compiled: m:Base.greet",
+            "compiled: m:Box.__init__",
+            "compiled: m:Box.total",
+            "compiled: m:Box.greet",
+            "compiled: m:Box.size",
+            "compiled: m:Box.twice",
+            "compiled: m:wrapped",
+            "compiled: m:boom",
+        ],
+        "{stderr}"
+    );
+    // A function that reads the module's globals by a string stays
+    // bytecode, as does one that does not compile (`deco` nests a `def`), and
+    // a nested function is not eligible.
+    assert!(stderr.contains("not compiled: m:main: it reaches the module's globals by a string"), "{stderr}");
+    assert!(stderr.contains("not compiled: m:deco: C0001"), "{stderr}");
+    assert!(!stderr.contains("m:deco.<locals>.wrapper"), "{stderr}");
+    assert_eq!(run_main(&dir), run_main(&scratch.join("plain")));
+    // The compiled functions are patched in: the module's own functions,
+    // not new ones.
+    let o = Command::new(python())
+        .args([
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); import m\n\
+             print(type(m.__spec__.loader).__name__, m.__file__.endswith('m.py'))\n\
+             print(m.hot.__code__.co_qualname, m.hot.__module__, m.Box.total.__qualname__)",
+        ])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(text(&o), "ExtensionFileLoader True\nhot m Box.total\n");
+}
+
+#[test]
+fn without_a_profile_nothing_is_selected_and_no_extension_is_built() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let (dir, o) = build(&scratch, &[]);
+    assert!(!extension(&dir));
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    assert!(stderr.contains("note: no profile (`--profile`): no function is selected"), "{stderr}");
+    assert!(stderr.contains("no extension is built, so CPython imports the module as it is"), "{stderr}");
+    let (dir, _) = build(&scratch, &["--select", "none"]);
+    assert!(!extension(&dir));
+}
+
+#[test]
+fn compile_and_no_compile_adjust_the_selection() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let (dir, o) = build(&scratch, &["--select", "none", "--compile", "m:hot", "--compile", "m:Box.greet"]);
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    let compiled: Vec<&str> = stderr.lines().filter(|l| l.starts_with("compiled: ")).collect();
+    assert_eq!(compiled, ["compiled: m:hot", "compiled: m:Box.greet"], "{stderr}");
+    assert_eq!(run_main(&dir), run_main(&scratch.join("plain")));
+    let (_, o) = build(&scratch, &["--select", "all", "--no-compile", "m:hot"]);
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    assert!(!stderr.contains("compiled: m:hot\n") && stderr.contains("compiled: m:boom\n"), "{stderr}");
+    // A function that is not in the sources is an error.
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let dir = scratch.join("d");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.py"), FIXTURE).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(dir.join("m.py"))
+        .arg("-o")
+        .arg(dir.join("m"))
+        .args(["--ext", "--non-strict", "--compile", "m:nope"])
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    assert!(text(&o).contains("--compile `m:nope`: no such function in the build's sources"), "{}", text(&o));
+}
+
+#[test]
+fn a_profile_selects_the_hot_functions() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let work_dir = scratch.join("w");
+    std::fs::create_dir_all(&work_dir).unwrap();
+    std::fs::write(work_dir.join("m.py"), FIXTURE).unwrap();
+    let work = scratch.join("work.py");
+    std::fs::write(
+        &work,
+        "import m\nfor i in range(3000):\n    m.hot({1: 2}, 1)\n    m.Box.twice(i)\n",
+    )
+    .unwrap();
+    let profile = scratch.join("p.json");
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("profile")
+        .arg("--no-verify")
+        .arg(work_dir.join("m.py"))
+        .arg("-o")
+        .arg(&profile)
+        .args(["--runs", "1", "--select-share", "0"])
+        .arg("--")
+        .arg(python())
+        .arg(&work)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    let p = profile.to_str().unwrap();
+    let (dir, o) = build(&scratch, &["--profile", p, "--select-share", "0"]);
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    let compiled: Vec<&str> = stderr.lines().filter(|l| l.starts_with("compiled: ")).collect();
+    assert_eq!(compiled, ["compiled: m:hot", "compiled: m:Box.twice"], "{stderr}");
+    assert_eq!(run_main(&dir), run_main(&scratch.join("plain")));
+}
+
+#[test]
+fn a_package_serves_only_its_modules_with_selected_functions() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let pkg = scratch.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "from .a import f\n").unwrap();
+    std::fs::write(pkg.join("a.py"), "def f(x):\n    return [x] * 2\n").unwrap();
+    std::fs::write(pkg.join("b.py"), "def g(x):\n    return x + 1\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&pkg)
+        .arg("-o")
+        .arg(pkg.join("__init__"))
+        .args(["--ext", "--non-strict", "--report-fallbacks", "--select", "none", "--compile", "pkg.a:f"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("compiled: pkg.a:f\n"), "{}", text(&o));
+    let o = Command::new(python())
+        .args([
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); import pkg, pkg.a, pkg.b\n\
+             for m in (pkg, pkg.a, pkg.b):\n    print(m.__name__, type(m.__spec__.loader).__name__, m.__file__[len(sys.argv[1].rstrip('/')):])\n\
+             print(pkg.f(3), pkg.b.g(1))",
+        ])
+        .arg(scratch.join(""))
+        .output()
+        .unwrap();
+    assert_eq!(
+        text(&o),
+        // The package's `__init__` is the extension that installs the finder;
+        // its module runs as bytecode too.
+        "pkg ExtensionFileLoader /pkg/__init__.py\n\
+         pkg.a _PyccFinder /pkg/a.py\n\
+         pkg.b SourceFileLoader /pkg/b.py\n\
+         [3, 3] 2\n"
+    );
+}

@@ -93,7 +93,7 @@ pub fn assert_native_matches(name: &str) {
             .output()
             .expect("the oracle runs"),
     );
-    for flags in [&["--release"][..], &["--release", "--non-strict"][..]] {
+    for flags in [&["--release"][..], &["--release", "--non-strict", "--select", "module"][..]] {
         let label = format!("stdlib_{}", name.trim_end_matches(".py"));
         assert_eq!(
             run_native(&label, &source, flags),

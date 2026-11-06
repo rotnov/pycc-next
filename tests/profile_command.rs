@@ -13,9 +13,11 @@ fn python() -> std::ffi::OsString {
     std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into())
 }
 
+/// Passes 1 and 2 only: pass 3 (`tests/profile_verify.rs`) builds and times.
 fn profile(pkg: &Path, out: &Path, extra: &[&str], workload: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_pycc"))
         .arg("profile")
+        .arg("--no-verify")
         .arg(pkg)
         .arg("-o")
         .arg(out)
@@ -116,6 +118,11 @@ fn a_profile_records_calls_self_time_callees_and_argument_types() {
     assert_eq!(hot["arg_types"]["d"]["dict"], 400 + 600 - 400);
     assert_eq!(hot["arg_types"]["d"]["list"], 400);
     assert_eq!(hot["arg_types"]["k"]["int"], 1000);
+    // Of those 1,000 calls, the ones that caught `KeyError`: the dict calls
+    // with `i % 3 != 1` (267 of the first loop's 400), then 9 of each
+    // `Box.total`'s 10 (20 of them before the sampling ends).
+    assert_eq!(hot["handled"], 267 + 9 * 20);
+    assert_eq!(get("Box.size")["handled"], 0);
     assert_eq!(get("Box.total")["arg_types"]["self"]["pkg.hot.Box"], 60);
     assert_eq!(get("Box.size")["calls"], 60);
     // Calls to Python functions, by callee: `hot` calls none; `Box.total`

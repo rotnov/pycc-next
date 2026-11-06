@@ -60,6 +60,55 @@ pub struct ModeFlags {
     /// runs its source.
     #[arg(long)]
     pub exact_cpython: bool,
+    /// Which functions a non-strict `--ext` build compiles
+    /// (docs/design/compile-little.md, section 2): `profile` (the default),
+    /// the selection of `--profile`, or nothing without one, and then no
+    /// extension is built; `all`, every eligible function; `none`, nothing;
+    /// `module`, transitional: whole modules compiled as before. Accepted,
+    /// and ignored, by every other build and command, so one set of mode
+    /// flags serves them all until `module` goes.
+    #[arg(long, value_enum)]
+    pub select: Option<crate::select::SelectMode>,
+}
+
+/// Which functions a non-strict `--ext` build compiles
+/// (docs/design/compile-little.md, section 2): the module itself stays
+/// CPython bytecode.
+#[derive(Args, Debug, Clone, Default)]
+pub struct SelectFlags {
+    /// A profile of a representative workload (`pycc profile`): its hot
+    /// functions are compiled. Also `[tool.pycc] profile = "..."`.
+    #[arg(long, value_name = "PROFILE", requires = "ext")]
+    pub profile: Option<PathBuf>,
+    /// Also compile this function (`MODULE:QUALNAME`). Repeatable. Also
+    /// `[tool.pycc] compile = [...]`.
+    #[arg(long = "compile", value_name = "MODULE:QUALNAME", requires = "ext")]
+    pub compile: Vec<String>,
+    /// Never compile this function (`MODULE:QUALNAME`). Repeatable. Also
+    /// `[tool.pycc] exclude-functions = [...]`.
+    #[arg(long = "no-compile", value_name = "MODULE:QUALNAME", requires = "ext")]
+    pub no_compile: Vec<String>,
+    /// The selection rule: the least share of the profile's self time.
+    #[arg(long, value_name = "FRACTION", requires = "ext")]
+    pub select_share: Option<f64>,
+    /// The selection rule: the fewest calls.
+    #[arg(long, value_name = "N", requires = "ext")]
+    pub select_calls: Option<u64>,
+    /// The selection rule: the most functions selected.
+    #[arg(long, value_name = "N", requires = "ext")]
+    pub select_max: Option<usize>,
+    /// The selection rule: the largest share of a function's calls to Python
+    /// functions that may leave the selected region.
+    #[arg(long, value_name = "SHARE", requires = "ext")]
+    pub select_outside: Option<f64>,
+    /// The selection rule: the share of a function's sampled calls that catch
+    /// an exception in its frame must be under this.
+    #[arg(long, value_name = "SHARE", requires = "ext")]
+    pub select_handled: Option<f64>,
+    /// Internal (the package build's member builds): the member's selected
+    /// functions, one `FIRSTLINENO QUALNAME` per line.
+    #[arg(long, value_name = "PATH", hide = true, requires = "package_member")]
+    pub select_functions: Option<PathBuf>,
 }
 
 impl InteropFlags {
@@ -186,6 +235,8 @@ pub enum Command {
         interop: InteropFlags,
         #[command(flatten)]
         mode: ModeFlags,
+        #[command(flatten)]
+        select: Box<SelectFlags>,
     },
     Run {
         path: PathBuf,
@@ -277,6 +328,21 @@ pub enum Command {
         /// compiled and interpreted code) must be under this.
         #[arg(long, default_value_t = 0.5)]
         select_outside: f64,
+        /// The selection rule: the share of a function's sampled calls that
+        /// catch an exception in its frame must be under this.
+        #[arg(long, default_value_t = 0.5)]
+        select_handled: f64,
+        /// Skip pass 3: keep the selection rule's candidates unmeasured.
+        #[arg(long)]
+        no_verify: bool,
+        /// Pass 3's interleaved rounds per check (at most 15), each one run
+        /// of the workload in CPython and one with the candidates compiled.
+        #[arg(long, default_value_t = 7, value_parser = clap::value_parser!(u32).range(1..=15))]
+        verify_rounds: u32,
+        /// Pass 3 also counts each check's instructions under callgrind
+        /// (needs valgrind), as evidence beside the wall-time verdict.
+        #[arg(long)]
+        verify_instructions: bool,
         /// Run no workload: read the profile `-o` names against PKG's current
         /// sources and print its stale entries and what the selection rule
         /// takes from it (`-- PYTHON` indexes the sources).
@@ -813,10 +879,10 @@ mod tests {
     #[test]
     fn non_strict_is_a_flag_of_build_run_check_and_lock() {
         for argv in [
-            &["pycc", "check", "--non-strict", "a.py"][..],
-            &["pycc", "build", "--non-strict", "a.py", "-o", "a"][..],
-            &["pycc", "run", "--non-strict", "a.py"][..],
-            &["pycc", "lock", "--non-strict", "a.py"][..],
+            &["pycc", "check", "--non-strict", "--select", "module", "a.py"][..],
+            &["pycc", "build", "--non-strict", "--select", "module", "a.py", "-o", "a"][..],
+            &["pycc", "run", "--non-strict", "--select", "module", "a.py"][..],
+            &["pycc", "lock", "--non-strict", "--select", "module", "a.py"][..],
         ] {
             let mode = match Cli::try_parse_from(argv).unwrap().command {
                 Command::Check { mode, .. }

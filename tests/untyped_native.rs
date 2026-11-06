@@ -72,7 +72,7 @@ fn build_specialized(dir: &Path) -> String {
     let build_src = dir.join("m.py");
     std::fs::copy(fixture("untyped_specialize.py"), &build_src).expect("source");
     let build = pycc(
-        &["--ext", "--non-strict", "--report-fallbacks"],
+        &["--ext", "--non-strict", "--select", "module", "--report-fallbacks"],
         &build_src,
         &ext.join("m"),
     );
@@ -128,7 +128,7 @@ fn a_refused_specialization_is_dropped_not_fallen_back() {
     std::fs::create_dir_all(&src).expect("dir");
     std::fs::write(dir.join("m.py"), source).expect("write");
     std::fs::write(src.join("m.py"), source).expect("write");
-    let build = pycc(&["--ext", "--non-strict", "--report-fallbacks"], &dir.join("m.py"), &ext.join("m"));
+    let build = pycc(&["--ext", "--non-strict", "--select", "module", "--report-fallbacks"], &dir.join("m.py"), &ext.join("m"));
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(!report.contains("fallback:"), "{report}");
@@ -154,7 +154,7 @@ fn widening_a_rebound_name_is_per_function() {
     let ir = dir.join("w.ll");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
         .env("PYCC_DUMP_LLVM", &ir)
-        .args(["build", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("w"))

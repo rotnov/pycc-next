@@ -10,6 +10,8 @@ fn entry(module: &str, qualname: &str, line: u32, sha: &str, calls: u64, ns: u64
         self_ns: ns,
         callees: BTreeMap::new(),
         arg_types: ArgTypes::new(),
+        handled: 0,
+        measured: None,
     }
 }
 
@@ -240,4 +242,29 @@ fn a_generator_expression_s_calls_count_as_its_function_s() {
     assert_eq!(total.calls, 60);
     assert_eq!(total.callees, BTreeMap::from([("*".to_string(), 3), ("m:hot:1".to_string(), 600)]));
     assert_eq!(folded[&key("C.total.<locals>.inner", 6)].callees["*"], 12);
+}
+
+#[test]
+fn a_function_that_mostly_catches_exceptions_is_not_selected() {
+    let mut often = entry("m", "often", 1, "", 3000, 300);
+    often.handled = 500;
+    let mut rare = entry("m", "rare", 2, "", 40, 200);
+    rare.handled = 19;
+    let mut some = entry("m", "some", 3, "", 100, 100);
+    some.handled = 49;
+    let es = [often, rare, some];
+    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, true)).collect();
+    let decided = select(1000, &input, Rule { calls: 1, ..Rule::default() });
+    let got: Vec<Option<&str>> = decided.iter().map(|d| d.rejected.as_deref()).collect();
+    assert_eq!(
+        got,
+        [
+            // Out of its first 1,000 calls, the ones pass 2 sampled.
+            Some("it catches an exception in 500 of its first 1000 calls"),
+            None,
+            None,
+        ]
+    );
+    let none = select(1000, &input, Rule { calls: 1, handled: 0.0, ..Rule::default() });
+    assert!(none.iter().all(|d| d.rejected.is_some()));
 }

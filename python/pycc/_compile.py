@@ -47,9 +47,12 @@ def find_pycc(env: dict | None = None) -> pathlib.Path:
 @dataclasses.dataclass
 class Outcome:
     module: str
-    artifact: pathlib.Path | None  # None: ships as Python (it fell back)
+    artifact: pathlib.Path | None  # None: ships as Python (it fell back, or nothing selected)
     seconds: float
     log: str
+    # A non-strict build that compiles selected functions only: the module's
+    # bytecode runs, so its `.py` ships beside the extension.
+    selected: bool = False
 
 
 def command(pycc: pathlib.Path, source: pathlib.Path, out: pathlib.Path,
@@ -62,7 +65,7 @@ def command(pycc: pathlib.Path, source: pathlib.Path, out: pathlib.Path,
     if release:
         cmd.append("--release")
     if not options.strict:
-        cmd += ["--non-strict", "--report-fallbacks"]
+        cmd += ["--non-strict", "--report-fallbacks", *options.select_args]
     return cmd + list(options.extra_args)
 
 
@@ -99,10 +102,13 @@ def compile_modules(pycc: pathlib.Path, staging: pathlib.Path,
                                f"with fallback-to-python).")
         artifacts = [p for p in out.parent.iterdir()
                      if p.name.startswith(out.name + ".") and p.suffix in (".so", ".pyd")]
+        selected = selects(options)
+        if not artifacts and selected:
+            return Outcome(name, None, seconds, log, selected)  # nothing selected
         if len(artifacts) != 1:
             raise ProjectError(f"pycc built {name} but left {len(artifacts)} extension files "
                                f"for {out}")
-        return Outcome(name, artifacts[0], seconds, log)
+        return Outcome(name, artifacts[0], seconds, log, selected)
 
     jobs = max(1, min(len(modules), os.cpu_count() or 1))
     with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
@@ -116,7 +122,10 @@ def compile_modules(pycc: pathlib.Path, staging: pathlib.Path,
     if errors:
         raise CompileError("\n\n".join(errors))
     for o in outcomes:
-        if o.artifact is None:
+        if o.artifact is None and o.selected:
+            print(f"pycc.build: {o.module}: no function selected; it ships as Python"
+                  + (f":\n  {o.log}" if o.log else ""), file=sys.stderr)
+        elif o.artifact is None:
             print(f"pycc.build: {o.module}: pycc could not compile it; it ships as Python "
                   f"(fallback-to-python):\n{o.log}", file=sys.stderr)
         else:
@@ -134,6 +143,7 @@ class PackageOutcome:
     failed: list[str]  # the modules pycc could not compile (when artifact is None)
     seconds: float
     log: str
+    selected: bool = False  # as `Outcome.selected`; with no artifact: nothing selected
 
 
 def package_command(pycc: pathlib.Path, staging: pathlib.Path, package: str,
@@ -145,7 +155,7 @@ def package_command(pycc: pathlib.Path, staging: pathlib.Path, package: str,
     if release:
         cmd.append("--release")
     if not options.strict:
-        cmd += ["--non-strict", "--report-fallbacks"]
+        cmd += ["--non-strict", "--report-fallbacks", *options.select_args]
     for name in excludes:
         cmd += ["--exclude", name]
     return cmd + list(options.extra_args)
@@ -175,7 +185,25 @@ def compile_package(pycc: pathlib.Path, staging: pathlib.Path, package: str,
         return PackageOutcome(package, None, members, failed, seconds, log)
     artifacts = [p for p in top.iterdir()
                  if p.name.startswith("__init__.") and p.suffix in (".so", ".pyd")]
+    selected = selects(options)
+    if not artifacts and selected:
+        return PackageOutcome(package, None, members, [], seconds, log, selected)
     if len(artifacts) != 1:
         raise ProjectError(f"pycc built package {package} but left {len(artifacts)} "
                            f"extension files for {top / '__init__'}")
-    return PackageOutcome(package, artifacts[0], members, [], seconds, log)
+    return PackageOutcome(package, artifacts[0], members, [], seconds, log, selected)
+
+
+def selects(options: ModuleOptions) -> bool:
+    """Whether a build with `options` compiles selected functions (a non-strict
+    build without `--select module`) rather than whole modules."""
+    if options.strict:
+        return False
+    args = [*options.select_args, *options.extra_args]
+    mode = "profile"
+    for i, a in enumerate(args):
+        if a == "--select" and i + 1 < len(args):
+            mode = args[i + 1]
+        elif a.startswith("--select="):
+            mode = a.split("=", 1)[1]
+    return mode != "module"

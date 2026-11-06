@@ -742,7 +742,7 @@ print(f())
     );
     let out = dir.join("prog");
     let status = Command::new(pycc_bin())
-        .args(["build", path.to_str().unwrap(), "-o", out.to_str().unwrap(), "--non-strict"])
+        .args(["build", path.to_str().unwrap(), "-o", out.to_str().unwrap(), "--non-strict", "--select", "module"])
         .status()
         .unwrap();
     assert!(status.success());

@@ -92,7 +92,7 @@ fn build_whole(dir: &Path, name: &str, args: &[&str]) -> Output {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .args(args)
         .output()
         .expect("pycc should spawn")
@@ -420,7 +420,7 @@ fn a_member_build_defines_only_prefixed_symbols() {
         .arg(&out)
         .args([
             "--ext",
-            "--non-strict",
+            "--non-strict", "--select", "module",
             "--release",
             "--foreign-relative-imports",
             "--package-member",
@@ -506,7 +506,7 @@ fn a_member_build_compiles_against_the_package_builds_probe() {
             .arg(&out)
             .args([
                 "--ext",
-                "--non-strict",
+                "--non-strict", "--select", "module",
                 "--release",
                 "--foreign-relative-imports",
                 "--package-member",

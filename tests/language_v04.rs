@@ -40,7 +40,7 @@ fn asdict_of_mixed_fields_matches_cpython_in_non_strict_mode() {
             .expect("the oracle runs"),
     );
     assert_eq!(
-        run_native("v04_asdict_mixed", &source, &["--release", "--non-strict"]),
+        run_native("v04_asdict_mixed", &source, &["--release", "--non-strict", "--select", "module"]),
         expected
     );
 }

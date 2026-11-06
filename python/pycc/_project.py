@@ -43,7 +43,10 @@ _FLAT_EXCLUDE = {
 _TOOL_KEYS = {
     "strict", "release", "packages", "py-modules", "source-dir", "pure-python",
     "fallback-to-python", "extra-args", "sdist-include", "overrides", "whole-package",
+    "select", "profile", "compile", "exclude",
 }
+# `[tool.pycc] select` (docs/design/compile-little.md, section 2.2).
+_SELECT_MODES = ("profile", "all", "none", "module")
 _OVERRIDE_KEYS = {"strict", "pure-python", "fallback-to-python", "extra-args"}
 
 
@@ -65,6 +68,8 @@ class ModuleOptions:
     pure: bool
     fallback: bool
     extra_args: tuple[str, ...]
+    # A non-strict build's selection flags (`--select`, `--profile`, ...).
+    select_args: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -90,6 +95,12 @@ class ToolConfig:
     sdist_include: list[str] = dataclasses.field(default_factory=list)
     overrides: dict[str, dict] = dataclasses.field(default_factory=dict)
     whole_package: bool = True
+    select: str | None = None
+    profile: str | None = None
+    compile: list[str] = dataclasses.field(default_factory=list)
+    exclude: list[str] = dataclasses.field(default_factory=list)
+    # Set by `Project` from the keys above, the profile resolved in its root.
+    select_args: tuple[str, ...] = ()
 
     def options(self, module: str) -> ModuleOptions:
         """The options `module` builds with: the project-wide settings, then the
@@ -109,7 +120,7 @@ class ToolConfig:
                     opts[key] = o[key]
             opts["extra-args"] += o.get("extra-args", [])
         return ModuleOptions(opts["strict"], opts["pure-python"], opts["fallback-to-python"],
-                             tuple(opts["extra-args"]))
+                             tuple(opts["extra-args"]), self.select_args)
 
 
 def _covers(prefix: str, module: str) -> bool:
@@ -187,6 +198,23 @@ def parse_tool(table: dict) -> ToolConfig:
                                                "(a boolean or an array of module names)")]
     if "extra-args" in table:
         cfg.extra_args = _str_list(table["extra-args"], "[tool.pycc] extra-args")
+    if "select" in table:
+        cfg.select = _expect(table["select"], str, "[tool.pycc] select")
+        if cfg.select not in _SELECT_MODES:
+            raise ProjectError(f"pyproject.toml: [tool.pycc] select must be one of "
+                               f"{', '.join(_SELECT_MODES)}, not {cfg.select!r}")
+    if "profile" in table:
+        cfg.profile = _expect(table["profile"], str, "[tool.pycc] profile")
+    for key in ("compile", "exclude"):
+        if key in table:
+            specs = _str_list(table[key], f"[tool.pycc] {key}")
+            for spec in specs:
+                module, _, qualname = spec.partition(":")
+                _dotted(module, f"[tool.pycc] {key}")
+                if not qualname:
+                    raise ProjectError(f"pyproject.toml: [tool.pycc] {key}: {spec!r} is not "
+                                       "MODULE:QUALNAME")
+            setattr(cfg, key, specs)
     if "sdist-include" in table:
         cfg.sdist_include = _str_list(table["sdist-include"], "[tool.pycc] sdist-include")
     if "overrides" in table:
@@ -258,7 +286,18 @@ def load(root: pathlib.Path) -> Project:
                            "PEP 440 version")
     version = version.strip()
     tool = data.get("tool", {}).get("pycc", {})
-    return Project(root, name, version, project, parse_tool(tool))
+    tool = parse_tool(tool)
+    args: list[str] = []
+    if tool.select is not None:
+        args += ["--select", tool.select]
+    if tool.profile is not None:
+        args += ["--profile", str(safe_path(root, tool.profile, "[tool.pycc] profile"))]
+    for spec in tool.compile:
+        args += ["--compile", spec]
+    for spec in tool.exclude:
+        args += ["--no-compile", spec]
+    tool.select_args = tuple(args)
+    return Project(root, name, version, project, tool)
 
 
 # ---------------------------------------------------------------------------

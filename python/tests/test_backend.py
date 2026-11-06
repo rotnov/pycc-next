@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import stat
 import struct
 import sys
@@ -76,6 +77,13 @@ with open(log, "a") as f:
                         "python": os.environ.get("PYCC_PYTHON")}}) + "\\n")
 src = pathlib.Path(args[1])
 out = pathlib.Path(args[args.index("-o") + 1])
+# A non-strict build selects functions (`--select`, default `profile`): with no
+# profile and no `--compile`, or `--select none`, nothing, so no extension.
+mode = args[args.index("--select") + 1] if "--select" in args else "profile"
+if "--non-strict" in args and "--compile" not in args and (
+        mode == "none" or (mode == "profile" and "--profile" not in args)):
+    print("note: no function is selected: no extension is built", file=sys.stderr)
+    sys.exit(0)
 if src.is_dir():
     # A whole-package build: every module not excluded, as pycc reports them.
     excludes = [args[i + 1] for i, a in enumerate(args) if a == "--exclude"]
@@ -342,6 +350,10 @@ class Configuration(Project):
             ({"extra-args": ["-o", "x"]}, "may not set '-o'"),
             ({"overrides": {"m": {"strikt": True}}}, "unknown [tool.pycc.overrides.\"m\"]"),
             ({"fallback-to-python": 3}, "fallback-to-python"),
+            ({"select": "some"}, "select must be one of profile, all, none, module"),
+            ({"compile": ["demo_pkg.core"]}, "is not MODULE:QUALNAME"),
+            ({"exclude": ["a-b:f"]}, "not a dotted module name"),
+            ({"profile": 1}, "profile must be a string"),
         ]:
             with self.subTest(table=table), self.assertRaisesRegex(_project.ProjectError,
                                                                    re.escape(message)):
@@ -449,7 +461,7 @@ class Discovery(Project):
 
 class Wheel(Project):
     def test_compiles_modules_and_writes_a_valid_wheel(self):
-        self.project('pure-python = ["demo_pkg.cli"]\n'
+        self.project('pure-python = ["demo_pkg.cli"]\nselect = "module"\n'
                      '[tool.pycc.overrides."demo_pkg.__init__"]\nstrict = false\n')
         pycc_exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(pycc_exe), PYCC_PYTHON=None) as z:
@@ -507,7 +519,7 @@ class Wheel(Project):
         self.assertEqual((meta_dir / dist_info / "METADATA").read_text(), meta)
 
     def test_a_package_is_built_whole_into_one_extension(self):
-        self.project('strict = false\npure-python = ["demo_pkg.cli"]')
+        self.project('strict = false\nselect = "module"\npure-python = ["demo_pkg.cli"]')
         exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(exe)) as z:
             names = [n for n in z.namelist() if "dist-info" not in n]
@@ -519,7 +531,7 @@ class Wheel(Project):
         self.assertIn("demo_pkg: 2 module(s) compiled into", self.stderr)
 
     def test_a_member_that_may_fall_back_is_left_out_and_the_package_rebuilt(self):
-        self.project('strict = false\nfallback-to-python = ["demo_pkg.core"]', {
+        self.project('strict = false\nselect = "module"\nfallback-to-python = ["demo_pkg.core"]', {
             "src/demo_pkg/__init__.py": "X = 1\n",
             "src/demo_pkg/core.py": "FAIL\n",
             "src/demo_pkg/util.py": "Y = 2\n",
@@ -535,7 +547,7 @@ class Wheel(Project):
                       self.stderr)
 
     def test_a_member_that_may_not_fall_back_fails_the_build(self):
-        self.project('strict = false', {
+        self.project('strict = false\nselect = "module"', {
             "src/demo_pkg/__init__.py": "X = 1\n",
             "src/demo_pkg/core.py": "FAIL\n",
         })
@@ -548,13 +560,53 @@ class Wheel(Project):
                       str(e.exception))
 
     def test_whole_package_false_builds_each_module_on_its_own(self):
-        self.project('strict = false\nwhole-package = false\npure-python = ["demo_pkg.cli"]')
+        self.project('strict = false\nselect = "module"\nwhole-package = false\n'
+                     'pure-python = ["demo_pkg.cli"]')
         exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(exe)) as z:
             names = [n for n in z.namelist() if "dist-info" not in n]
         self.assertIn("demo_pkg/core.abi3.so", names)
         self.assertEqual({pathlib.Path(c["args"][1]).name for c in self.calls()},
                          {"__init__.py", "core.py"})
+
+    def test_a_non_strict_build_without_a_profile_ships_python(self):
+        self.project('strict = false\npure-python = ["demo_pkg.cli"]')
+        exe = self.fake_pycc()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            names = [n for n in z.namelist() if "dist-info" not in n]
+            self.assertIn("Tag: py3-none-any\n", z.read("demo_pkg-1.2.0.dist-info/WHEEL").decode())
+        self.assertEqual(names, ["demo_pkg/__init__.py", "demo_pkg/cli.py", "demo_pkg/core.py",
+                                 "demo_pkg/data/table.txt", "demo_pkg/py.typed"])
+        self.assertIn("demo_pkg: no function selected; it ships as Python", self.stderr)
+        # Each package is tried once, not again module by module.
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_selected_functions_ship_the_sources_beside_the_extension(self):
+        self.project('strict = false\nprofile = "pycc.profile.json"\n'
+                     'compile = ["demo_pkg.core:fib"]\nexclude = ["demo_pkg:helper"]\n'
+                     'pure-python = ["demo_pkg.cli"]')
+        write(self.root, {"pycc.profile.json": "{}"})
+        exe = self.fake_pycc()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            names = [n for n in z.namelist() if "dist-info" not in n]
+        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/__init__.py",
+                                 "demo_pkg/cli.py", "demo_pkg/core.py",
+                                 "demo_pkg/data/table.txt", "demo_pkg/py.typed"])
+        [call] = self.calls()
+        args = call["args"]
+        self.assertEqual(args[args.index("--profile") + 1],
+                         str(self.root / "pycc.profile.json"))
+        self.assertEqual(args[args.index("--compile") + 1], "demo_pkg.core:fib")
+        self.assertEqual(args[args.index("--no-compile") + 1], "demo_pkg:helper")
+        # A separate module build ships its source too.
+        self.project('strict = false\nwhole-package = false\nselect = "all"\n'
+                     'pure-python = ["demo_pkg.cli"]')
+        shutil.rmtree(self.out)
+        self.out.mkdir()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            names = [n for n in z.namelist() if "dist-info" not in n]
+        self.assertIn("demo_pkg/core.abi3.so", names)
+        self.assertIn("demo_pkg/core.py", names)
 
     def test_a_compile_error_fails_the_build_with_pycc_diagnostics(self):
         self.project(files={"m.py": "FAIL\n", "ok.py": ""})

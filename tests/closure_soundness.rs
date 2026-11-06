@@ -67,7 +67,7 @@ fn build_and_compare(source: &str, flags: &[&str]) -> Option<()> {
 fn sound(source: &str) {
     build_and_compare(source, &[]);
     assert!(
-        build_and_compare(source, &["--non-strict"]).is_some(),
+        build_and_compare(source, &["--non-strict", "--select", "module"]).is_some(),
         "non-strict mode refused:\n{source}"
     );
 }
@@ -166,7 +166,7 @@ fn reserved_names_are_refused_or_run_in_cpython() {
         assert_eq!(build.status.code(), Some(1), "{source}\n{report}");
         assert!(report.contains("error[E0109]"), "{source}\n{report}");
         assert!(
-            build_and_compare(source, &["--non-strict"]).is_some(),
+            build_and_compare(source, &["--non-strict", "--select", "module"]).is_some(),
             "non-strict mode refused:\n{source}"
         );
     }

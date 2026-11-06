@@ -68,7 +68,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn native(name: &str) -> String {
     let dir = ScratchDir::new(&format!("{name}_native")).expect("scratch");
     let source = fixture(name, &dir, "m.py");
-    let report = build(&source, &dir.join("app"), &["--non-strict"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
     let ours = Command::new(dir.join("app")).output().expect("run the build");
     let oracle = python().arg(&source).output().expect("python should spawn");
     assert_matches(&ours, &oracle);
@@ -80,7 +80,7 @@ fn native(name: &str) -> String {
 fn ext(name: &str) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    build(&source, &compiled.join("m"), &["--ext", "--non-strict"]);
+    build(&source, &compiled.join("m"), &["--ext", "--non-strict", "--select", "module"]);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new(&format!("{name}_ext_src")).expect("scratch");
     fixture(name, &plain, "m.py");
@@ -136,7 +136,7 @@ fn issue_8_without_fallback_code_every_class_stays_native() {
          return self.v\n\n\nprint(Loose(3).get())\n",
     )
     .unwrap();
-    let report = build(&source, &dir.join("app"), &["--non-strict"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
     assert!(!report.contains("fallback:"), "{report}");
     let ours = Command::new(dir.join("app")).output().expect("run the build");
     assert_eq!(text(&ours.stdout), "3\n", "{}", text(&ours.stderr));

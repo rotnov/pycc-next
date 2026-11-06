@@ -101,7 +101,7 @@ fn frozenset_of_str_matches_cpython() {
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn non_strict_rebinding_matches_cpython() {
-    assert_native_matches("non_strict_rebinding", &["--non-strict"]);
+    assert_native_matches("non_strict_rebinding", &["--non-strict", "--select", "module"]);
 }
 
 /// Builds `typed_pkg`'s `_core`, `_types` and `__init__` in place under
@@ -115,7 +115,7 @@ fn build_typed_pkg(dir: &Path) -> String {
     for module in ["_core", "_types", "__init__"] {
         let source = ext.join("pkg").join(format!("{module}.py"));
         let build = pycc_build(
-            &["--ext", "--non-strict", "--foreign-relative-imports", "--report-fallbacks"],
+            &["--ext", "--non-strict", "--select", "module", "--foreign-relative-imports", "--report-fallbacks"],
             &source,
             &ext.join("pkg").join(module),
         );
@@ -174,7 +174,7 @@ fn a_mistyped_scalar_argument_runs_as_cpython_runs_it() {
     let dir = ScratchDir::new("real_package_idioms_ext_scalar_guard").expect("scratch");
     let fixture_dir = fixture("ext_scalar_guard");
     let build = pycc_build(
-        &["--ext", "--non-strict", "--report-fallbacks"],
+        &["--ext", "--non-strict", "--select", "module", "--report-fallbacks"],
         &fixture_dir.join("m.py"),
         &dir.join("m"),
     );

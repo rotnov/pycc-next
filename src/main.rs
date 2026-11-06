@@ -16,6 +16,7 @@ mod mode;
 mod modules;
 mod package_build;
 mod profile;
+mod select;
 mod project_config;
 mod source;
 mod specialize;
@@ -78,6 +79,7 @@ fn main() -> ExitCode {
             static_libpython,
             interop,
             mode,
+            select,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
             mode::set_cli_exact_cpython(mode.exact_cpython);
@@ -138,6 +140,33 @@ fn main() -> ExitCode {
                 (toolchain, _) => toolchain,
             };
             let started = std::time::Instant::now();
+            // Which functions a non-strict `--ext` build compiles
+            // (`crate::select`): resolved once, by the package build for its
+            // members, which each read their own share.
+            let selection = match (&toolchain, &package_member) {
+                (Some(toolchain), None) if mode::non_strict_for(&path) => {
+                    match select::resolve(&path, mode.select, &select, toolchain.interpreter()) {
+                        Ok(selection) => selection,
+                        Err(message) => {
+                            eprintln!("error: {message}");
+                            return ExitCode::from(2);
+                        }
+                    }
+                }
+                _ => None,
+            };
+            if let Some(file) = &select.select_functions {
+                match std::fs::read_to_string(file)
+                    .map_err(|e| format!("cannot read `{}`: {e}", file.display()))
+                    .and_then(|text| select::from_text(&text))
+                {
+                    Ok(selected) => select::set_module(selected),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
             // A package directory under `--ext` is a whole-package build.
             if let Some(toolchain) = toolchain.as_ref().filter(|_| package_member.is_none() && path.is_dir()) {
                 let mut mode_args = Vec::new();
@@ -157,6 +186,7 @@ fn main() -> ExitCode {
                     release,
                     excludes: &excludes,
                     mode_args,
+                    selection: selection.as_ref(),
                 };
                 let result = build_pipeline::build_package(&build, toolchain, &scratch);
                 timing::print(started);
@@ -164,6 +194,27 @@ fn main() -> ExitCode {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(code) => code,
                 };
+            }
+            // A module with nothing selected stays CPython's own: no
+            // extension at all.
+            if let Some(selection) = &selection {
+                // The selection indexed this file alone, under its dotted
+                // name (`pkg.mod` for a member of a package).
+                let module = selection.modules.keys().next().cloned().unwrap_or_else(|| {
+                    path.file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                });
+                match selection.modules.get(&module) {
+                    Some(selected) if !selected.is_empty() => select::set_module(selected.clone()),
+                    _ => {
+                        eprintln!(
+                            "note: no function of `{module}` is selected: no extension is built, \
+                             so CPython imports the module as it is"
+                        );
+                        return ExitCode::SUCCESS;
+                    }
+                }
             }
             // A member's objects go to its output directory, where the
             // package build links them.
@@ -291,6 +342,10 @@ fn main() -> ExitCode {
             select_calls,
             select_max,
             select_outside,
+            select_handled,
+            no_verify,
+            verify_rounds,
+            verify_instructions,
             check,
             workload,
         } => {
@@ -299,11 +354,16 @@ fn main() -> ExitCode {
                 calls: select_calls,
                 max: select_max,
                 outside: select_outside,
+                handled: select_handled,
             };
             let done = if check {
                 profile::check_profile(&path, &out, &workload, rule)
             } else {
-                profile::run_profile(&path, &out, &workload, runs, rule)
+                let verify = (!no_verify).then_some(profile::verify::Options {
+                    rounds: verify_rounds,
+                    instructions: verify_instructions,
+                });
+                profile::run_profile(&path, &out, &workload, runs, rule, verify)
             };
             match done {
                 Ok(()) => ExitCode::SUCCESS,

@@ -63,12 +63,15 @@ jobs:
         run: python3 bench/run.py --runs "$RUNS" --json bench-out/run.json
       # Real packages' hot paths, CPython vs the compiled package (their own
       # test suites pass against the compiled modules first), and vs the
-      # Cython and mypyc builds that compile and pass the suites.
+      # Cython and mypyc builds that compile and pass the suites. The package
+      # compiles the functions a profile of its own test suite selects
+      # (docs/design/compile-little.md); pydantic_check.py builds with its
+      # training profile by default.
       - name: bench/package_check.py --time
         if: ${{ !cancelled() }}
         run: >-
           python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache
-          --time --competitors --runs "$RUNS" --json bench-out/packages.json
+          --select profile --time --competitors --runs "$RUNS" --json bench-out/packages.json
       - name: bench/pydantic_check.py --time
         if: ${{ !cancelled() }}
         run: >-

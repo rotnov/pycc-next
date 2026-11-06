@@ -106,6 +106,9 @@ typedef struct PycFwdSlot {
      * forwarder, and copies of 24 of each made them 488 bytes. */
     PyObject *defaults;
     Py_ssize_t ndefaults;
+    /* A selected function's own code (`__pycc_patch__`), not a forwarder:
+     * its traceback entry is its own and stays. */
+    int own_body;
 } PycFwdSlot;
 
 static vectorcallfunc pycc_fwd_original = NULL;
@@ -221,6 +224,10 @@ static void pycc_fwd_drop_entry(PycFwdSlot *slot)
     PyObject *tb, *frame, *code, *next;
 
     if (exc == NULL) {
+        return;
+    }
+    if (slot->own_body) {
+        PyErr_SetRaisedException(exc);
         return;
     }
     tb = PyException_GetTraceback(exc);
@@ -660,40 +667,76 @@ static int pycc_fwd_code_read(PyObject *code, PycFwdCode *out, PyObject **owned)
     return 0;
 }
 
+/* What `__pycc_patch__` looks for: a selected function, by its code's
+ * qualified name and first line, the compiled body it gets, and whether
+ * that body takes the class first (the `__class__` cell). */
+typedef struct {
+    PyObject *qualname;
+    int firstlineno;
+    int uses_class;
+    PyObject *target;
+} PycFwdWant;
+
+/* Whether `code` is the selected function `want` names. */
+static int pycc_fwd_wanted(PyObject *code, const PycFwdWant *want)
+{
+    PyObject *qualname = pycc_fwd_getattr(code, "co_qualname");
+    int line = pycc_fwd_code_int(code, "co_firstlineno");
+    int same = qualname != NULL && PyUnicode_Check(qualname)
+               && PyUnicode_Compare(qualname, want->qualname) == 0 && line == want->firstlineno;
+
+    Py_XDECREF(qualname);
+    PyErr_Clear();
+    return same;
+}
+
 /*
  * Patches `func` when it is an unpatched forwarder of this module: a
  * Python function whose code names only a lift (`__pycc_lift...`) bound in
- * `ns` and has at most the `__class__` cell.
+ * `ns` and has at most the `__class__` cell. With `want` (`__pycc_patch__`),
+ * when it is instead the selected function `want` names, whatever its code
+ * holds: its own body keeps running for what the trampoline does not bind.
+ * Returns 1 when it patched `func`.
  */
-static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
+static int pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func, const PycFwdWant *want)
 {
     PyObject *code, *owned, *lift, *target;
     PycFwdCode info;
     PycFwdSlot *slot;
+    int patched = 0;
 
     if (Py_TYPE(func) != (PyTypeObject *)pycc_frames_function_type
         || *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) != pycc_fwd_original
         || m->fwd_used >= *m->fwd_slot_count) {
-        return;
+        return 0;
     }
     code = PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE);
+    if (want != NULL && !pycc_fwd_wanted(code, want)) {
+        return 0;
+    }
     if (pycc_fwd_code_read(code, &info, &owned) != 0) {
         PyErr_Clear();
-        return;
+        return 0;
     }
-    if (PyTuple_Size(info.names) != 1 || info.nfreevars > 1) {
-        goto done;
+    if (want != NULL) {
+        target = want->target;
+    } else {
+        if (PyTuple_Size(info.names) != 1 || info.nfreevars > 1) {
+            goto done;
+        }
+        lift = PyTuple_GetItem(info.names, 0);
+        if (!PyUnicode_Check(lift)
+            || PyUnicode_Tailmatch(lift, pycc_fwd_prefix, 0, PY_SSIZE_T_MAX, -1) != 1) {
+            goto done;
+        }
+        target = PyDict_GetItemWithError(ns, lift);
     }
-    lift = PyTuple_GetItem(info.names, 0);
-    if (!PyUnicode_Check(lift) || PyUnicode_Tailmatch(lift, pycc_fwd_prefix, 0, PY_SSIZE_T_MAX, -1) != 1) {
-        goto done;
-    }
-    target = PyDict_GetItemWithError(ns, lift);
     if (target == NULL || !PyCFunction_Check(target)) {
         goto done;
     }
     slot = &m->fwd_slots[m->fwd_used];
     memset(slot, 0, sizeof(*slot));
+    slot->own_body = want != NULL;
     slot->argcount = info.argcount;
     slot->posonly = info.posonly;
     slot->kwonly = info.kwonly;
@@ -704,10 +747,13 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         || PyTuple_Size(info.varnames) < slot->argcount + slot->kwonly) {
         goto done;
     }
-    if (info.nfreevars == 1) {
+    /* A forwarder passes its `__class__` cell when it has one; a selected
+     * function's body takes the class when its lift says so, and then the
+     * cell is its only free variable (a method of a module-level class). */
+    if (want != NULL ? want->uses_class : info.nfreevars == 1) {
         PyObject *closure = PYCC_FUNC_FIELD(func, PYCC_FUNC_CLOSURE);
 
-        if (PyUnicode_CompareWithASCIIString(info.freevar, "__class__") != 0
+        if (info.nfreevars != 1 || PyUnicode_CompareWithASCIIString(info.freevar, "__class__") != 0
             || closure == NULL || PyTuple_Size(closure) != 1) {
             goto done;
         }
@@ -727,27 +773,32 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         slot->entry_kw = (PyObject * (*)(PyObject *, PyObject *const *, Py_ssize_t, PyObject *))
             PyCFunction_GetFunction(target);
     }
-    *(int *)((char *)code + PYCC_CODE_FLAGS) |= PYCC_CO_SIGNATURE;
+    if (want == NULL) {
+        *(int *)((char *)code + PYCC_CODE_FLAGS) |= PYCC_CO_SIGNATURE;
+    }
     *(uint32_t *)((char *)func + PYCC_FUNC_VERSION) = pycc_fwd_version_cleared;
     *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampoline(m->fwd_used);
     m->fwd_used++;
     pycc_fwd_index_add(slot);
+    patched = 1;
 done:
     PyErr_Clear();
     Py_DECREF(info.varnames);
     Py_XDECREF(owned);
+    return patched;
 }
 
-static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth);
+static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth,
+                          const PycFwdWant *want);
 
 /* Walks `obj.<name>` when `obj` has it. */
 static void pycc_fwd_walk_attr(PyccExtModule *m, PyObject *ns, PyObject *obj, const char *name,
-                               int depth)
+                               int depth, const PycFwdWant *want)
 {
     PyObject *inner = pycc_fwd_getattr(obj, name);
 
     if (inner != NULL && inner != obj && inner != Py_None) {
-        pycc_fwd_walk(m, ns, inner, depth + 1);
+        pycc_fwd_walk(m, ns, inner, depth + 1, want);
     }
     Py_XDECREF(inner);
     PyErr_Clear();
@@ -757,7 +808,8 @@ static void pycc_fwd_walk_attr(PyccExtModule *m, PyObject *ns, PyObject *obj, co
  * (`functools.wraps`'s `__wrapped__`, `functools.cached_property`'s and
  * `partialmethod`'s `func`, a `wrapped` field), without running any of
  * its attribute hooks. */
-static void pycc_fwd_walk_dict(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth)
+static void pycc_fwd_walk_dict(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth,
+                               const PycFwdWant *want)
 {
     static const char *const keys[] = {"__wrapped__", "wrapped", "func", NULL};
     PyObject *dict;
@@ -787,7 +839,7 @@ static void pycc_fwd_walk_dict(PyccExtModule *m, PyObject *ns, PyObject *obj, in
 
         if (inner != NULL && inner != obj) {
             Py_INCREF(inner);
-            pycc_fwd_walk(m, ns, inner, depth + 1);
+            pycc_fwd_walk(m, ns, inner, depth + 1, want);
             Py_DECREF(inner);
         }
     }
@@ -797,7 +849,8 @@ static void pycc_fwd_walk_dict(PyccExtModule *m, PyObject *ns, PyObject *obj, in
 
 /* Patches the forwarders reachable from `obj`: itself, or the function a
  * decorator wraps (`depth` bounds the walk). */
-static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth)
+static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth,
+                          const PycFwdWant *want)
 {
     int i, j;
 
@@ -805,8 +858,11 @@ static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int dep
         return;
     }
     if (Py_TYPE(obj) == (PyTypeObject *)pycc_frames_function_type) {
-        pycc_fwd_patch(m, ns, obj);
-        pycc_fwd_walk_dict(m, ns, obj, depth);
+        /* A selected function found ends the walk; a forwarder's own
+         * `__wrapped__` may hold another one. */
+        if (!pycc_fwd_patch(m, ns, obj, want) || want == NULL) {
+            pycc_fwd_walk_dict(m, ns, obj, depth, want);
+        }
         return;
     }
     if (PyType_Check(obj)) {
@@ -816,12 +872,12 @@ static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int dep
         if (pycc_fwd_wrapper_types[i] != NULL
             && Py_TYPE(obj) == (PyTypeObject *)pycc_fwd_wrapper_types[i]) {
             for (j = 0; pycc_fwd_wrapper_attrs[i][j] != NULL; j++) {
-                pycc_fwd_walk_attr(m, ns, obj, pycc_fwd_wrapper_attrs[i][j], depth);
+                pycc_fwd_walk_attr(m, ns, obj, pycc_fwd_wrapper_attrs[i][j], depth, want);
             }
             return;
         }
     }
-    pycc_fwd_walk_dict(m, ns, obj, depth);
+    pycc_fwd_walk_dict(m, ns, obj, depth, want);
 }
 
 /* `type.__dict__` as the dict it shows (a new reference): the real dict
@@ -926,7 +982,7 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
         }
         obj = in == NULL ? NULL : pycc_fwd_lookup(in, args[i]);
         if (obj != NULL) {
-            pycc_fwd_walk(m, ns, obj, 0);
+            pycc_fwd_walk(m, ns, obj, 0, NULL);
             Py_DECREF(obj);
         }
         PyErr_Clear();
@@ -937,6 +993,94 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
 
 static PyMethodDef pycc_ext_forward_def = {
     "__pycc_forward__", (PyCFunction)(void (*)(void))pycc_ext_forward, METH_FASTCALL, NULL,
+};
+
+/* `__pycc_patch__(owner, name, lift, line, ..., (owner, ...), name, ...)`:
+ * points each selected function at its compiled body, once the module's
+ * code has run (`src/fallback/selected.rs`). Owner paths are
+ * `__pycc_forward__`'s; each function is its name, its lift's name and its
+ * first line times two, plus one when the lift takes the class. The
+ * function bound under the name, or the one a `property`, `classmethod`,
+ * `staticmethod` or decorator's `__wrapped__` there holds, is patched when
+ * its code's qualified name and first line are the selected function's.
+ * Each lift is then unbound from the namespace: it was published only for
+ * this. */
+static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+    PyObject *ns = PyEval_GetGlobals();
+    PyccExtModule *m = (PyccExtModule *)PyCapsule_GetPointer(self, PYCC_FWD_CAPSULE);
+    PyObject *owner = NULL, *in, *prefix = PyUnicode_FromString("");
+    Py_ssize_t i;
+
+    if (m == NULL || prefix == NULL) {
+        Py_XDECREF(prefix);
+        return NULL;
+    }
+    if (ns == NULL || !PyDict_Check(ns)) {
+        Py_DECREF(prefix);
+        Py_RETURN_NONE;
+    }
+    in = ns;
+    for (i = 0; i < nargs; i++) {
+        PycFwdWant want;
+        PyObject *obj;
+        long flags;
+
+        if (PyTuple_Check(args[i])) {
+            Py_CLEAR(owner);
+            Py_CLEAR(prefix);
+            if (PyTuple_Size(args[i]) == 0) {
+                in = ns;
+                prefix = PyUnicode_FromString("");
+            } else {
+                PyObject *dot = PyUnicode_FromString(".");
+
+                owner = pycc_fwd_owner(ns, args[i]);
+                in = owner;
+                prefix = dot == NULL ? NULL : PyUnicode_Join(dot, args[i]);
+                Py_XDECREF(dot);
+                if (prefix != NULL) {
+                    PyObject *joined = prefix;
+
+                    prefix = PyUnicode_FromFormat("%U.", joined);
+                    Py_DECREF(joined);
+                }
+            }
+            if (prefix == NULL) {
+                Py_XDECREF(owner);
+                return NULL;
+            }
+            continue;
+        }
+        if (i + 2 >= nargs) {
+            break;
+        }
+        flags = PyLong_AsLong(args[i + 2]);
+        want.target = PyDict_GetItemWithError(ns, args[i + 1]);
+        want.qualname = PyUnicode_FromFormat("%U%U", prefix, args[i]);
+        want.firstlineno = (int)(flags >> 1);
+        want.uses_class = (int)(flags & 1);
+        if (want.qualname != NULL && want.target != NULL && pycc_fwd_original != NULL
+            && in != NULL && (obj = pycc_fwd_lookup(in, args[i])) != NULL) {
+            Py_INCREF(want.target);
+            pycc_fwd_walk(m, ns, obj, 0, &want);
+            Py_DECREF(want.target);
+            Py_DECREF(obj);
+        }
+        Py_XDECREF(want.qualname);
+        PyErr_Clear();
+        if (PyDict_DelItem(ns, args[i + 1]) != 0) {
+            PyErr_Clear();
+        }
+        i += 2;
+    }
+    Py_XDECREF(owner);
+    Py_XDECREF(prefix);
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef pycc_ext_patch_def = {
+    "__pycc_patch__", (PyCFunction)(void (*)(void))pycc_ext_patch, METH_FASTCALL, NULL,
 };
 
 /* Binds `__pycc_forward__` in the namespace of `module`, of record `m`, for
@@ -961,11 +1105,18 @@ static int pycc_ext_forward_install(PyccExtModule *m, PyObject *module)
         return -1;
     }
     hook = PyCFunction_NewEx(&pycc_ext_forward_def, capsule, NULL);
+    if (hook == NULL) {
+        Py_DECREF(capsule);
+        return -1;
+    }
+    status = PyDict_SetItemString(PyModule_GetDict(module), "__pycc_forward__", hook);
+    Py_DECREF(hook);
+    hook = status != 0 ? NULL : PyCFunction_NewEx(&pycc_ext_patch_def, capsule, NULL);
     Py_DECREF(capsule);
     if (hook == NULL) {
         return -1;
     }
-    status = PyDict_SetItemString(PyModule_GetDict(module), "__pycc_forward__", hook);
+    status = PyDict_SetItemString(PyModule_GetDict(module), "__pycc_patch__", hook);
     Py_DECREF(hook);
     return status;
 }
@@ -976,6 +1127,9 @@ static void pycc_ext_forward_remove(PyObject *module)
     PyObject *raised = PyErr_GetRaisedException();
 
     if (PyDict_DelItemString(PyModule_GetDict(module), "__pycc_forward__") != 0) {
+        PyErr_Clear();
+    }
+    if (PyDict_DelItemString(PyModule_GetDict(module), "__pycc_patch__") != 0) {
         PyErr_Clear();
     }
     PyErr_SetRaisedException(raised);

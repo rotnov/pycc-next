@@ -24,6 +24,11 @@
  * package's name, and each member's name relative to the package, whether
  * it is a package, and its definition's entry point (each member's own
  * module unit, `module_init.c`).
+ *
+ * A build that compiles only selected functions (`PYCC_PKG_SOURCE_ORIGIN`,
+ * docs/design/compile-little.md, section 2.4) lists only the modules
+ * holding one, each of which runs its own source as bytecode: its origin
+ * and `__file__` are its `.py` file. Every other module is CPython's.
  */
 
 #define Py_LIMITED_API 0x030D0000
@@ -196,8 +201,15 @@ static PyObject *pycc_pkg_find_spec(PyObject *self, PyObject *const *args, Py_ss
     if (dir == NULL) {
         return NULL;
     }
+#ifdef PYCC_PKG_SOURCE_ORIGIN
+    /* A build that compiles only selected functions: the member is its own
+     * source run as bytecode, and names it, as CPython's own module would. */
+    origin = member->is_package ? PyUnicode_FromFormat("%U" PYCC_PKG_SEP "__init__.py", dir)
+                                : PyUnicode_FromFormat("%U.py", dir);
+#else
     origin = member->is_package ? PyUnicode_FromFormat("%U" PYCC_PKG_SEP "__init__%U", dir, pycc_pkg_suffix)
                                 : PyUnicode_FromFormat("%U%U", dir, pycc_pkg_suffix);
+#endif
     spec_type = origin == NULL ? NULL : pycc_pkg_spec_type();
     if (spec_type == NULL) {
         goto done;

@@ -25,7 +25,7 @@ fn object_containers_stay_compiled_and_match_cpython() {
         .arg(&fixture)
         .arg("-o")
         .arg(&binary)
-        .args(["--release", "--non-strict", "--report-fallbacks"])
+        .args(["--release", "--non-strict", "--select", "module", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));

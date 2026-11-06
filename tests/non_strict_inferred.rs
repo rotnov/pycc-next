@@ -58,7 +58,7 @@ fn matches_cpython(name: &str) -> String {
     };
     let stdin = std::fs::read(stdin_file).expect("stdin fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))

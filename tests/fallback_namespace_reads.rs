@@ -59,7 +59,7 @@ fn a_global_the_module_never_binds_is_read_from_the_builtins() {
     let compiled = ScratchDir::new("fallback_builtin_read").expect("scratch");
     std::fs::write(compiled.join("m.py"), MODULE).expect("write the module");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict"])
+        .args(["build", "--ext", "--non-strict", "--select", "module"])
         .arg(compiled.join("m.py"))
         .arg("-o")
         .arg(compiled.join("m"))
@@ -105,7 +105,7 @@ fn a_lazy_import_fallback_code_binds_is_resolved_when_compiled_code_reads_it() {
     let compiled = ScratchDir::new("fallback_lazy_import").expect("scratch");
     write(&compiled);
     let build = pycc()
-        .args(["build", "--ext", "--non-strict"])
+        .args(["build", "--ext", "--non-strict", "--select", "module"])
         .arg(compiled.join("pkg"))
         .arg("-o")
         .arg(compiled.join("pkg/__init__"))

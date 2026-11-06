@@ -621,7 +621,7 @@ fn an_object_index_runs_in_constant_memory() {
         .expect("write the probe source");
         let bin = dir.join(&name);
         let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
-            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .args(["build", "--release", "--non-strict", "--select", "module", "--report-fallbacks"])
             .arg(&src)
             .arg("-o")
             .arg(&bin)
@@ -674,7 +674,7 @@ fn an_object_comprehension_runs_in_constant_memory() {
         .expect("write the probe source");
         let bin = dir.join(&name);
         let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
-            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .args(["build", "--release", "--non-strict", "--select", "module", "--report-fallbacks"])
             .arg(&src)
             .arg("-o")
             .arg(&bin)
@@ -724,7 +724,7 @@ fn percent_formatting_runs_in_constant_memory() {
         .expect("write the probe source");
         let bin = dir.join(&name);
         let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
-            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .args(["build", "--release", "--non-strict", "--select", "module", "--report-fallbacks"])
             .arg(&src)
             .arg("-o")
             .arg(&bin)
@@ -778,7 +778,7 @@ fn object_stdlib_calls_run_in_constant_memory() {
         .expect("write the probe source");
         let bin = dir.join(&name);
         let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
-            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .args(["build", "--release", "--non-strict", "--select", "module", "--report-fallbacks"])
             .arg(&src)
             .arg("-o")
             .arg(&bin)

@@ -59,6 +59,7 @@ mod package_bases;
 pub(crate) use package_bases::overridden_in_package;
 mod render;
 mod report;
+mod selected;
 
 pub(crate) use lift::LIFT_PREFIX;
 pub(crate) use driver::{can_fall_back, with_fallback};

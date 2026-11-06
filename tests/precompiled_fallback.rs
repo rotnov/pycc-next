@@ -102,7 +102,7 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
     let source = compiled.join("m.py");
     std::fs::write(&source, MODULE).expect("write the module");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("m"))
@@ -162,7 +162,7 @@ fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
     let source = compiled.join("m.py");
     std::fs::write(&source, module).expect("write the module");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict"])
+        .args(["build", "--ext", "--non-strict", "--select", "module"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("m"))
