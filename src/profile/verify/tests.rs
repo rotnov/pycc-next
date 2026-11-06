@@ -112,6 +112,7 @@ fn the_rule_rejects_a_function_measured_slower() {
         crate::profile::Candidate {
             entry: e,
             eligible: true,
+            excluded: false,
             lines: 10,
         }
     }
@@ -139,47 +140,149 @@ fn a_member_is_copied_with_the_packages_above_it() {
     std::fs::write(src.join("top/pkg/__init__.py"), "x = 1\n").unwrap();
     std::fs::write(src.join("top/pkg/mod.py"), "y = 2\n").unwrap();
     std::fs::write(src.join("top/pkg/__pycache__/mod.pyc"), "").unwrap();
-    let copy = copy_package(&src.join("top/pkg"), &dir.join("out")).unwrap();
-    assert_eq!(copy, dir.join("out/top/pkg"));
-    assert!(dir.join("out/top/__init__.py").is_file());
-    // The whole top-level package, for the member's sibling imports.
-    assert!(dir.join("out/top/other.py").is_file());
+    std::fs::write(src.join("unrelated.txt"), "").unwrap();
+    let out = dir.join("out");
+    let copy = copy_package(&src.join("top/pkg"), &out, &[]).unwrap();
+    assert_eq!(copy, out.canonicalize().unwrap().join("top/pkg"));
+    // The whole top-level package, for the member's sibling imports; with
+    // no project marker, nothing else.
+    assert!(out.join("top/__init__.py").is_file());
+    assert!(out.join("top/other.py").is_file());
+    assert!(!out.join("unrelated.txt").exists());
     assert_eq!(std::fs::read_to_string(copy.join("mod.py")).unwrap(), "y = 2\n");
     assert!(!copy.join("__pycache__").exists());
-    let member = copy_package(&src.join("top/other.py"), &dir.join("one")).unwrap();
-    assert_eq!(member, dir.join("one/top/other.py"));
+    let member = copy_package(&src.join("top/other.py"), &dir.join("one"), &[]).unwrap();
+    assert!(member.ends_with("one/top/other.py"));
     assert!(dir.join("one/top/pkg/mod.py").is_file());
     std::fs::write(src.join("alone.py"), "z = 3\n").unwrap();
-    let single = copy_package(&src.join("alone.py"), &dir.join("two")).unwrap();
-    assert_eq!(single, dir.join("two/alone.py"));
+    let single = copy_package(&src.join("alone.py"), &dir.join("two"), &[]).unwrap();
+    assert!(single.ends_with("two/alone.py"));
+    assert!(!dir.join("two/top").exists());
+    assert!(!dir.join("two/unrelated.txt").exists());
 }
 
 /// The workload reads files beside the package by their paths from the
-/// project root (a test directory, benchmark data, `pyproject.toml`): the
-/// copy pass 3 times is of the whole project, not only the package.
+/// import root (a test directory, benchmark data, `pyproject.toml`): the
+/// copy pass 3 times is of the project root, the nearest directory with a
+/// project marker, not only the package.
 #[test]
 fn the_copy_holds_the_project_files_beside_the_package() {
     let dir = pycc_scratch::ScratchDir::new("verify-copy-root").unwrap();
-    let src = dir.join("src");
-    std::fs::create_dir_all(src.join("pkg")).unwrap();
-    std::fs::create_dir_all(src.join("tests/data")).unwrap();
-    std::fs::create_dir_all(src.join(".git")).unwrap();
-    std::fs::write(src.join("pkg/__init__.py"), "").unwrap();
-    std::fs::write(src.join("tests/test_pkg.py"), "import pkg\n").unwrap();
-    std::fs::write(src.join("tests/data/case.txt"), "case\n").unwrap();
-    std::fs::write(src.join("pyproject.toml"), "[project]\n").unwrap();
-    std::fs::write(src.join(".git/HEAD"), "x").unwrap();
-    let copy = copy_package(&src.join("pkg"), &dir.join("out")).unwrap();
-    assert_eq!(copy, dir.join("out/pkg"));
-    assert_eq!(std::fs::read_to_string(dir.join("out/tests/data/case.txt")).unwrap(), "case\n");
-    assert!(dir.join("out/tests/test_pkg.py").is_file());
-    assert!(dir.join("out/pyproject.toml").is_file());
-    assert!(!dir.join("out/.git").exists());
+    let project = dir.join("project");
+    std::fs::create_dir_all(project.join("src/pkg")).unwrap();
+    std::fs::create_dir_all(project.join("tests/data")).unwrap();
+    std::fs::create_dir_all(project.join(".git")).unwrap();
+    std::fs::write(project.join("src/pkg/__init__.py"), "").unwrap();
+    std::fs::write(project.join("tests/test_pkg.py"), "import pkg\n").unwrap();
+    std::fs::write(project.join("tests/data/case.txt"), "case\n").unwrap();
+    std::fs::write(project.join("pyproject.toml"), "[project]\n").unwrap();
+    std::fs::write(project.join(".git/HEAD"), "x").unwrap();
+    std::fs::write(dir.join("beside_the_project.txt"), "").unwrap();
+    let out = dir.join("out");
+    let copy = copy_package(&project.join("src/pkg"), &out, &[]).unwrap();
+    assert_eq!(copy, out.canonicalize().unwrap().join("src/pkg"));
+    assert_eq!(std::fs::read_to_string(out.join("tests/data/case.txt")).unwrap(), "case\n");
+    assert!(out.join("tests/test_pkg.py").is_file());
+    assert!(out.join("pyproject.toml").is_file());
+    assert!(!out.join(".git").exists());
+    assert!(!out.join("beside_the_project.txt").exists());
     // A copy made inside the project does not copy itself.
-    let inner = copy_package(&src.join("pkg"), &src.join("build/tree")).unwrap();
-    assert_eq!(inner, src.join("build/tree/pkg"));
-    assert!(src.join("build/tree/tests/data/case.txt").is_file());
-    assert!(!src.join("build/tree/build/tree").exists());
+    let inner = copy_package(&project.join("src/pkg"), &project.join("build/tree"), &[]).unwrap();
+    assert!(inner.ends_with("build/tree/src/pkg"));
+    assert!(project.join("build/tree/tests/data/case.txt").is_file());
+    assert!(!project.join("build/tree/build/tree").exists());
+}
+
+/// Without a project marker the copy is the package alone, plus the paths
+/// `--verify-include` names, at their paths under the import root.
+#[test]
+fn an_included_path_is_copied_beside_the_package() {
+    let dir = pycc_scratch::ScratchDir::new("verify-copy-include").unwrap();
+    let tree = dir.join("tree");
+    std::fs::create_dir_all(tree.join("pkg")).unwrap();
+    std::fs::create_dir_all(tree.join("tests")).unwrap();
+    std::fs::create_dir_all(tree.join("benchmark")).unwrap();
+    std::fs::write(tree.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(tree.join("tests/test_pkg.py"), "").unwrap();
+    std::fs::write(tree.join("benchmark/data.toml"), "a = 1\n").unwrap();
+    std::fs::write(tree.join("benchmark/other.toml"), "").unwrap();
+    let out = dir.join("out");
+    let include = [tree.join("tests"), tree.join("benchmark/data.toml")];
+    copy_package(&tree.join("pkg"), &out, &include).unwrap();
+    assert!(out.join("pkg/__init__.py").is_file());
+    assert!(out.join("tests/test_pkg.py").is_file());
+    assert_eq!(std::fs::read_to_string(out.join("benchmark/data.toml")).unwrap(), "a = 1\n");
+    assert!(!out.join("benchmark/other.toml").exists());
+    let outside = copy_package(&tree.join("pkg"), &dir.join("x"), &[dir.join("tree/../out")]);
+    assert!(outside.unwrap_err().contains("not under the package's import root"));
+}
+
+/// An installed package is copied alone, whatever project marker lies above
+/// its `site-packages`.
+#[test]
+fn an_installed_package_is_copied_alone() {
+    let dir = pycc_scratch::ScratchDir::new("verify-copy-installed").unwrap();
+    let site = dir.join("venv/lib/python3.15/site-packages");
+    std::fs::create_dir_all(site.join("pkg")).unwrap();
+    std::fs::create_dir_all(site.join("other")).unwrap();
+    std::fs::write(site.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(site.join("other/__init__.py"), "").unwrap();
+    std::fs::write(site.join("setup.py"), "").unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "").unwrap();
+    let out = dir.join("out");
+    let copy = copy_package(&site.join("pkg"), &out, &[]).unwrap();
+    assert!(copy.ends_with("out/pkg"));
+    assert!(out.join("pkg/__init__.py").is_file());
+    assert!(!out.join("other").exists());
+    assert!(!out.join("setup.py").exists());
+    assert!(!out.join("pyproject.toml").exists());
+}
+
+/// Whether this process can read a file whose permissions forbid it (it
+/// runs as root): the unreadable-entry tests then prove nothing.
+fn reads_unreadable(dir: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let probe = dir.join("probe");
+    std::fs::write(&probe, "x").unwrap();
+    std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = std::fs::read(&probe).is_ok();
+    std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::remove_file(&probe).unwrap();
+    readable
+}
+
+/// An entry of the project outside the package that cannot be read is left
+/// out of the copy (with a note); one inside the package is an error.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_entry_is_skipped_outside_the_package_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = pycc_scratch::ScratchDir::new("verify-copy-unreadable").unwrap();
+    if reads_unreadable(&dir) {
+        eprintln!("skipped: this process reads files it has no permission for (root)");
+        return;
+    }
+    let project = dir.join("project");
+    std::fs::create_dir_all(project.join("private")).unwrap();
+    std::fs::write(project.join("pyproject.toml"), "").unwrap();
+    std::fs::write(project.join("m.py"), "x = 1\n").unwrap();
+    std::fs::write(project.join("private/secret"), "").unwrap();
+    let mode = |path: &Path, mode| std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    mode(&project.join("private"), 0o000);
+    let copied = copy_package(&project.join("m.py"), &dir.join("out"), &[]);
+    mode(&project.join("private"), 0o755);
+    let copy = copied.unwrap();
+    assert_eq!(std::fs::read_to_string(&copy).unwrap(), "x = 1\n");
+    assert!(!dir.join("out/private/secret").exists());
+    // Inside the package: an error.
+    std::fs::create_dir_all(project.join("pkg")).unwrap();
+    std::fs::write(project.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(project.join("pkg/data.bin"), "").unwrap();
+    mode(&project.join("pkg/data.bin"), 0o000);
+    let copied = copy_package(&project.join("pkg"), &dir.join("out2"), &[]);
+    mode(&project.join("pkg/data.bin"), 0o644);
+    let err = copied.unwrap_err();
+    assert!(err.contains("pass 3 cannot copy") && err.contains("data.bin"), "{err}");
 }
 
 #[test]
@@ -261,7 +364,7 @@ fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
     let (candidates, regions, core) = regions_of(&["a", "b", "c"]);
     let mut asked = Vec::new();
     let mut run = fake(60, &mut asked);
-    let (verdicts, builds) = decide(&candidates, &regions, &core, 6, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 6, &mut run).unwrap();
     drop(run);
     let asked = asked;
     // All (lost), its core (lost), region a and its core, region b (its
@@ -286,7 +389,7 @@ fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
     // With a budget that leaves no build for the union, still one region.
     let mut asked = Vec::new();
     let mut run = fake(60, &mut asked);
-    let (verdicts, builds) = decide(&candidates, &regions, &core, 5, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 5, &mut run).unwrap();
     drop(run);
     assert_eq!(builds, 4);
     assert_eq!(compiled(&verdicts), a);
@@ -294,7 +397,7 @@ fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
     // measured as a whole.
     let mut asked = Vec::new();
     let mut run = fake(10, &mut asked);
-    let (verdicts, _) = decide(&candidates, &regions, &core, 6, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 6, &mut run).unwrap();
     drop(run);
     assert_eq!(compiled(&verdicts), union);
     assert!(asked.contains(&union));
@@ -307,7 +410,7 @@ fn the_faster_of_the_whole_set_and_its_core_is_selected() {
     let (candidates, regions, core) = regions_of(&["a", "b"]);
     let mut asked = Vec::new();
     let mut run = fake(0, &mut asked);
-    let (verdicts, builds) = decide(&candidates, &regions, &core, 8, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
     drop(run);
     // All: 60 ms; the core: 70 ms.
     assert_eq!(builds, 2);
@@ -326,8 +429,48 @@ fn the_faster_of_the_whole_set_and_its_core_is_selected() {
             })
         })
     };
-    let (verdicts, _) = decide(&candidates, &regions, &core, 8, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
     assert_eq!(compiled(&verdicts), core);
     assert_eq!(verdicts[&k("a_cold")].without, Some([69, 70, 71]));
     assert_eq!(verdicts[&k("a_cold")].compiled_ns, [84, 85, 86]);
+}
+
+/// The winning set an earlier profile measured is in every set measured
+/// now: the new selection is that set with what wins beside it, measured
+/// as a whole, or, when nothing new wins, that set alone, as it was.
+#[test]
+fn an_earlier_winning_set_is_in_every_set_measured_and_stays_when_nothing_wins() {
+    let (candidates, regions, core) = regions_of(&["a", "b"]);
+    let earlier = Measured {
+        compiled: true,
+        with: 1,
+        cpython_ns: [90, 100, 110],
+        compiled_ns: [94, 95, 96],
+        instructions: None,
+        refused: None,
+        without: None,
+    };
+    let base: BTreeMap<FunctionKey, Measured> = [(k("x"), earlier.clone())].into_iter().collect();
+    let mut asked = Vec::new();
+    let mut run = fake(0, &mut asked);
+    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, &mut run).unwrap();
+    drop(run);
+    assert!(asked.iter().all(|set| set.contains(&k("x"))), "{asked:?}");
+    let mut all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
+    all.insert(k("x"));
+    assert_eq!(compiled(&verdicts), all);
+    assert_eq!(verdicts[&k("x")].with, 5);
+    // Nothing new wins: the earlier set alone, its verdict unchanged.
+    let mut slower = |set: &BTreeSet<FunctionKey>, n: usize| {
+        let _ = (set, n);
+        Ok(Ok(Check {
+            cpython: [90, 100, 110],
+            compiled: [149, 150, 151],
+            instructions: None,
+        }))
+    };
+    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, &mut slower).unwrap();
+    assert_eq!(compiled(&verdicts), [k("x")].into_iter().collect());
+    assert_eq!(verdicts[&k("x")], earlier);
+    assert!(!verdicts[&k("a_hot")].compiled);
 }

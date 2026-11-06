@@ -50,12 +50,15 @@ pub(crate) const EARLY_ROUNDS: u32 = 5;
 pub(crate) const MAX_BUILDS: usize = 8;
 
 /// Pass 3's settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Options {
     /// Interleaved rounds per check (each one run in CPython and one compiled).
     pub(crate) rounds: u32,
     /// Also count each check's instructions under callgrind.
     pub(crate) instructions: bool,
+    /// Files and directories the copy holds besides the project
+    /// (`--verify-include`, [`copy_package`]).
+    pub(crate) include: Vec<PathBuf>,
 }
 
 /// What pass 3 works with.
@@ -190,6 +193,31 @@ pub(super) fn verify(
     // measured winners are selected, never a function that would fill the
     // slot of a rejected one.
     profile.verified = true;
+    // The winning set an earlier profile measured, when it is still whole
+    // (every member unchanged): every set measured now includes it, so the
+    // selection stays one set measured as a whole. A broken one is
+    // measured again.
+    let winners: Vec<usize> = (0..profile.functions.len())
+        .filter(|&i| profile.functions[i].measured.as_ref().is_some_and(|m| m.compiled))
+        .collect();
+    let whole = winners.len()
+        == winners
+            .first()
+            .and_then(|&i| profile.functions[i].measured.as_ref())
+            .map_or(0, |m| m.with);
+    if !whole {
+        for &i in &winners {
+            profile.functions[i].measured = None;
+        }
+    }
+    let base: BTreeMap<FunctionKey, Measured> = profile
+        .functions
+        .iter()
+        .filter_map(|e| {
+            let m = e.measured.as_ref().filter(|m| m.compiled)?;
+            Some(((e.module.clone(), e.qualname.clone(), e.firstlineno), m.clone()))
+        })
+        .collect();
     // A candidate with a verdict carried from an earlier profile keeps it.
     let recorded: BTreeSet<FunctionKey> = profile
         .functions
@@ -208,7 +236,7 @@ pub(super) fn verify(
     let started = Instant::now();
     let regions = regions(profile, &candidates);
     let mut run = |set: &BTreeSet<FunctionKey>, builds: usize| check(set, cx, builds);
-    let (mut verdicts, builds) = decide(&candidates, &regions, core, MAX_BUILDS, &mut run)?;
+    let (mut verdicts, builds) = decide(&candidates, &regions, core, &base, MAX_BUILDS, &mut run)?;
     let kept = verdicts.values().filter(|m| m.compiled).count();
     for e in &mut profile.functions {
         if let Some(m) = verdicts.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
@@ -233,7 +261,9 @@ pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 
 
 /// Pass 3's decision over `candidates` (in `regions`, most self time
 /// first) within `budget` builds, each check made by `run`: a verdict for
-/// every candidate, and the builds made.
+/// every candidate, and the builds made. `base` is the winning set an
+/// earlier profile measured, with its verdicts: every set measured now
+/// includes it, and with no new winner it stays the selection.
 ///
 /// The invariant: the functions selected are exactly one set that was
 /// measured as a whole and won (its compiled median under CPython's first
@@ -248,11 +278,13 @@ pub(super) fn decide(
     candidates: &[FunctionKey],
     regions: &[Vec<FunctionKey>],
     core: &BTreeSet<FunctionKey>,
+    base: &BTreeMap<FunctionKey, Measured>,
     budget: usize,
     run: &mut Run<'_>,
 ) -> Result<(BTreeMap<FunctionKey, Measured>, usize), String> {
     let mut pass = Pass {
         run,
+        base: base.clone(),
         builds: 0,
         verdicts: BTreeMap::new(),
         winners: Vec::new(),
@@ -305,6 +337,9 @@ fn record(verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<Functio
 /// Pass 3's builds, verdicts and the sets that won so far.
 struct Pass<'r, 's> {
     run: &'r mut Run<'s>,
+    /// The earlier profile's winning set, in every set measured, with its
+    /// verdicts.
+    base: BTreeMap<FunctionKey, Measured>,
     builds: usize,
     verdicts: BTreeMap<FunctionKey, Measured>,
     /// Each set measured as a whole that was faster than CPython.
@@ -369,14 +404,17 @@ impl Pass<'_, '_> {
         mut set: BTreeSet<FunctionKey>,
         limit: usize,
     ) -> Result<Option<(BTreeSet<FunctionKey>, Check)>, String> {
+        set.retain(|key| !self.base.contains_key(key));
         while !set.is_empty() && self.builds < limit {
             self.builds += 1;
-            match (self.run)(&set, self.builds)? {
-                Ok(c) => return Ok(Some((set, c))),
+            let whole: BTreeSet<FunctionKey> = set.iter().chain(self.base.keys()).cloned().collect();
+            match (self.run)(&whole, self.builds)? {
+                Ok(c) => return Ok(Some((whole, c))),
                 Err(refused) => {
-                    let with = set.len();
+                    let with = whole.len();
                     for (key, reason) in refused {
                         set.remove(&key);
+                        self.base.remove(&key);
                         self.verdicts.insert(key, Measured::refused(with, reason));
                     }
                 }
@@ -392,13 +430,21 @@ impl Pass<'_, '_> {
     /// own set won too, records the winner's times (`without`); any other
     /// keeps its own check's. The builds made.
     fn finish(mut self) -> (BTreeMap<FunctionKey, Measured>, usize) {
+        let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
+        if self.winners.is_empty() {
+            // No new winner: the earlier winning set stays, as measured.
+            for (key, m) in std::mem::take(&mut self.base) {
+                kept.insert(key.clone());
+                self.verdicts.insert(key, m);
+            }
+        }
         let best = self
             .winners
             .iter()
             .min_by_key(|(set, c)| (c.compiled[1], set.len()))
             .map(|(set, c)| (set.clone(), c.clone()));
         for (key, m) in &mut self.verdicts {
-            if m.refused.is_some() {
+            if m.refused.is_some() || kept.contains(key) {
                 continue;
             }
             match &best {
@@ -436,7 +482,7 @@ fn check(
     builds: usize,
 ) -> Outcome {
     let dir = cx.scratch.join(format!("verify{builds}"));
-    let copy = copy_package(cx.driver.pkg, &dir.join("tree"))?;
+    let copy = copy_package(cx.driver.pkg, &dir.join("tree"), &cx.options.include)?;
     let refused = build(&copy, set, cx)?;
     if !refused.is_empty() {
         let _ = std::fs::remove_dir_all(&dir);
@@ -646,50 +692,147 @@ pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<Fu
         .collect()
 }
 
-/// Copies the project `pkg` (a package or single module) lives in under
-/// `root`, and returns the copy of `pkg`: the whole directory `pkg` is
-/// imported from (the parent of its top-level package, or of the module),
-/// so the workload's files beside the package (its tests, data,
-/// `pyproject.toml`) are found at the same relative paths as in the
-/// original. Hidden entries and `__pycache__` are left out, and so is
-/// `root` itself when it lies inside the project.
-pub(crate) fn copy_package(pkg: &Path, root: &Path) -> Result<PathBuf, String> {
+/// The files that mark a project's root directory.
+const PROJECT_MARKERS: [&str; 3] = ["pyproject.toml", "setup.cfg", "setup.py"];
+
+/// Whether `dir` is an installation directory (`site-packages`,
+/// `dist-packages`), which is never a project.
+fn installed_dir(dir: &Path) -> bool {
+    dir.file_name()
+        .is_some_and(|name| name == "site-packages" || name == "dist-packages")
+}
+
+/// Copies what pass 3 times `pkg` (a package or single module) in under
+/// `root`, and returns the copy of `pkg`, at the same path below the copy
+/// of its import root (the parent of its top-level package, or of the
+/// module):
+///
+/// - the project: the nearest directory at or above the import root that
+///   holds a `pyproject.toml`, `setup.cfg` or `setup.py`, searched up to
+///   the first `site-packages` or `dist-packages` directory, so the
+///   workload's tests, data and `pyproject.toml` are found at the same
+///   relative paths;
+/// - else (no marker, or the package is installed) the top-level package or
+///   the module alone;
+/// - and each of `include` (`--verify-include`), which must lie under the
+///   import root, at its own path.
+///
+/// Hidden entries, `__pycache__` and `root` itself are left out. An entry
+/// outside the package that cannot be read is skipped, with a note; one
+/// inside it is an error.
+pub(crate) fn copy_package(pkg: &Path, root: &Path, include: &[PathBuf]) -> Result<PathBuf, String> {
     let mut base = pkg.parent().unwrap_or(Path::new("")).to_path_buf();
+    let mut top = pkg.to_path_buf();
     while base.join("__init__.py").is_file() {
+        top = base.clone();
         match base.parent() {
             Some(parent) => base = parent.to_path_buf(),
             None => break,
         }
     }
-    let rel = pkg.strip_prefix(&base).map_err(|e| e.to_string())?.to_path_buf();
     if base.as_os_str().is_empty() {
         base = PathBuf::from(".");
+        top = Path::new(".").join(&top);
     }
+    let base = base.canonicalize().map_err(|e| format!("{}: {e}", base.display()))?;
+    let top = top.canonicalize().map_err(|e| format!("{}: {e}", top.display()))?;
+    let pkg = pkg.canonicalize().map_err(|e| format!("{}: {e}", pkg.display()))?;
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let skip = root.canonicalize().map_err(|e| e.to_string())?;
-    copy_dir(&base, root, &skip)?;
-    Ok(root.join(rel))
+    let installed = base.ancestors().any(installed_dir);
+    let project = if installed {
+        None
+    } else {
+        base.ancestors()
+            .take_while(|dir| !installed_dir(dir))
+            .find(|dir| PROJECT_MARKERS.iter().any(|marker| dir.join(marker).is_file()))
+            .map(Path::to_path_buf)
+    };
+    // The copy of the import root.
+    let below = |path: &Path, from: &Path| -> Result<PathBuf, String> {
+        path.strip_prefix(from)
+            .map(Path::to_path_buf)
+            .map_err(|_| format!("{} is not under {}", path.display(), from.display()))
+    };
+    let copy_base = match &project {
+        Some(project) => root.join(below(&base, project)?),
+        None => root.to_path_buf(),
+    };
+    let copy = Copy { package: &top, skip: &skip };
+    match &project {
+        Some(project) => copy.dir(project, root, false)?,
+        None => copy.entry(&top, &copy_base.join(below(&top, &base)?), true)?,
+    }
+    for path in include {
+        let path = path.canonicalize().map_err(|e| format!("--verify-include {}: {e}", path.display()))?;
+        let rel = below(&path, &base).map_err(|_| {
+            format!("--verify-include {}: not under the package's import root {}", path.display(), base.display())
+        })?;
+        copy.entry(&path, &copy_base.join(rel), false)?;
+    }
+    Ok(copy_base.join(below(&pkg, &base)?))
 }
 
-fn copy_dir(from: &Path, to: &Path, skip: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
-    for entry in std::fs::read_dir(from).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let kind = entry.file_type().map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        if name.to_string_lossy().starts_with('.') {
-            continue;
-        }
-        if kind.is_dir() {
-            let path = entry.path();
-            if name != "__pycache__" && path.canonicalize().map_err(|e| e.to_string())? != skip {
-                copy_dir(&path, &to.join(&name), skip)?;
+/// One copy of [`copy_package`]: the package's own directory or module
+/// (whose entries must all be read), and the destination to leave out.
+struct Copy<'a> {
+    package: &'a Path,
+    skip: &'a Path,
+}
+
+impl Copy<'_> {
+    /// Copies the file or directory `from` to `to`; `inside` when `from` is
+    /// part of the package.
+    fn entry(&self, from: &Path, to: &Path, inside: bool) -> Result<(), String> {
+        let inside = inside || from.starts_with(self.package);
+        // A link is not followed (it may leave the project, or loop).
+        let meta = match std::fs::symlink_metadata(from) {
+            Ok(meta) => meta,
+            Err(e) => return self.unreadable(from, inside, e),
+        };
+        if meta.is_dir() {
+            if from == self.skip {
+                return Ok(());
             }
-        } else if kind.is_file() {
-            std::fs::copy(entry.path(), to.join(&name)).map_err(|e| e.to_string())?;
+            return self.dir(from, to, inside);
         }
+        if meta.is_file() {
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            if let Err(e) = std::fs::copy(from, to) {
+                return self.unreadable(from, inside, e);
+            }
+        }
+        Ok(())
     }
-    Ok(())
+
+    fn dir(&self, from: &Path, to: &Path, inside: bool) -> Result<(), String> {
+        let entries = match std::fs::read_dir(from) {
+            Ok(entries) => entries,
+            Err(e) => return self.unreadable(from, inside, e),
+        };
+        std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with('.') || name == "__pycache__" {
+                continue;
+            }
+            self.entry(&entry.path(), &to.join(&name), inside)?;
+        }
+        Ok(())
+    }
+
+    /// An entry `from` that cannot be read: an error inside the package,
+    /// else skipped with a note.
+    fn unreadable(&self, from: &Path, inside: bool, e: std::io::Error) -> Result<(), String> {
+        if inside {
+            return Err(format!("pass 3 cannot copy {}: {e}", from.display()));
+        }
+        eprintln!("pycc profile: pass 3: {} left out of the copy: {e}", from.display());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

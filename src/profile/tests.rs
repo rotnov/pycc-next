@@ -24,6 +24,7 @@ fn function(module: &str, qualname: &str, line: u32, sha: &str) -> Function {
         sha256: sha.into(),
         lines: 10,
         eligible: true,
+        excluded: false,
     }
 }
 
@@ -32,6 +33,7 @@ fn candidate(e: &Entry, eligible: bool) -> Candidate<'_> {
     Candidate {
         entry: e,
         eligible,
+        excluded: false,
         lines: 10,
     }
 }
@@ -314,7 +316,7 @@ fn a_function_that_mostly_catches_exceptions_is_not_selected() {
 fn a_verified_profile_selects_only_its_measured_winners() {
     let measured = |compiled| Measured {
         compiled,
-        with: 2,
+        with: if compiled { 1 } else { 2 },
         cpython_ns: [10, 11, 12],
         compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
         instructions: None,
@@ -349,4 +351,61 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     std::fs::write(&path, p.to_json()).unwrap();
     assert!(Profile::read(&path).unwrap().verified);
     assert!(!profile(Vec::new()).to_json().contains("verified"));
+}
+
+/// Pass 3's winning set is selected member for member: the rule's region
+/// and crossing steps chose its candidates and are not applied again. Here
+/// the winning core is `a` and `b`; `a` calls the cold `c`, measured not
+/// faster, 1000 times, which as a crossing (36 us) costs more than its
+/// 25 us of self time. Rejecting `a` for it would compile `{b}`, a set
+/// never measured.
+#[test]
+fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
+    let won = |with| Measured {
+        compiled: true,
+        with,
+        cpython_ns: [100, 110, 120],
+        compiled_ns: [80, 85, 90],
+        instructions: None,
+        refused: None,
+        without: None,
+    };
+    let mut a = entry("m", "a", 1, "", 100, 25_000);
+    a.callees.insert("m:c:3".into(), 1000);
+    a.callees.insert("m:b:2".into(), 100);
+    a.measured = Some(won(2));
+    let mut b = entry("m", "b", 2, "", 100, 900_000);
+    b.measured = Some(won(2));
+    let mut c = entry("m", "c", 3, "", 1000, 75_000);
+    c.measured = Some(Measured {
+        compiled: false,
+        without: Some([80, 85, 90]),
+        compiled_ns: [95, 100, 105],
+        with: 3,
+        ..won(3)
+    });
+    let mut p = profile(vec![a, b, c]);
+    p.total_ns = 1_000_000;
+    p.verified = true;
+    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    let decided = select(p.total_ns, &input, p.rule(Rule::default()));
+    let selected: Vec<&str> = decided
+        .iter()
+        .filter(|d| d.rejected.is_none())
+        .map(|d| d.entry.qualname.as_str())
+        .collect();
+    assert_eq!(selected, ["b", "a"], "{decided:?}");
+    // Unverified, the crossing rule rejects `a` (the rule chooses what pass
+    // 3 measures).
+    p.verified = false;
+    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    let decided = select(p.total_ns, &input, p.rule(Rule::default()));
+    assert!(decided.iter().find(|d| d.entry.qualname == "a").unwrap().rejected.is_some(), "{decided:?}");
+    // A winning set with a member gone from the sources selects nothing.
+    p.verified = true;
+    let rest: Vec<Entry> = p.functions.iter().filter(|e| e.qualname != "a").cloned().collect();
+    let input: Vec<Candidate> = rest.iter().map(|e| candidate(e, true)).collect();
+    let decided = select(p.total_ns, &input, p.rule(Rule::default()));
+    let b = decided.iter().find(|d| d.entry.qualname == "b").unwrap();
+    assert!(b.rejected.as_deref().unwrap().starts_with("pass 3's winning set of 2 functions is not whole"), "{b:?}");
 }

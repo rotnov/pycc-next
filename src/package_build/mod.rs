@@ -19,6 +19,7 @@
 //! differs from separate extensions.
 
 mod discover;
+pub(crate) use discover::excluded;
 mod exceptions;
 mod graph;
 mod interface;

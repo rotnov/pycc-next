@@ -197,7 +197,11 @@ function, its calls to Python functions by callee (section 2.2), and the rule
    its loop, and pydantic's glue alike.
 4. **The size**: at most 64 functions and 4,000 source lines, taken by self time. This,
    not heat, caps how far regions grow: each selected line is compiled code in the `.so`.
-5. **Pass 3's evidence**, once pass 3 has run.
+5. **Pass 3's evidence**, once pass 3 has run: the set pass 3 measured as the winner is
+   the selection, member for member. Steps 2 to 4 chose the candidates pass 3 measured
+   and are not applied to its result again, so a build compiles exactly the set that was
+   timed. A winning set with a member that changed or is gone selects nothing until the
+   package is profiled again.
 
 Steps 2 to 4 repeat until no function changes. A rejection names the first step the
 function failed: a function its region or its crossings reject says so in a verified
@@ -210,9 +214,7 @@ profile's numbers, never a function's name.
 
 The rule's picks are candidates, not the selection: only measured winners are
 selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidates into
-a copy of the project (the whole directory the package is imported from, so the
-workload's tests, data and `pyproject.toml` are found at the same paths; the workload
-reads that root from `PYCC_PROFILE_ROOT`) and times the training workload with them compiled against the
+a copy of the project and times the training workload with them compiled against the
 unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
 (`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
 verdict is on wall time: the compiled median must be under CPython's first quartile. A
@@ -233,7 +235,18 @@ and won: the winner with the lowest median, the smaller on a tie, never a union 
 measured apart. When the regions together cannot be built within the budget, or lose,
 the best single winner is kept (a region, a core, or nothing). A function the winner
 leaves out of a set it was measured in is rejected ("faster without it",
-`measured.without`). Every candidate gets its
+`measured.without`). A later profile keeps an earlier winning set that is still whole
+(no member changed) inside every set it measures, so its selection is again one set
+measured as a whole. The copy is the project root: the nearest directory at or above the
+package's import root with a `pyproject.toml`, `setup.cfg` or `setup.py`, searched up to
+the first `site-packages` or `dist-packages`, so the workload's tests and data are found
+at the same paths (the workload reads the copy's import root from `PYCC_PROFILE_ROOT`).
+With no marker, or for an installed package, it is the package alone, plus the paths
+`--verify-include` names. An unreadable entry outside the package is left out with a
+note, and one inside it is an error. A module a build keeps in Python (`--exclude`) is
+excluded from the profile's candidates by the same `--exclude` (it is still profiled, so
+the calls into it count as crossings), so the build compiles exactly the set pass 3
+measured; `bench/package_check.py --select profile` checks that it does. Every candidate gets its
 last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
 `compiled_ns` as first quartile, median and third quartile, and with
 `--verify-instructions` the instruction delta under callgrind, as evidence only). A

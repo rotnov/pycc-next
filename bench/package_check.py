@@ -51,8 +51,12 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            the package's own test suite and then each of its timed workloads
            once (the training input, `training`) against the unchanged sources
            first, the build passes it as `--profile`, and the
-           `.py` files stay, since the modules' bytecode runs. The suite then
-           checks that each module with a compiled function is imported
+           `.py` files stay, since the modules' bytecode runs. The modules the
+           build keeps in Python (`excludes`) are excluded from the profile's
+           candidates too, the layout's other entries are given to pass 3
+           (`--verify-include`), and the check fails unless the build
+           compiles exactly the set pass 3 measured as the winner. The suite
+           then checks that each module with a compiled function is imported
            through the extension.
   --time   also time each package's hot paths compiled and in CPython (pypng:
            its 256x256 filter image, and every PngSuite image its tests use;
@@ -795,7 +799,14 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
         train.write_text(training(pkg))
         profile = tmp / "pycc.profile.json"
         target = plain / pkg.layout[0][0]
-        r = subprocess.run([a.pycc, "profile", str(target), "-o", str(profile), "--",
+        # Pass 3's copy is the package alone when the tree has no project
+        # marker: the layout's other entries (tests, benchmark data) are
+        # added explicitly.
+        include = [arg for dst, _ in pkg.layout[1:]
+                   for arg in ("--verify-include", str(plain / dst))]
+        # The modules the build keeps in Python are never candidates.
+        include += [arg for e in pkg.excludes for arg in ("--exclude", e)]
+        r = subprocess.run([a.pycc, "profile", str(target), "-o", str(profile), *include, "--",
                             sys.executable, str(train), str(plain)], cwd=cwd,
                            capture_output=True, text=True, timeout=900)
         if r.returncode != 0:
@@ -887,6 +898,18 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             print(f"  compiled: {module}: {', '.join(qualnames)}")
         print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s "
               f"({cpu:.2f}s of builds, {a.jobs} at a time); {n} selected functions compiled")
+        # The build compiles exactly the set pass 3 measured as the winner.
+        r = subprocess.run([a.pycc, "profile", str(plain / pkg.layout[0][0]), "-o", str(profile),
+                            "--check", *[arg for e in pkg.excludes for arg in ("--exclude", e)],
+                            "--", sys.executable], cwd=cwd, capture_output=True, text=True)
+        measured = {line[len("selected: "):].split(" (")[0] for line in r.stdout.splitlines()
+                    if line.startswith("selected: ")}
+        compiled_set = {f"{module}:{q}" for module, qualnames in selected.items() for q in qualnames}
+        if r.returncode != 0 or measured != compiled_set:
+            print(r.stdout + r.stderr)
+            print(f"FAIL: the build compiled {sorted(compiled_set)}, but pass 3 measured "
+                  f"{sorted(measured)} as the winner")
+            return False
     else:
         for mod in pkg.modules:
             (pkg_dir / mod).unlink()

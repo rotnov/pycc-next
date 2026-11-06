@@ -345,6 +345,8 @@ fn main() -> ExitCode {
             no_verify,
             verify_rounds,
             verify_instructions,
+            verify_include,
+            excludes,
             check,
             workload,
         } => {
@@ -359,13 +361,14 @@ fn main() -> ExitCode {
             measured_only: false,
             };
             let done = if check {
-                profile::check_profile(&path, &out, &workload, rule)
+                profile::check_profile(&path, &out, &workload, rule, &excludes)
             } else {
                 let verify = (!no_verify).then_some(profile::verify::Options {
                     rounds: verify_rounds,
                     instructions: verify_instructions,
+                    include: verify_include,
                 });
-                profile::run_profile(&path, &out, &workload, runs, rule, verify)
+                profile::run_profile(&path, &out, &workload, runs, rule, verify, &excludes)
             };
             match done {
                 Ok(()) => ExitCode::SUCCESS,

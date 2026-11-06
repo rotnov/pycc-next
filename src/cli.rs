@@ -343,6 +343,20 @@ pub enum Command {
         /// (needs valgrind), as evidence beside the wall-time verdict.
         #[arg(long)]
         verify_instructions: bool,
+        /// A file or directory pass 3's copy holds besides the project (its
+        /// tests, data), at the same path relative to the package's import
+        /// root; repeatable. The copy is of the project root (the nearest
+        /// directory above the package with a `pyproject.toml`, `setup.cfg`
+        /// or `setup.py`, never past `site-packages`), or of the package
+        /// alone when there is none or it is installed.
+        #[arg(long = "verify-include", value_name = "PATH")]
+        verify_include: Vec<PathBuf>,
+        /// A module or subpackage of the package (as a package build's
+        /// `--exclude`) kept in Python: profiled, never a candidate, so the
+        /// set pass 3 measures is the set a build with the same `--exclude`
+        /// compiles. Repeatable.
+        #[arg(long = "exclude", value_name = "MODULE")]
+        excludes: Vec<String>,
         /// Run no workload: read the profile `-o` names against PKG's current
         /// sources and print its stale entries and what the selection rule
         /// takes from it (`-- PYTHON` indexes the sources).

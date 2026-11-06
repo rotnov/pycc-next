@@ -620,3 +620,35 @@ fn a_cold_callee_is_sampled_with_its_hot_callers_region() {
     assert!(text.contains("selected: pkg.b:bisect"), "{text}");
     assert!(text.contains("selected: pkg.b:split"), "{text}");
 }
+
+/// A module `--exclude` keeps in Python (a package's own tests) is
+/// profiled, so its time and the calls into it count, but never a
+/// candidate: the set pass 3 measures is the one a build with the same
+/// `--exclude` compiles.
+#[test]
+fn an_excluded_module_is_profiled_but_never_a_candidate() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    std::fs::create_dir_all(pkg.join("tests")).unwrap();
+    std::fs::write(pkg.join("tests/__init__.py"), "").unwrap();
+    std::fs::write(
+        pkg.join("tests/t.py"),
+        "def spin(n):\n    s = 0\n    for i in range(n):\n        s += i\n    return s\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, format!("{WORKLOAD}from pkg.tests import t\nfor i in range(200):\n    t.spin(500)\n")).unwrap();
+    let out = dir.join("p.json");
+    let rule = ["--select-share", "0", "--select-calls", "1"];
+    let r = profile(&pkg, &out, &["--runs", "1", "--exclude", "tests", rule[0], rule[1], rule[2], rule[3]], &[work.as_os_str(), dir.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let spin = p["functions"].as_array().unwrap().iter().find(|f| f["qualname"] == "spin").unwrap();
+    assert!(spin["calls"].as_u64().unwrap() >= 200, "{spin}");
+    // Not a candidate, so pass 2 never sampled it.
+    assert!(spin["arg_types"].as_object().is_none_or(|t| t.is_empty()), "{spin}");
+    let r = profile(&pkg, &out, &["--check", "--exclude", "pkg.tests", rule[0], rule[1], rule[2], rule[3]], &[]);
+    let stdout = String::from_utf8_lossy(&r.stdout);
+    assert!(stdout.contains("rejected: pkg.tests.t:spin: its module is kept in Python (`--exclude`)"), "{stdout}");
+    assert!(stdout.contains("selected: pkg.hot:Box.size"), "{stdout}");
+}

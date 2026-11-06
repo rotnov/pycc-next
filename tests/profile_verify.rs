@@ -171,10 +171,10 @@ fn a_member_that_imports_its_sibling_is_measured() {
     assert_eq!(measured(&out, "work")["compiled"], true);
 }
 
-/// A training script reads its data beside the package, from the project
+/// A training script reads its data beside the package, from the import
 /// root it is given (`PYCC_PROFILE_ROOT`), as a package check's tests and
-/// benchmark do: pass 3's copy holds the whole project, so the script finds
-/// its files there too.
+/// benchmark do: pass 3's copy is of the project (marked by its
+/// `pyproject.toml`), so the script finds its files there too.
 #[test]
 fn a_workload_that_reads_files_beside_the_package_is_measured() {
     let _turn = timing();
@@ -191,6 +191,7 @@ fn a_workload_that_reads_files_beside_the_package_is_measured() {
     std::fs::write(dir.join("data/n.txt"), "20000\n").unwrap();
     std::fs::create_dir_all(dir.join("tests")).unwrap();
     std::fs::write(dir.join("tests/test_m.py"), "from pkg import m\n").unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"pkg\"\n").unwrap();
     let out = dir.join("p.json");
     let r = profile(&pkg, &out, &work);
     let stderr = String::from_utf8_lossy(&r.stderr);

@@ -180,6 +180,9 @@ pub(crate) struct Function {
     /// Module-level functions and methods of module-level classes that are
     /// not generators or coroutines (section 2.1).
     pub(crate) eligible: bool,
+    /// Its module is kept in Python (`--exclude`): profiled, never selected.
+    #[serde(default)]
+    pub(crate) excluded: bool,
 }
 
 impl Function {
@@ -188,6 +191,7 @@ impl Function {
         Candidate {
             entry,
             eligible: self.eligible,
+            excluded: self.excluded,
             lines: self.lines,
         }
     }
@@ -343,6 +347,8 @@ impl Profile {
 pub(crate) struct Candidate<'p> {
     pub(crate) entry: &'p Entry,
     pub(crate) eligible: bool,
+    /// Its module is kept in Python (`--exclude`).
+    pub(crate) excluded: bool,
     pub(crate) lines: u32,
 }
 
@@ -363,7 +369,11 @@ pub(crate) struct Candidate<'p> {
 ///    than its self time;
 /// 4. the size of the selection: at most `rule.max` functions and
 ///    `rule.lines` source lines, taken by self time;
-/// 5. once pass 3 has run (`rule.measured_only`), measured by it.
+/// 5. once pass 3 has run (`rule.measured_only`), in the set it measured
+///    as the winner. That set is the selection, member for member, and
+///    steps 2 to 4 are not applied to it again: they choose the candidates
+///    pass 3 measures, not its result. A winning set that is not whole in
+///    the current sources (a member changed or is gone) selects nothing.
 ///
 /// Steps 2 to 4 repeat until no function changes: a rejection can shrink a
 /// region below its threshold or turn its callers' calls into crossings.
@@ -381,7 +391,9 @@ pub(crate) fn select<'p>(total_ns: u64, entries: &[Candidate<'p>], rule: Rule) -
         .iter()
         .map(|c| {
             let entry = c.entry;
-            let rejected = if !c.eligible {
+            let rejected = if c.excluded {
+                Some("its module is kept in Python (`--exclude`)".to_string())
+            } else if !c.eligible {
                 Some("not eligible (a generator, coroutine or nested function)".to_string())
             } else if let Some(m) = entry.measured.as_ref().filter(|m| !m.compiled) {
                 Some(m.rejection())
@@ -492,11 +504,34 @@ pub(crate) fn select<'p>(total_ns: u64, entries: &[Candidate<'p>], rule: Rule) -
             break;
         }
     }
-    // Step 5: pass 3's evidence.
+    // Step 5: pass 3's evidence. Its winning set is the selection, member
+    // for member: the steps above chose what pass 3 measured, and are not
+    // applied to its result again.
     if rule.measured_only {
-        for d in decided.iter_mut().filter(|d| d.rejected.is_none()) {
-            if d.entry.measured.is_none() {
-                d.rejected = Some("not measured by pass 3 (it was not among the candidates it built)".to_string());
+        let winners: Vec<usize> = (0..decided.len())
+            .filter(|&i| decided[i].entry.measured.as_ref().is_some_and(|m| m.compiled))
+            .collect();
+        let whole = winners
+            .first()
+            .and_then(|&i| decided[i].entry.measured.as_ref())
+            .map_or(0, |m| m.with);
+        let intact = winners.len() == whole
+            && winners
+                .iter()
+                .all(|&i| decided[i].entry.measured.as_ref().is_some_and(|m| m.with == whole));
+        for (i, d) in decided.iter_mut().enumerate() {
+            if winners.contains(&i) {
+                d.rejected = (!intact).then(|| {
+                    format!(
+                        "pass 3's winning set of {whole} functions is not whole in the current sources \
+                         (one changed or is gone): profile again"
+                    )
+                });
+            } else if d.rejected.is_none() {
+                d.rejected = Some(match &d.entry.measured {
+                    None => "not measured by pass 3 (it was not among the candidates it built)".to_string(),
+                    Some(_) => "not in the set pass 3 measured as the winner".to_string(),
+                });
             }
         }
     }
@@ -744,6 +779,37 @@ impl Driver<'_> {
 
 /// The package's current functions, from `python` (the driver's `index`).
 pub(crate) fn index(python: &OsStr, pkg: &Path) -> Result<Vec<Function>, String> {
+    index_excluding(python, pkg, &[])
+}
+
+/// [`index`], with the functions of each module `excludes` names (as a
+/// package build's `--exclude`: a module or subpackage, relative to the
+/// package or with its name first) marked kept in Python.
+pub(crate) fn index_excluding(python: &OsStr, pkg: &Path, excludes: &[String]) -> Result<Vec<Function>, String> {
+    let mut functions = index_all(python, pkg)?;
+    if !excludes.is_empty() && pkg.is_dir() {
+        let package = pkg.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        // The functions' modules are dotted from the package's import root.
+        let prefix = functions
+            .iter()
+            .find_map(|f| {
+                let at = f.module.split('.').position(|part| part == package)?;
+                Some(f.module.split('.').take(at + 1).collect::<Vec<_>>().join("."))
+            })
+            .unwrap_or_else(|| package.clone());
+        for f in &mut functions {
+            let relative = if f.module == prefix {
+                ""
+            } else {
+                f.module.strip_prefix(&prefix).and_then(|rest| rest.strip_prefix('.')).unwrap_or(&f.module)
+            };
+            f.excluded = crate::package_build::excluded(&package, relative, excludes);
+        }
+    }
+    Ok(functions)
+}
+
+fn index_all(python: &OsStr, pkg: &Path) -> Result<Vec<Function>, String> {
     let scratch = pycc_scratch::ScratchDir::new("profile").map_err(|e| e.to_string())?;
     let script = scratch.join("driver.py");
     std::fs::write(&script, DRIVER.replace("\r\n", "\n")).map_err(|e| e.to_string())?;
@@ -768,12 +834,13 @@ pub(crate) fn check_profile(
     profile_path: &Path,
     workload: &[OsString],
     rule: Rule,
+    excludes: &[String],
 ) -> Result<(), String> {
     let [python, ..] = workload else {
         return Err("pycc profile --check needs the interpreter: -- PYTHON".to_string());
     };
     let profile = Profile::read(profile_path)?;
-    let sources = index(python, pkg)?;
+    let sources = index_excluding(python, pkg, excludes)?;
     let (current, notes) = profile.current(&sources);
     for note in &notes {
         eprintln!("{note}");
@@ -804,6 +871,7 @@ pub(crate) fn run_profile(
     runs: u32,
     rule: Rule,
     verify: Option<verify::Options>,
+    excludes: &[String],
 ) -> Result<(), String> {
     let [python, rest @ ..] = workload else {
         return Err("pycc profile needs a workload: -- PYTHON SCRIPT [ARGS]".to_string());
@@ -816,7 +884,7 @@ pub(crate) fn run_profile(
     }
     // Without a Windows verbatim prefix: the path goes on the workload's `sys.path`.
     let pkg = crate::canonical::canonicalize(pkg).map_err(|e| e.to_string())?;
-    let sources = index(python, &pkg)?;
+    let sources = index_excluding(python, &pkg, excludes)?;
     let scratch = pycc_scratch::ScratchDir::new("profile").map_err(|e| e.to_string())?;
     let script = scratch.join("driver.py");
     std::fs::write(&script, DRIVER.replace("\r\n", "\n")).map_err(|e| e.to_string())?;
