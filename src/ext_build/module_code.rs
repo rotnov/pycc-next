@@ -25,7 +25,10 @@
 //! (and tuples of them) whose order `marshal` changes, the source display
 //! it was folded from (its elements in source order, checked to rebuild the
 //! compiled table), and the hook rebuilds those constants from it after
-//! unmarshalling. A constant with a `str` or `bytes` keeps `marshal`'s
+//! unmarshalling. The build checks the result, fail-closed: a module whose
+//! rebuilt bytecode would not iterate every such constant as a fresh compile
+//! does is compiled from its source at import instead. A constant with a
+//! `str` or `bytes` keeps `marshal`'s
 //! order (docs/DEVIATIONS.md): its fresh-compile order depends on the
 //! process's hash key and on what it interned before.
 
@@ -36,9 +39,10 @@ use std::io::Write as _;
 use std::process::Stdio;
 
 /// What the target interpreter compiled: its magic number, the `marshal`led
-/// tuple of every chunk's code object (`None` for a chunk it refused to
-/// compile, which then fails at import exactly as `compile()` does), and
-/// which chunks compiled.
+/// pair of every chunk's code object (`None` for a chunk it refused to
+/// compile, which then fails at import exactly as `compile()` does, or whose
+/// `frozenset` constants its bytecode would not reproduce, which is then
+/// compiled at import) and the fix-ups, and which chunks are precompiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Precompiled {
     pub(crate) magic: u32,
@@ -52,17 +56,26 @@ pub(crate) struct Precompiled {
 /// code objects and the `frozenset` constants to rebuild after loading:
 /// `(chunk, path, index, elements)`, the constant at `co_consts[index]` of
 /// the code object reached from the chunk's by the `co_consts` indexes in
-/// `path`, rebuilt as `frozenset(elements)`. A constant is rebuilt when its
-/// hashes are `fixed` (no `str` or `bytes`, whose hashes are randomized per
-/// process), `marshal` changes its table, and a set display in the chunk's
-/// source, in source order, rebuilds the compiled table. The display is the
-/// one at the source position of the first instruction that loads the
-/// constant (`loaded_at`), or, for a constant merged with an equal one
-/// folded elsewhere, another display that rebuilds it. Either way it must
-/// rebuild the table (`same`): the same elements, compared by type and
-/// `repr` (recursively through tuples, so that `{1, 0}` never stands for
-/// `{1.0, 0.0}` nor `{True, 0}`), in the same iteration order, also once
-/// copied into a set and grown, as `SET_UPDATE` and later `add`s would.
+/// `path`, rebuilt as `frozenset(elements)`.
+///
+/// A constant gets a fix-up when its hashes are `fixed` (no `str` or
+/// `bytes`, whose hashes are randomized per process) and `marshal` changes
+/// its table. Its elements are those of a set display of the chunk's source,
+/// in source order: the display at the source position of the first
+/// instruction that loads the constant (`loaded_at`), else (a constant
+/// merged with an equal one folded elsewhere) another display that rebuilds
+/// it.
+///
+/// The gate is the result, not the matching. Each chunk is unmarshalled
+/// again with its fix-ups applied (`refold`, as the hook does), and every
+/// `frozenset` constant of numbers in every code object of it must iterate
+/// as the fresh compile's (`agrees`, through `same`: element by element by
+/// type and `repr`, recursively through tuples, also once copied into a set
+/// and grown, as `SET_UPDATE` and later `add`s would). A chunk for which
+/// that fails (a display `ast.literal_eval` cannot read, as `{1 + 0, 8, 0}`)
+/// or raises is not precompiled: the hook compiles its source at import, as
+/// for a chunk the interpreter refused to compile.
+///
 /// `marshal` data rather than JSON: importing `json` doubled the
 /// interpreter's start-up, and the script runs once per built module; `ast`
 /// and `dis` are imported only for a chunk with such a constant.
@@ -114,6 +127,21 @@ def loaded_at(code, index):
             p = ins.positions
             return p.lineno, p.col_offset, p.end_lineno, p.end_col_offset
     return None
+def refold(code, path, index, order):
+    consts = list(code.co_consts)
+    if path:
+        consts[path[0]] = refold(consts[path[0]], path[1:], index, order)
+    else:
+        consts[index] = frozenset(order)
+    return code.replace(co_consts=tuple(consts))
+def agrees(loaded, compiled):
+    for x, y in zip(loaded.co_consts, compiled.co_consts, strict=True):
+        if isinstance(y, frozenset):
+            if fixed(y) and not same(x, y):
+                return False
+        elif hasattr(y, 'co_consts') and not agrees(x, y):
+            return False
+    return True
 chunks = marshal.loads(sys.stdin.buffer.read())
 codes = []
 fixups = []
@@ -122,8 +150,8 @@ for k, (source, filename) in enumerate(chunks):
         code = compile(source, filename, 'exec', dont_inherit=True, optimize=0)
     except (SyntaxError, ValueError):
         code = None
-    codes.append(code)
     orders = None
+    mine = []
     for owner, path, index, const in (() if code is None else frozensets(code, ())):
         if not fixed(const) or same(marshal.loads(marshal.dumps(const)), const):
             continue
@@ -132,8 +160,20 @@ for k, (source, filename) in enumerate(chunks):
         first = orders.get(loaded_at(owner, index))
         for order in ([first] if first is not None else []) + list(orders.values()):
             if rebuilds(order, const):
-                fixups.append((k, path, index, order))
+                mine.append((k, path, index, order))
                 break
+    if code is not None:
+        try:
+            loaded = marshal.loads(marshal.dumps(code))
+            for _, path, index, order in mine:
+                loaded = refold(loaded, path, index, order)
+            ok = agrees(loaded, code)
+        except Exception:
+            ok = False
+        if not ok:
+            code, mine = None, []
+    codes.append(code)
+    fixups.extend(mine)
 out = sys.stdout.buffer
 out.write(importlib.util.MAGIC_NUMBER)
 out.write(bytes(c is not None for c in codes))

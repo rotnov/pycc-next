@@ -337,6 +337,9 @@ fn assert_ext_non_strict_matches(name: &str) {
 #[test]
 fn a_constant_set_display_in_bytecode_iterates_as_compiled_from_source() {
     assert_ext_non_strict_matches_selecting("fuzz_constant_set_bytecode", "all");
+    // A display the build cannot read back (`{1 + 0, 8, 0}`), in the module,
+    // a lambda and a nested function: the module compiles at import.
+    assert_ext_non_strict_matches_selecting("fuzz_constant_set_folded", "all");
 }
 
 /// [`assert_ext_non_strict_matches`] under `--select <select>`.

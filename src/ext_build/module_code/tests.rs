@@ -107,6 +107,27 @@ fn a_real_interpreter_compiles_the_chunks() {
     assert_eq!(compiled.present, vec![true, false, true]);
 }
 
+/// A frozenset constant `marshal` reorders is precompiled with a fix-up when
+/// its display can be read back, and its chunk is left to `compile()` at
+/// import when it cannot (`1 + 0` is folded, not a literal): never run with
+/// `marshal`'s order.
+#[test]
+fn a_frozenset_constant_marshal_reorders_is_rebuilt_or_its_chunk_compiles_at_import() {
+    let Some(compiled) = precompile(
+        OsStr::new(super::super::DEFAULT_PYTHON),
+        &[
+            chunk("a = {1, 8, 0}\n"),
+            chunk("def f():\n    return {1 + 0, 8, 0}\n"),
+            chunk("g = lambda: {2 * 4, 1, 0}\n"),
+            chunk("b = {'zz', 'q', 'abc'}\n"),
+        ],
+    ) else {
+        return;
+    };
+    // The `str` display keeps `marshal`'s order (docs/DEVIATIONS.md).
+    assert_eq!(compiled.present, vec![true, false, false, true]);
+}
+
 #[test]
 fn an_interpreter_that_cannot_run_compiles_nothing() {
     assert_eq!(precompile(OsStr::new("/nonexistent/python3"), &[chunk("x = 1\n")]), None);
