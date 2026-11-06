@@ -43,9 +43,12 @@ description: Use when measuring pycc-next performance, after any codegen/runtime
 6. Local runs are for deciding what to change, on the current commit. To see why something
    is slow: `objdump -d --no-show-raw-insn <binary>` and look for runtime calls
    (`pycc_rt_*`) in hot functions.
-7. The machine is shared: decide with instruction counts
-   (`valgrind --tool=callgrind <binary>`; `bench/package_check.py --instructions`, whose
-   bounds are CI's regression gate in `ci.yml`), not local wall time.
+7. The machine is shared: decide with simulated counts, not local wall time alone. Run
+   `valgrind --tool=callgrind --cache-sim=yes --branch-sim=yes <binary>` and report
+   instructions, I1 misses and branch mispredictions together with interleaved wall time
+   and the extension's size (`docs/design/compile-little.md`, section 3): fewer
+   instructions with more I1 misses or more wall time is not a win.
+   `bench/package_check.py --instructions` bounds are CI's regression gate in `ci.yml`.
    `PYCC_DUMP_LLVM=<path> pycc build ...` writes the IR before (`<path>.pre.ll`) and after
    (`<path>`) optimization; `opt -passes='default<O3>'` on the `.pre.ll` reproduces a release
    build for pipeline experiments.

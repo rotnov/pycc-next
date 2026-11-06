@@ -55,11 +55,30 @@ Accept (carried over from v0.11, not met there):
    CPython from `.pyc`, same pydantic-core wheel, on both runners; its suite fails no test
    that passes against its sources. v0.11 (CPython 3.13): 0.97x / 0.98x; against 3.15:
    0.96x / 0.94x.
+   **Status 2026-11-06:** met locally (1.05x-1.07x), not yet confirmed on CI. The 1.2x
+   stretch is withdrawn. Under the plan below, modules run as CPython bytecode, so the
+   import is at parity by construction and has no path to 1.2x.
 2. **pystache's import no slower than CPython's** in the CI benchmark job, on both
    runners, and no package check regresses. v0.11 (CPython 3.13): 0.97x / 0.94x; against
    3.15: 0.94x / 0.93x.
+   **Status 2026-11-06:** not met (0.94-0.96x locally). The remaining 0.5 ms is spent
+   loading the extension. Under the plan below, a package with nothing selected gets no
+   extension, so its import is CPython's.
+3. **(added 2026-11-06) Library code: compile little, compile well**
+   ([design](design/compile-little.md), [#78](https://github.com/rotnov/pycc-next/issues/78)).
+   The targets are ratios of CPython time to pycc time, as medians of `bench.yml` on both
+   runners:
+   - pydantic `model_json_schema()` >= 1.2x;
+   - model definition >= 1.0x;
+   - whole process >= 1.0x;
+   - pydantic import stays >= 1.0x;
+   - mistune's and pystache's imports and benchmarks no slower than at a92ee70.
 
-Tracked, not an Accept item: pydantic's model definition and `model_json_schema()`
+   Every step reports wall time, instructions, I1 misses and branch mispredictions, and the
+   extension's size (the design's section 3). The three suites fail no test that passes
+   against their sources. **Not met:** the plan's pull requests 1-12 are not started.
+
+Tracked until accept 3 made them targets: pydantic's model definition and `model_json_schema()`
 phases, and the workload's whole-process wall time (`process`: one fresh interpreter
 running every phase, start-up and shutdown included). Every `bench/pydantic_check.py
 --time` run reports all three, and `bench.yml` publishes them. The compiled tree is the
@@ -84,6 +103,30 @@ Where the time goes, from callgrind (`valgrind --tool=callgrind`, cache and bran
 - **The extra time is instruction-cache misses and branch mispredictions.** At 2a3ef35, per schema repetition, there are 0.80M I1 misses against 0.38M, and 1.56M mispredictions against 1.28M.
 - **The compiled bodies are thin.** At 2a3ef35, of the extension's 32M instructions per schema repetition, 24.6M are in the shim's generic object helpers: calls, attribute and item reads, `isinstance`, displays, iteration and reference counting. The interpreter's own misses also grow by about 60%, spread across all of its code: two hot code bases share the cache.
 - **Compiler flags do not help.** Compiling the shim with `-Os` or `-O3` instead of `-O2` measured no faster.
+
+### Plan 2026-11-06: compile little, compile well
+
+The levers below tuned the "compile everything" model one cost at a time. The import
+reached parity locally, but definition and schema stayed at 0.77-0.80x. A headroom
+experiment ([design](design/compile-little.md), section 1) shows why. The compiled tree
+runs about as many instructions as CPython (1175M against 1190M over import, definition
+and schema), with about twice the I1 misses (6.7M against 3.4M) from a 10.9 MB `.so`.
+Three hot functions written as ideal C and injected into plain CPython are 3-8x faster
+than both. With them, schema takes 9.33 ms against CPython's 11.68 ms (1.25x) and
+definition is unchanged.
+
+The plan:
+
+- modules stay bytecode;
+- only functions a profile shows hot are compiled, each with exact-type fast paths inline
+  and idioms lowered;
+- the generic helpers become the cold fallback;
+- most of what the levers built is deleted (the design's section 7).
+
+Accept 3 holds the targets, and the design's section 8 the ordered pull requests. Levers
+11 and 12, the chunk tables, mirrored imports and classes made once are slated for
+deletion once the switch (pull request 4) makes them unnecessary. Until then they stay,
+because deleting them earlier would regress pydantic's import.
 
 
 Each lever is measured locally against the merged head before it (PBS CPython 3.15.2,
