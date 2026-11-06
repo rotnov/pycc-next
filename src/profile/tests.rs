@@ -11,6 +11,7 @@ fn entry(module: &str, qualname: &str, line: u32, sha: &str, calls: u64, ns: u64
         callees: BTreeMap::new(),
         arg_types: ArgTypes::new(),
         handled: 0,
+        sampled: true,
         measured: None,
     }
 }
@@ -33,6 +34,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         runs: 5,
         total_ns: 1000,
         functions,
+        sampled: true,
         verified: false,
     }
 }

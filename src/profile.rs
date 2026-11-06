@@ -58,6 +58,10 @@ pub(crate) struct Entry {
     /// an exception in the function's own frame.
     #[serde(default)]
     pub(crate) handled: u64,
+    /// Pass 2 sampled its calls (it was among the candidates it sampled, and
+    /// the workload called it): its `handled` and `arg_types` are evidence.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) sampled: bool,
     /// Pass 3's verdict (`profile::verify`): whether the workload ran no
     /// slower with this function compiled. Absent when not measured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -138,6 +142,10 @@ pub(crate) struct Profile {
     pub(crate) runs: u32,
     pub(crate) total_ns: u64,
     pub(crate) functions: Vec<Entry>,
+    /// Pass 2 sampled the selection's candidates: only the functions it
+    /// sampled are selected ([`Rule::sampled_only`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) sampled: bool,
     /// Pass 3 measured the selection's candidates: only its measured
     /// winners are selected ([`Rule::measured_only`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -173,6 +181,9 @@ pub(crate) struct Rule {
     /// exception must be under this. Exceptions as control flow are slower
     /// compiled than in CPython until PR 9 (section 2.7).
     pub(crate) handled: f64,
+    /// Only functions pass 2 sampled are selected: a function that would
+    /// fill a slot a rejected candidate left has no `handled` count.
+    pub(crate) sampled_only: bool,
     /// Only functions pass 3 measured are selected: a profile whose
     /// candidates were measured keeps exactly its winners, and a function
     /// that would fill a slot a rejected candidate left is not one of them.
@@ -187,6 +198,7 @@ impl Default for Rule {
             max: 64,
             outside: 0.5,
             handled: 0.5,
+            sampled_only: false,
             measured_only: false,
         }
     }
@@ -203,16 +215,19 @@ pub(crate) struct Decision<'p> {
 }
 
 impl Profile {
-    /// The file's text: pretty JSON, entries sorted, a final newline.
-    /// `rule` as it applies to this profile: only measured winners when
-    /// pass 3 ran.
+    /// `rule` as it applies to this profile: a function is selected only
+    /// with evidence from every pass that ran (sampled when pass 2 ran,
+    /// measured a winner when pass 3 did). A rejection frees a slot but
+    /// admits no function a pass did not examine.
     pub(crate) fn rule(&self, rule: Rule) -> Rule {
         Rule {
+            sampled_only: self.sampled,
             measured_only: self.verified,
             ..rule
         }
     }
 
+    /// The file's text: pretty JSON, entries sorted, a final newline.
     pub(crate) fn to_json(&self) -> String {
         let mut sorted = self.clone();
         sorted.functions.sort_by(|a, b| {
@@ -320,6 +335,8 @@ pub(crate) fn select<'p>(
                 ))
             } else if entry.calls < rule.calls {
                 Some(format!("{} calls is under {}", entry.calls, rule.calls))
+            } else if rule.sampled_only && !entry.sampled {
+                Some("not sampled by pass 2 (it was not among the candidates it sampled)".to_string())
             } else if entry.handled > 0
                 && entry.handled as f64 >= entry.calls.min(TYPE_CALLS) as f64 * rule.handled
             {
@@ -683,6 +700,7 @@ pub(crate) fn run_profile(
                 callees: aggregated.callees,
                 arg_types: ArgTypes::new(),
                 handled: 0,
+                sampled: false,
                 measured: None,
             })
         })
@@ -728,6 +746,7 @@ pub(crate) fn run_profile(
             if let Some((t, h)) = by.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
                 e.arg_types = t;
                 e.handled = h;
+                e.sampled = true;
             }
         }
     }
@@ -746,13 +765,15 @@ pub(crate) fn run_profile(
         runs: runs.max(1),
         total_ns,
         functions,
+        sampled: !candidates.is_empty(),
         verified: false,
     };
-    // Pass 2's samples can reject a candidate (and with it its callers); pass
-    // 3 keeps only the measured winners.
+    // Pass 2's samples can reject a candidate (and with it its callers),
+    // never admit one it did not sample; pass 3 keeps only the measured
+    // winners.
     if let Some(options) = verify {
         let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
-        let candidates: Vec<FunctionKey> = select(total_ns, &decided, rule)
+        let candidates: Vec<FunctionKey> = select(total_ns, &decided, profile.rule(rule))
             .into_iter()
             .filter(|d| d.rejected.is_none())
             .map(|d| (d.entry.module.clone(), d.entry.qualname.clone(), d.entry.firstlineno))

@@ -145,14 +145,17 @@ fn check_drops_stale_entries_and_prints_the_selection() {
     let pkg = package(&dir);
     let out = dir.join("p.json");
     let work = dir.join("work.py");
-    let r = profile(&pkg, &out, &["--runs", "1"], &[work.as_os_str(), dir.as_os_str()]);
+    // Profiled under the rule `--check` applies: a function pass 2 did not
+    // sample is never selected.
+    let rule = ["--select-share", "0", "--select-calls", "1"];
+    let r = profile(&pkg, &out, &["--runs", "1", rule[0], rule[1], rule[2], rule[3]], &[work.as_os_str(), dir.as_os_str()]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     // `hot` changes; `Box.size` moves down a line but keeps its text.
     let changed = HOT
         .replace("return None", "return 0")
         .replace("    @property", "\n    @property");
     std::fs::write(pkg.join("hot.py"), changed).unwrap();
-    let r = profile(&pkg, &out, &["--check", "--select-share", "0", "--select-calls", "1"], &[]);
+    let r = profile(&pkg, &out, &["--check", rule[0], rule[1], rule[2], rule[3]], &[]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     let stderr = String::from_utf8_lossy(&r.stderr);
     let stdout = String::from_utf8_lossy(&r.stdout);
@@ -525,4 +528,51 @@ runpy.run_path(driver, run_name='__main__')
     let t = read(&out);
     // [module, qualname, line, types, handled]: the dict calls with `i % 3 != 1`.
     assert_eq!(t["functions"][0][4], 67, "{t}");
+}
+
+/// Two functions that catch an exception in every call, `--select-max 1`:
+/// pass 2 samples only `a`, the one candidate, and rejects it. The slot it
+/// frees admits no one: `b`, which pass 2 never sampled, has no `handled`
+/// count to pass the threshold with.
+#[test]
+fn a_function_pass_2_did_not_sample_never_takes_a_rejected_one_s_slot() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(
+        pkg.join("m.py"),
+        "def a(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 1\n\n\n\
+         def b(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 2\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    // `a` takes more self time than `b`.
+    std::fs::write(&work, "from pkg import m\nfor i in range(3000):\n    m.a({})\n    m.a({})\n    m.b({})\n").unwrap();
+    let out = dir.join("p.json");
+    let rule = ["--runs", "1", "--select-share", "0", "--select-max", "1"];
+    let r = profile(&pkg, &out, &rule, &[work.as_os_str()]);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("; 0 pass the selection rule"), "{stderr}");
+    let p = read(&out);
+    let get = |q: &str| p["functions"].as_array().unwrap().iter().find(|f| f["qualname"] == q).unwrap().clone();
+    assert_eq!(get("a")["sampled"], true, "{p}");
+    assert_eq!(get("a")["handled"], 1000, "{p}");
+    assert_eq!(get("b")["sampled"], serde_json::Value::Null, "{p}");
+    let check = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("profile")
+        .arg(&pkg)
+        .arg("-o")
+        .arg(&out)
+        .args(&rule[2..])
+        .args(["--check", "--"])
+        .arg(python())
+        .output()
+        .unwrap();
+    let shown = String::from_utf8_lossy(&check.stdout);
+    assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
+    assert!(shown.contains("rejected: pkg.m:a: it catches an exception in 1000 of its first 1000 calls"), "{shown}");
+    assert!(shown.contains("rejected: pkg.m:b: not sampled by pass 2"), "{shown}");
+    assert!(!shown.contains("selected: pkg.m:b"), "{shown}");
 }

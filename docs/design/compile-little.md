@@ -214,10 +214,12 @@ and reports what it compiled (`--report-fallbacks`); a candidate the build leave
 bytecode is never timed: it is rejected with the build's reason ("not compiled: ...",
 `measured.refused`, not carried to the next profile, whose pycc may compile it) and the
 check is built again without it. The timed runs keep the original module's import root
-on `sys.path` after the copy's, so a standalone module's siblings are found. Once
-pass 3 has run the profile is `verified`, and a verified profile selects only its
-measured winners: a function pass 3 did not build is never selected in a rejected
-one's place.
+on `sys.path` after the copy's, so a standalone module's siblings are found. A
+function is selected only with evidence from every pass that ran: once pass 2 has run
+the profile is `sampled` and only the functions it sampled (`sampled` on the entry)
+are selectable ("not sampled by pass 2"), and once pass 3 has run it is `verified` and
+only its measured winners are. A rejection frees a slot under `--select-max` but
+admits no function a pass did not examine.
 
 Pass 3 exists because of what PR 4 measured on mistune. Its 11 candidates (escape,
 `HTMLRenderer.text`, `InlineState.append_token`, the emphasis parser and its helpers)

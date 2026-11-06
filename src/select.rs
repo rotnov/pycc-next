@@ -229,6 +229,7 @@ pub(crate) fn resolve(
             max: flags.select_max.unwrap_or(defaults.max),
             outside: flags.select_outside.unwrap_or(defaults.outside),
             handled: flags.select_handled.unwrap_or(defaults.handled),
+            sampled_only: false,
             measured_only: false,
         },
     };

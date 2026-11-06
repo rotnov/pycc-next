@@ -12,6 +12,7 @@ fn entry(qualname: &str, ns: u64, callees: &[&str]) -> Entry {
         callees: callees.iter().map(|c| (format!("m:{c}:1"), 10)).collect(),
         arg_types: ArgTypes::new(),
         handled: 0,
+        sampled: true,
         measured: None,
     }
 }
@@ -24,6 +25,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         runs: 1,
         total_ns: 1000,
         functions,
+        sampled: true,
         verified: false,
     }
 }
