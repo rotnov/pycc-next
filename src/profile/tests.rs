@@ -180,8 +180,10 @@ fn the_region_keeps_functions_whose_calls_stay_inside_the_selection() {
         with("hub", 500, &[("m:leaf:1", 10), ("m:hub:1", 5), ("m:hub.<locals>.inner:1", 5)]),
         // No calls to Python functions at all.
         with("leaf", 400, &[]),
-        // Half of its calls leave: at the limit, kept.
+        // Half of its calls leave: not most inside, rejected.
         with("even", 300, &[("m:leaf:1", 1), ("*", 1)]),
+        // A third leave: kept.
+        with("most", 250, &[("m:leaf:1", 2), ("*", 1)]),
         // Mostly glue: rejected.
         with("glue", 200, &[("*", 3), ("m:leaf:1", 1)]),
         // Only selected through `glue`: rejected once `glue` is.
@@ -198,13 +200,18 @@ fn the_region_keeps_functions_whose_calls_stay_inside_the_selection() {
         [
             ("hub", None),
             ("leaf", None),
-            ("even", None),
+            ("even", Some("1 of its 2 calls to Python functions leave the selection")),
+            ("most", None),
             ("glue", Some("3 of its 4 calls to Python functions leave the selection")),
             ("caller", Some("1 of its 1 calls to Python functions leave the selection")),
         ]
     );
+    // At 0 no call may leave; at 1 only a function all of whose calls leave
+    // is rejected.
     let strict = select(1000, &input, Rule { share: 0.0, outside: 0.0, ..Rule::default() });
-    assert!(strict[2].rejected.is_some() && strict[0].rejected.is_none());
+    assert!(strict[3].rejected.is_some() && strict[0].rejected.is_none() && strict[1].rejected.is_none());
+    let loose = select(1000, &input, Rule { share: 0.0, outside: 1.0, ..Rule::default() });
+    assert!(loose[2].rejected.is_none() && loose[4].rejected.is_none());
 }
 
 #[test]

@@ -89,9 +89,9 @@ pub(crate) struct Rule {
     pub(crate) calls: u64,
     /// The most functions selected, by self time.
     pub(crate) max: usize,
-    /// The largest share of a function's calls to Python functions that may
-    /// leave the selection: its own nested code, itself and the other
-    /// selected functions are inside it.
+    /// The share of a function's calls to Python functions that leave the
+    /// selection must be under this (its own nested code, itself and the
+    /// other selected functions are inside it): at 0.5, most stay inside.
     pub(crate) outside: f64,
 }
 
@@ -189,7 +189,7 @@ impl Profile {
 /// The selection rule (section 2.3) over `entries` (current ones): eligible,
 /// at least `rule.share` of the run's total self time, at least `rule.calls`
 /// calls, and among the `rule.max` such functions with the most self time;
-/// then, of those, the ones at most `rule.outside` of whose calls to Python
+/// then, of those, the ones less than `rule.outside` of whose calls to Python
 /// functions leave the selection (the region, section 2.3).
 /// Every entry is decided, in order of self time (most first; then by name).
 pub(crate) fn select<'p>(
@@ -255,7 +255,7 @@ pub(crate) fn select<'p>(
                 .filter(|(callee, _)| !inside.contains(*callee) && !callee.starts_with(&nested))
                 .map(|(_, n)| n)
                 .sum();
-            if total > 0 && out as f64 > total as f64 * rule.outside {
+            if out > 0 && out as f64 >= total as f64 * rule.outside {
                 d.rejected = Some(format!(
                     "{out} of its {total} calls to Python functions leave the selection"
                 ));

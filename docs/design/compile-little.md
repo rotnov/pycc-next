@@ -166,7 +166,7 @@ when it is eligible, its profile entry is current, and:
 - its self time is at least 0.5% of the run's total;
 - it was called at least 50 times;
 - it ranks in the top 64 functions by self time;
-- at most half of its calls to Python functions leave the region. Calls to itself, to
+- most of its calls to Python functions stay inside the region: less than half leave it. Calls to itself, to
   its own nested functions and to the other selected functions stay inside. Rejecting a
   function can push its callers out, so this condition is applied until no function
   changes. A function that calls no Python function passes.

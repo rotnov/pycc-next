@@ -272,9 +272,9 @@ pub enum Command {
         /// The selection rule's most functions.
         #[arg(long, default_value_t = 64)]
         select_max: usize,
-        /// The selection rule's largest share of a function's calls to Python
-        /// functions that may leave the selection (each one a crossing between
-        /// compiled and interpreted code).
+        /// The selection rule: the share of a function's calls to Python
+        /// functions that leave the selection (each one a crossing between
+        /// compiled and interpreted code) must be under this.
         #[arg(long, default_value_t = 0.5)]
         select_outside: f64,
         /// Run no workload: read the profile `-o` names against PKG's current
