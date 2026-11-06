@@ -431,9 +431,9 @@ static int pycc_ext_exec_module(PyObject *module)
      * this thread (see `pycc_ext_mod.exec_target_key`) hands the outer one's
      * target back.
      */
-#ifdef PYCC_EXT_HAS_PRECOMPILED
-    /* The fallback source's code objects, for the body only
-     * (`src/ext_build/precompiled.rs`). */
+#ifdef PYCC_EXT_HAS_MODULE_CODE
+    /* The module's CPython code, for the body only
+     * (`src/ext_build/module_code.rs`). */
     if (pycc_ext_code_install(module) != 0) {
         Py_DECREF(classes);
         return -1;
@@ -445,7 +445,7 @@ static int pycc_ext_exec_module(PyObject *module)
         || PyThread_tss_set(pycc_ext_mod.exec_classes_key, classes) != 0) {
         (void)PyThread_tss_set(pycc_ext_mod.exec_target_key, saved_target);
         Py_DECREF(classes);
-#ifdef PYCC_EXT_HAS_PRECOMPILED
+#ifdef PYCC_EXT_HAS_MODULE_CODE
         pycc_ext_code_remove(module);
 #endif
         PyErr_SetString(PyExc_RuntimeError, "pycc: cannot record the executing module");
@@ -483,7 +483,7 @@ static int pycc_ext_exec_module(PyObject *module)
         pycc_ext_ns_deferred = 0;
         pycc_ext_ns_version = pycc_ext_ns_watch(pycc_ext_ns_dict, &pycc_ext_ns_counter);
     }
-#ifdef PYCC_EXT_HAS_PRECOMPILED
+#ifdef PYCC_EXT_HAS_MODULE_CODE
     pycc_ext_code_remove(module);
 #endif
     (void)PyThread_tss_set(pycc_ext_mod.exec_target_key, saved_target);

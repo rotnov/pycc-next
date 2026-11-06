@@ -2,7 +2,8 @@
 
 Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted,
 section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`), PR 4 (the switch,
-sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`). Tracking issue:
+sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`), PR 5 (the chunk machinery
+deleted, section 7 items 1-5; `src/ext_build/module_code.rs`). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -255,10 +256,13 @@ rejected with the reason.
   embedded source. The module's `__file__` and `__spec__.origin` name its `.py` file, as
   CPython's own would. Its loader has `get_code` and `get_source`.
 
-  As of PR 4, the whole source is one precompiled chunk of the existing chunk machinery,
-  run in the module's namespace. `__file__` and `__spec__.origin` name the `.py` file,
-  which ships beside the extension, so `inspect` and tracebacks read it. The loader
-  does not have `get_code` and `get_source` yet: PR 5 replaces the chunk machinery.
+  As of PR 5, the build compiles the module's source once with the target interpreter
+  and embeds the code object, marshalled with the interpreter's magic number
+  (`src/ext_build/module_code.rs`); the extension runs it in the module's namespace
+  (`module_code.c`), or `compile()`s the embedded source when the running interpreter's
+  magic number differs or it runs with `-O`. `__file__` and `__spec__.origin` name the
+  `.py` file, which ships beside the extension, so `inspect` and tracebacks read it. The
+  loader does not have `get_code` and `get_source` yet.
 - **Patching.** After the body has run, each selected function is patched in place, with
   the frameless forwarder mechanism v0.8 built (`src/ext/module/forward.c`; the hook is `patch.c`):
   - its `vectorcall` becomes a trampoline into the native body;

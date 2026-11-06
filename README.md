@@ -559,7 +559,7 @@ shim targets the 3.13 stable ABI, one `--ext` module or `cp313-abi3` wheel still
 imports on 3.13, 3.14 and 3.15, and a message the shim raises in a module follows the
 interpreter hosting it. The fast paths that read
 CPython's internal layouts -- compiled functions in real CPython frames, the attribute
-and module-global caches, `def`s made directly from precompiled bytecode -- know 3.13's
+and module-global caches -- know 3.13's
 and 3.15's layouts; on 3.14 a module runs without them (same results, slower; see
 `docs/DEVIATIONS.md`). CI no longer runs the suite against 3.13.
 

@@ -73,14 +73,16 @@ Accept (carried over from v0.11, not met there):
    - whole process >= 1.0x;
    - pydantic import stays >= 1.0x;
    - mistune's and pystache's imports and benchmarks no slower than at a92ee70.
-   **Status (PR 4 of the design):** non-strict `--ext` builds compile only the selected
+   **Status (PR 5 of the design):** non-strict `--ext` builds compile only the selected
    functions, and `pycc profile` selects only measured winners (it builds the candidates
-   and times the training workload against them). Locally, with the training profiles,
-   no candidate of pydantic (5), mistune (12) or pystache (0) is a measured winner yet,
-   so none gets an extension and every phase is at CPython's time (pydantic: 81
-   interleaved rounds, every median within 1% of CPython's); the three suites pass. The
-   gains wait for direct calls inside the selected region (PR 7, schema >= 1.05x) and
-   type-specialized bodies (PR 8).
+   and times the training workload against them). A served module runs one code object
+   marshalled at build time; the chunk tables, dataclass texts, forward references,
+   direct defs and `--exact-cpython` are deleted (pydantic's whole-module `.so` 1.81 MB
+   smaller). Locally, with the training profiles, mistune (12 candidates) and pystache (0)
+   have no measured winner, and pydantic's 5 candidates are kept or rejected run to run
+   within noise; every phase of the three is within CPython's interquartile range (31
+   interleaved rounds), and the three suites pass. The gains wait for direct calls
+   inside the selected region (PR 7, schema >= 1.05x) and type-specialized bodies (PR 8).
 
    Every step reports wall time, instructions, I1 misses and branch mispredictions, and the
    extension's size (the design's section 3). The three suites fail no test that passes
@@ -132,9 +134,9 @@ The plan:
 - most of what the levers built is deleted (the design's section 7).
 
 Accept 3 holds the targets, and the design's section 8 the ordered pull requests. Levers
-11 and 12, the chunk tables, mirrored imports and classes made once are slated for
-deletion once the switch (pull request 4) makes them unnecessary. Until then they stay,
-because deleting them earlier would regress pydantic's import.
+11 and 12 and the chunk tables are deleted (pull request 5, after the switch made them
+unnecessary); mirrored imports and classes made once go with non-strict module-body
+compilation (pull request 6).
 
 
 Each lever is measured locally against the merged head before it (PBS CPython 3.15.2,

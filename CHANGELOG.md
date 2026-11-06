@@ -23,15 +23,20 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   --branch-sim=yes`, compiled tree against CPython, with the extension's `.so` and `.text`
   size; the CI benchmark workflow publishes them. The per-function harness behind
   `docs/design/compile-little.md`'s section 1 moved to `bench/headroom/`.
-- `pycc build --exact-cpython` (with `--ext`): leaves out the import fast paths whose
-  effects CPython code could observe, so the module imports exactly as CPython runs its
-  source (`docs/DEVIATIONS.md` names each): the dataclass texts and forward references
-  below.
 - `bench/pydantic_check.py --time` (and the published CI benchmark) reports `process`
   alongside the workload's phases: each run's whole-process wall time, from starting the
   interpreter to its exit.
 
 ### Changed
+- A non-strict `--ext` module's CPython code (its whole source, which runs as bytecode,
+  and each published signature's wrapper) is compiled once at build time by the target
+  interpreter and embedded as one marshalled tuple of code objects, which the import
+  unmarshals as CPython loads a `.pyc` (`src/ext_build/module_code.rs`). The fallback
+  chunk tables, the dataclass texts and forward references compiled at build time, the
+  `def`s and signature wrappers made without running their code, and the `frozenset`
+  order fixes are gone with the fallback chunks they served
+  (`docs/design/compile-little.md`, section 7 items 1-5); `--select module` runs its
+  fallback statements with `exec(compile(...))`.
 - **Non-strict `--ext` builds compile little** (`docs/design/compile-little.md`,
   sections 2.1-2.4): a module runs its source as CPython bytecode, and only its
   *selected* functions are compiled, each patched into the function object CPython
@@ -75,24 +80,6 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   receiver and arguments are copied without an inline `rep movsq`. pydantic's warm schema
   phase takes about 4% less time (14.87 -> 14.24 ms median, 21 interleaved runs) and its
   define phase about 2% less (7.32 -> 7.18 ms).
-- An `--ext` module's dataclasses whose class statements run in CPython get the methods
-  `dataclasses` generates from code objects the build compiled: the build runs the target
-  interpreter's own `dataclasses` on a stand-in of each class (its fields, `field()`
-  flags, body names and bases of the module) and compiles every text it generates, and
-  while such a statement runs at import, `dataclasses`' `exec` is a builtin that runs the
-  pre-compiled code for a text equal to one of those, raising the same `compile` audit
-  event, and compiles any other text as before (`docs/DEVIATIONS.md`). pydantic's import
-  (33 of its 50 dataclass texts) runs about 45M fewer instructions (own share 139.8M ->
-  94.3M against CPython's 135.9M), mistune's 0.3M fewer.
-- An `--ext` module's `TypedDict` and `NamedTuple` classes whose statements run in CPython
-  get the forward references for their string annotations from code objects the build
-  compiled: while such a statement runs at import, `annotationlib`'s (`typing`'s on 3.13)
-  `compile` is a builtin that returns the pre-compiled code for a text equal to one of
-  those, raising the same `compile` audit event, and compiles any other text (one whose
-  compiling warns, or with an `int` literal of more than 640 digits, among them) as before
-  (`docs/DEVIATIONS.md`). A text several dataclasses (or classes) make now gets one
-  pre-compiled code object per use. pydantic's import (103 of the 132 references made
-  outside `pydantic_core`) runs about 5.3M fewer instructions (own share 94.5M -> 89.2M).
 - An `--ext` module's published class whose statement's bases are none, `object`, or
   compiled classes of its module made the same way is made once, when its statement
   runs, straight from its compiled layout, methods and slots: no template type is made
@@ -103,17 +90,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   running a `__del__` Python code assigns to it as `subtype_dealloc` did. pystache's
   import (16 classes made once) runs about 0.83M fewer instructions and 6 fewer page
   faults, pydantic's 0.74M fewer and 9 fewer faults, mistune's 0.15M fewer.
-- An `--ext` module's published signature wrapper whose defaults are constants (and
-  that guards no scalar parameter with a fallback twin) is tabled at build time as the
-  wrapper's own code object with its defaults and closure layout, and the import makes
-  the function directly with `types.FunctionType` instead of running the factory
-  chunk `_pycc_make` and calling it: pystache's import runs about 0.2M fewer
-  instructions, pydantic's about 0.85M (42 of its 53 wrappers). The wrappers behave
-  as before; each now raises one `function.__new__` audit event
-  (`docs/DEVIATIONS.md`).
 - An `--ext` module's import-time tables of names and sources (its interface names,
-  published class names, builtin exception names, precompiled fallback chunks and
-  their file names) are one string each indexed by offset, and its forward
+  published class names, builtin exception names, embedded sources and their
+  file names) are one string each indexed by offset, and its forward
   trampolines are picked by a `switch`, instead of arrays of pointers: each pointer
   was a dynamic relocation, and every page holding one is copied when the extension
   is loaded. Relocated pages: pydantic 81 -> 66, mistune 41 -> 35, pystache 20 -> 18;
@@ -137,10 +116,6 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   at the hashed slot of a large zero-filled table: the import touches a few consecutive
   pages of them instead of most pages, each a page fault. Minor faults of the import:
   pydantic 1349 -> 1249, mistune 382 -> 308, pystache 186 -> 149.
-- An `--ext` module's precompiled fallback chunk holding `frozenset` constants
-  rebuilds each in source order along the path the build recorded to it, instead of
-  walking every nested code object at import: pydantic's import runs 1.55M fewer
-  instructions (of about 143M). The constants iterate as before.
 - A `str` literal an `--ext` module only hands to CPython (a call's argument, a stored
   attribute, a subscript key) is made as a CPython `str` directly, on the first
   evaluation of the module's sites of that text, instead of as a native string that is
@@ -160,7 +135,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Supported versions: `--ext` modules and `pycc.build` wheels keep the `cp313-abi3`
   floor and import on CPython 3.13, 3.14 and 3.15. The fast paths that read CPython's
   internal layouts (compiled functions in real CPython frames, the attribute and
-  module-global caches, `def`s made directly from precompiled bytecode) now know 3.15's
+  module-global caches) now know 3.15's
   layouts as well as 3.13's; on 3.15 a module global rebound from Python reaches
   compiled code through one dict watcher shared by every pycc module, as 3.14 removed
   the dict version tag. A module imported by 3.14 runs without those fast paths, as

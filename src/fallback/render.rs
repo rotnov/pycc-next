@@ -24,19 +24,18 @@ pub(crate) struct Rendered {
     /// class statement's offset in `text`, and the attributes of `self`
     /// the method uses, which the frontend checks the carrier exposes.
     pub(super) attached: Vec<(String, u32, BTreeSet<String>)>,
-    /// The CPython source `text` runs, in an `--ext` module: chunk `k` is
-    /// what `__pycc_fallback_ns["__pycc_run__"](k)` runs (`CodeChunk`).
-    /// Empty elsewhere, where `text` calls
-    /// `compile()` itself.
+    /// The CPython source a selected module's `text` runs (`chunk_text`):
+    /// chunk `k` is what `__pycc_fallback_ns["__pycc_run__"](k)` runs.
+    /// Empty elsewhere, where `text` calls `compile()` itself.
     pub(super) chunks: Vec<CodeChunk>,
 }
 
-/// One piece of CPython source an `--ext` module runs with `exec`. The
-/// build compiles it ahead of time with the target interpreter and embeds
-/// the marshalled code object (`crate::ext_build::precompiled`), so an
-/// import unmarshals it as CPython loads a `.pyc` instead of compiling the
-/// source; the source is embedded too, compiled at run time when the
-/// running interpreter's bytecode differs.
+/// One piece of CPython source an `--ext` module runs with `exec`: a
+/// selected module's whole source, or a published signature's wrapper. The
+/// build compiles it with the target interpreter and embeds the marshalled
+/// code object (`crate::ext_build::module_code`), so an import unmarshals it
+/// as CPython loads a `.pyc`; the source is embedded too, compiled at run
+/// time when the running interpreter's bytecode differs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodeChunk {
     /// The source, padded with newlines so its line numbers are the
@@ -44,39 +43,11 @@ pub(crate) struct CodeChunk {
     pub(crate) source: String,
     /// The `co_filename` (the entry file's display path).
     pub(crate) filename: String,
-    /// Compiled with `from __future__ import annotations`.
-    pub(crate) future_annotations: bool,
-    /// Edits the build applies to the compiled code object before it is
-    /// embedded, which the source then skips at import (it still makes
-    /// them when it is compiled at run time).
-    pub(crate) rewrites: Vec<CodeRewrite>,
-}
-
-/// An edit of a nested code object of a chunk, made at build time instead
-/// of by the chunk's source at import (each `code.replace` cost an import
-/// about 13K instructions). `path` names the code objects from the chunk's
-/// own code down (`co_name` of each constant code object on the way).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CodeRewrite {
-    /// `__pycc_fallback_requal(code, old, new)` of `src/fallback/nested.rs`:
-    /// the code and every code object it holds re-qualified from `old` to
-    /// `new`.
-    Requal {
-        path: Vec<String>,
-        old: String,
-        new: String,
-    },
-    /// `code.replace(co_qualname=qualname, co_flags=code.co_flags | flags)`.
-    Retag {
-        path: Vec<String>,
-        qualname: String,
-        flags: u32,
-    },
 }
 
 /// The name, in an `--ext` module's namespace while its body runs, of the
 /// function running a fallback chunk (`CodeChunk`) in it, as `exec` of the
-/// chunk's code object would (`src/ext_build/precompiled.rs`).
+/// chunk's code object would (`src/ext_build/module_code.rs`).
 const RUN_HOOK: &str = "__pycc_run__";
 
 impl Rendered {
@@ -155,12 +126,12 @@ impl Plan {
                 for unit in self.attached() {
                     if let Some(source) = self.attached_source(unit) {
                         out.text.push_str("; ");
-                        out.text.push_str(&self.exec_text(&mut out.chunks, &source));
+                        out.text.push_str(&self.exec_text(&source));
                     }
                 }
                 // The nested statements' scaffolds (`nested`), defined
                 // before any compiled function can run one.
-                let nested = self.nested_preamble(&mut out.chunks);
+                let nested = self.nested_preamble();
                 out.text.push_str(&nested);
                 out.text.push('\n');
                 preamble = at..out.text.len() as u32;
@@ -194,7 +165,7 @@ impl Plan {
                 // line: a statement may follow it there after a `;`.
                 out.text.push_str(&"\n".repeat(chunk.matches('\n').count()));
                 let at = out.text.len() as u32;
-                out.text.push_str(&self.exec_text(&mut out.chunks, &padded));
+                out.text.push_str(&self.exec_text(&padded));
                 let end_at = out.text.len() as u32;
                 for unit in index..=last {
                     out.ranges[unit] = at..end_at;
@@ -211,7 +182,6 @@ impl Plan {
                 // its lines.
                 let line = src[..start].matches('\n').count();
                 let run = self.mirror_text(
-                    &mut out.chunks,
                     index,
                     &format!("{}{}", "\n".repeat(line), &src[start..end]),
                 );
@@ -285,41 +255,38 @@ impl Plan {
         }
     }
 
-    /// `exec`s the (padded) CPython source `source` in the namespace: in
-    /// an `--ext` module the code object of a new chunk of `chunks`
-    /// (`CodeChunk`), elsewhere `compile()`d where it runs.
-    pub(super) fn exec_text(&self, chunks: &mut Vec<CodeChunk>, source: &str) -> String {
-        self.exec_text_as(chunks, source, &self.display, self.defers_annotations)
+    /// `exec`s the (padded) CPython source `source` in the namespace,
+    /// `compile()`d where it runs.
+    pub(super) fn exec_text(&self, source: &str) -> String {
+        self.exec_text_as(source, &self.display, self.defers_annotations)
     }
 
     /// [`Self::exec_text`] of `source` compiled as file `filename`, with
     /// `from __future__ import annotations` when `future`.
-    pub(super) fn exec_text_as(
-        &self,
-        chunks: &mut Vec<CodeChunk>,
-        source: &str,
-        filename: &str,
-        future: bool,
-    ) -> String {
-        if self.publishes.variables {
-            chunks.push(CodeChunk {
-                source: source.to_string(),
-                filename: filename.to_string(),
-                future_annotations: future,
-                rewrites: Vec::new(),
-            });
-            return format!("{NS}[\"{RUN_HOOK}\"]({})", chunks.len() - 1);
-        }
+    pub(super) fn exec_text_as(&self, source: &str, filename: &str, future: bool) -> String {
+        // The flags argument of a `compile()` with `from __future__ import
+        // annotations`.
+        let flags = if future {
+            format!(", {BUILTINS}.__import__(\"__future__\").annotations.compiler_flag")
+        } else {
+            String::new()
+        };
         format!(
-            "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
+            "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{flags}), {NS})",
             py_str(source),
             py_str(filename),
-            if future {
-                self.compile_flags()
-            } else {
-                String::new()
-            }
         )
+    }
+
+    /// Runs the module's whole (padded) source `source` as chunk `k` of
+    /// `chunks`: the code object the build compiled for it
+    /// (`src/ext_build/module_code.rs`), as `exec` of it would.
+    pub(super) fn chunk_text(chunks: &mut Vec<CodeChunk>, source: &str, filename: &str) -> String {
+        chunks.push(CodeChunk {
+            source: source.to_string(),
+            filename: filename.to_string(),
+        });
+        format!("{NS}[\"{RUN_HOOK}\"]({})", chunks.len() - 1)
     }
 
     /// Mirrors compiled statement `index`, whose padded source is `source`,
@@ -331,7 +298,7 @@ impl Plan {
     /// a module compiled code models natively (`pycc_std`: its names are
     /// not objects compiled code holds), a wildcard, or a module outside
     /// `--ext`, runs `source` in CPython ([`Self::exec_text`]).
-    pub(super) fn mirror_text(&self, chunks: &mut Vec<CodeChunk>, index: usize, source: &str) -> String {
+    pub(super) fn mirror_text(&self, index: usize, source: &str) -> String {
         let native = |module: &str| {
             pycc_std::resolve_module(module.split('.').next().unwrap_or(module)).is_some()
         };
@@ -368,7 +335,7 @@ impl Plan {
                 .map(|store| format!("{NS}[\"{store}\"] = {store}"))
                 .collect::<Vec<_>>()
                 .join("; "),
-            _ => self.exec_text(chunks, source),
+            _ => self.exec_text(source),
         }
     }
 
@@ -490,7 +457,6 @@ impl Plan {
         out.text.push_str(&"\n".repeat(rest));
         let line = src[..start].matches('\n').count();
         let run = self.exec_text(
-            &mut out.chunks,
             &format!(
                 "{}{}\n{}",
                 "\n".repeat(line),
@@ -549,19 +515,6 @@ fn blank_line_after(src: &str, end: usize) -> Option<usize> {
     let next = line_end + 1;
     let next_end = next + src[next..].find('\n')?;
     src[next..next_end].trim().is_empty().then_some(next)
-}
-
-impl Plan {
-    /// The extra `compile()` arguments of fallback code: the module's
-    /// `from __future__ import annotations`, which `exec`'d source does not
-    /// inherit, so its annotations stay unevaluated there too.
-    fn compile_flags(&self) -> String {
-        if self.defers_annotations {
-            format!(", {BUILTINS}.__import__(\"__future__\").annotations.compiler_flag")
-        } else {
-            String::new()
-        }
-    }
 }
 
 /// The edits annotating every unannotated parameter and the return of

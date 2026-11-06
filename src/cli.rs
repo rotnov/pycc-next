@@ -52,14 +52,6 @@ pub struct ModeFlags {
     /// compiled code, and why (the diagnostic that made it fall back).
     #[arg(long)]
     pub report_fallbacks: bool,
-    /// `--ext`: leave out the import fast paths whose effects CPython code
-    /// could observe (each a row of docs/DEVIATIONS.md): a dataclass's
-    /// methods, and a `TypedDict`'s or `NamedTuple`'s forward references,
-    /// compiled at build time instead of from the texts `dataclasses` and
-    /// `typing` make at import. The module then imports exactly as CPython
-    /// runs its source.
-    #[arg(long)]
-    pub exact_cpython: bool,
     /// Which functions a non-strict `--ext` build compiles
     /// (docs/design/compile-little.md, section 2): `profile` (the default),
     /// the selection of `--profile`, or nothing without one, and then no
