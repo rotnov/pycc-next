@@ -175,3 +175,26 @@ fn a_workload_that_sets_up_its_environment_before_importing_is_measured() {
     assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
     assert_eq!(measured(&out, "work")["compiled"], true);
 }
+
+#[test]
+fn pass_3_refuses_an_interpreter_that_cannot_patch() {
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = package(&dir, "from pkg import m\nfor i in range(60):\n    m.work(20000)\n");
+    let out = dir.join("p.json");
+    // As on a CPython whose layouts the frames probe does not know.
+    let r = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .args(["profile".as_ref(), pkg.as_os_str(), "-o".as_ref(), out.as_os_str(), "--".as_ref()])
+        .arg(python())
+        .arg(&work)
+        .env("PYCC_NO_PATCH", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(!r.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("pass 3 cannot measure the compiled functions with this interpreter: ImportError: pycc: pkg.m: the selected functions cannot be patched"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("or pass --no-verify"), "{stderr}");
+    assert!(!out.exists(), "no verdict is recorded");
+}

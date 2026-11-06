@@ -1005,12 +1005,48 @@ static PyMethodDef pycc_ext_forward_def = {
  * its code's qualified name and first line are the selected function's.
  * Each lift is then unbound from the namespace: it was published only for
  * this. */
+/* Whether an environment variable is set to something other than "" or
+ * "0". */
+static int pycc_fwd_env_on(const char *name)
+{
+    const char *value = getenv(name);
+
+    return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+/* With no patching on the running interpreter (the frames probe failed: a
+ * CPython other than 3.13 and 3.15, or `PYCC_NO_PATCH` set), the selected
+ * functions would run as their bytecode: never silently. Under
+ * `PYCC_REQUIRE_PATCH` (`pycc profile`'s pass 3, which must not time
+ * bytecode against bytecode) the import fails; otherwise it warns once per
+ * module. 0, or -1 with an exception set. */
+static int pycc_fwd_patch_unavailable(PyObject *ns)
+{
+    PyObject *name = PyDict_GetItemString(ns, "__name__");
+
+    if (name == NULL) {
+        name = Py_None;
+    }
+    if (pycc_fwd_env_on("PYCC_REQUIRE_PATCH")) {
+        PyErr_Format(PyExc_ImportError,
+                     "pycc: %S: the selected functions cannot be patched on this interpreter "
+                     "(patching needs CPython 3.13's or 3.15's layouts): they would run as bytecode",
+                     name);
+        return -1;
+    }
+    return PyErr_WarnFormat(PyExc_RuntimeWarning, 1,
+                            "pycc: %S: the selected functions run as bytecode: patching them needs "
+                            "CPython 3.13's or 3.15's layouts",
+                            name);
+}
+
 static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
     PyObject *ns = PyEval_GetGlobals();
     PyccExtModule *m = (PyccExtModule *)PyCapsule_GetPointer(self, PYCC_FWD_CAPSULE);
     PyObject *owner = NULL, *in, *prefix = PyUnicode_FromString("");
     Py_ssize_t i;
+    int available;
 
     if (m == NULL || prefix == NULL) {
         Py_XDECREF(prefix);
@@ -1019,6 +1055,11 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
     if (ns == NULL || !PyDict_Check(ns)) {
         Py_DECREF(prefix);
         Py_RETURN_NONE;
+    }
+    available = pycc_fwd_original != NULL && !pycc_fwd_env_on("PYCC_NO_PATCH");
+    if (!available && nargs > 0 && pycc_fwd_patch_unavailable(ns) != 0) {
+        Py_DECREF(prefix);
+        return NULL;
     }
     in = ns;
     for (i = 0; i < nargs; i++) {
@@ -1060,7 +1101,7 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
         want.qualname = PyUnicode_FromFormat("%U%U", prefix, args[i]);
         want.firstlineno = (int)(flags >> 1);
         want.uses_class = (int)(flags & 1);
-        if (want.qualname != NULL && want.target != NULL && pycc_fwd_original != NULL
+        if (want.qualname != NULL && want.target != NULL && available
             && in != NULL && (obj = pycc_fwd_lookup(in, args[i])) != NULL) {
             Py_INCREF(want.target);
             pycc_fwd_walk(m, ns, obj, 0, &want);

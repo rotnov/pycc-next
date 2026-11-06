@@ -106,6 +106,45 @@ fn select_all_compiles_every_eligible_function_and_behaves_as_the_source() {
     assert_eq!(text(&o), "ExtensionFileLoader True\nhot m Box.total\n");
 }
 
+/// Where the selected functions cannot be patched (a CPython whose layouts
+/// the frames probe does not know, simulated by `PYCC_NO_PATCH`), they run
+/// as their bytecode, never silently: the import warns, and under
+/// `PYCC_REQUIRE_PATCH` it fails.
+#[test]
+fn an_interpreter_that_cannot_patch_says_so() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let (dir, _) = build(&scratch, &["--select", "all"]);
+    let run = |env: &[(&str, &str)]| {
+        Command::new(python())
+            .args(["-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import m; m.main()"])
+            .arg(&dir)
+            .envs(env.iter().copied())
+            .output()
+            .unwrap()
+    };
+    let o = run(&[("PYCC_NO_PATCH", "1")]);
+    assert!(o.status.success(), "{}", text(&o));
+    let stderr = String::from_utf8_lossy(&o.stderr).replace('\r', "");
+    assert!(
+        stderr.contains("RuntimeWarning: pycc: m: the selected functions run as bytecode: patching them needs"),
+        "{stderr}"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout).replace('\r', "").replace(dir.to_str().unwrap(), "DIR"),
+        run_main(&scratch.join("plain"))
+    );
+    let o = run(&[("PYCC_NO_PATCH", "1"), ("PYCC_REQUIRE_PATCH", "1")]);
+    assert!(!o.status.success());
+    assert!(
+        text(&o).contains("ImportError: pycc: m: the selected functions cannot be patched on this interpreter"),
+        "{}",
+        text(&o)
+    );
+    // Patched, it neither warns nor fails.
+    let o = run(&[("PYCC_REQUIRE_PATCH", "1")]);
+    assert!(o.status.success() && !text(&o).contains("RuntimeWarning"), "{}", text(&o));
+}
+
 #[test]
 fn without_a_profile_nothing_is_selected_and_no_extension_is_built() {
     let scratch = ScratchDir::new("select_fn").unwrap();

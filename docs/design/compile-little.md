@@ -254,6 +254,11 @@ rejected with the reason.
   The function object, its `__code__`, `__defaults__`, `__wrapped__` chains and its
   identity stay CPython's. A decorator that wrapped the function keeps calling the
   patched object. A function whose `__code__` is later replaced runs as bytecode.
+- **Where patching is unavailable.** The trampoline writes CPython 3.13's and 3.15's
+  function layouts. On another CPython (3.14) the selected functions run as bytecode, and
+  the import says so with a `RuntimeWarning`; under `PYCC_REQUIRE_PATCH` the import fails
+  instead, which is how pass 3 refuses to time bytecode against bytecode
+  (`PYCC_NO_PATCH` simulates such an interpreter).
 - **Before the patch.** A function called while the module body runs (before the patch)
   runs as bytecode. That is correct, only slower.
 

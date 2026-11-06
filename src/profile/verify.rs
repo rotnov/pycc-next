@@ -307,9 +307,11 @@ fn key(e: &super::Entry) -> FunctionKey {
 fn time(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, String> {
     let output = driver
         .command("time", out, &[], workload, &[])
+        .env("PYCC_REQUIRE_PATCH", "1")
         .output()
         .map_err(|e| format!("cannot run {}: {e}", driver.python.to_string_lossy()))?;
     if !output.status.success() {
+        unpatchable(&output.stderr)?;
         return Err(format!(
             "the profile's time pass failed ({}):\n{}{}",
             output.status,
@@ -324,17 +326,34 @@ fn time(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, S
     Ok(Driver::json::<Timed>(out)?.ns)
 }
 
+/// The error for a timed run whose compiled copy could not patch its
+/// functions (`forward.c`, under `PYCC_REQUIRE_PATCH`): its verdicts would
+/// compare bytecode with bytecode, so none is recorded.
+fn unpatchable(stderr: &[u8]) -> Result<(), String> {
+    let stderr = String::from_utf8_lossy(stderr);
+    match stderr.lines().find(|line| line.contains("cannot be patched on this interpreter")) {
+        Some(line) => Err(format!(
+            "pass 3 cannot measure the compiled functions with this interpreter: {}
+             (profile with CPython 3.13 or 3.15, or pass --no-verify)",
+            line.trim()
+        )),
+        None => Ok(()),
+    }
+}
+
 /// One run of the workload under callgrind: its instruction count.
 fn instructions(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<i64, String> {
     let file = format!("--callgrind-out-file={}", out.with_extension("cg").display());
     let wrapper: [&OsStr; 3] = ["valgrind".as_ref(), "--tool=callgrind".as_ref(), file.as_ref()];
     let output = driver
         .command("time", out, &[], workload, &wrapper)
+        .env("PYCC_REQUIRE_PATCH", "1")
         .output()
         .map_err(|e| format!("--verify-instructions needs valgrind: {e}"))?;
     let _ = std::fs::remove_file(out.with_extension("cg"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
+        unpatchable(&output.stderr)?;
         return Err(format!("the profile's time pass under callgrind failed ({}):\n{stderr}", output.status));
     }
     stderr
