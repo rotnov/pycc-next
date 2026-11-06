@@ -170,7 +170,6 @@ mod deferred_classes;
 mod exports;
 mod foreign_class_boundary;
 mod generated_c;
-mod hot_api;
 mod getset;
 mod init_only_publication;
 mod instance_boundary;

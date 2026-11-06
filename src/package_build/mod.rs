@@ -45,10 +45,7 @@ pub(crate) use unit::{MEMBERS_HEADER_NAME, member_header, members_header};
 use std::sync::OnceLock;
 
 /// The C source of the package unit, compiled once per package build.
-pub(crate) const FINDER_C: &str = concat!(
-    include_str!("../ext/module/hot_api.c"),
-    include_str!("../ext/package/finder.c")
-);
+pub(crate) const FINDER_C: &str = include_str!("../ext/package/finder.c");
 
 /// The member a `pycc build --package-member` process compiles: one module
 /// of a package built whole, which ends in objects for the package build to
