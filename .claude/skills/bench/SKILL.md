@@ -48,6 +48,11 @@ description: Use when measuring pycc-next performance, after any codegen/runtime
    instructions, I1 misses and branch mispredictions together with interleaved wall time
    and the extension's size (`docs/design/compile-little.md`, section 3): fewer
    instructions with more I1 misses or more wall time is not a win.
+   `bench/pydantic_check.py --cachegrind [PYTHON]` does this for pydantic, per phase
+   (each phase alone, `--toggle-collect` around `bench/headroom/hrmark.c`'s region)
+   and for the whole process, compiled tree against CPython, plus the extension's
+   `.so` and `.text` size; `bench.yml` publishes it. `bench/headroom/` holds the
+   per-function replay harness (`docs/design/compile-little.md`, section 10).
    `bench/package_check.py --instructions` bounds are CI's regression gate in `ci.yml`.
    `PYCC_DUMP_LLVM=<path> pycc build ...` writes the IR before (`<path>.pre.ll`) and after
    (`<path>`) optimization; `opt -passes='default<O3>'` on the `.pre.ll` reproduces a release

@@ -178,7 +178,7 @@ def markdown(doc: dict) -> str:
                 out.append(f"- {b['package']} {b['version']}: {b['tool']} ({b['mode']}): "
                            f"{b['summary']}{after}{timed}")
             out.append("")
-    if "pydantic" in doc:
+    if "pydantic" in doc and "phases" in doc["pydantic"]["pydantic"]:
         d = doc["pydantic"]["pydantic"]
         out += [f"## pydantic {d['version']} (`bench/pydantic_check.py --time`, {d['runs']} "
                 f"runs, each phase x{d['repeat']} per run, mean per repetition; "
@@ -202,6 +202,22 @@ def markdown(doc: dict) -> str:
                 after = f"; the workload: {b['workload']}" if "workload" in b else ""
                 timed = "; timed" if b.get("timed") else ""
                 out.append(f"- {b['tool']} ({b['mode']}): {b['summary']}{after}{timed}")
+            out.append("")
+    if "pydantic" in doc and doc["pydantic"]["pydantic"].get("cachegrind"):
+        cg = doc["pydantic"]["pydantic"]["cachegrind"]
+        if cg:
+            out += [f"### pydantic under callgrind (`--cachegrind`: `--cache-sim=yes "
+                    f"--branch-sim=yes`, `PYTHONHASHSEED=0`, each phase x{cg['repeat']}, "
+                    f"millions)", "",
+                    f"Extension: {cg['so_bytes']} bytes, `.text` {cg['text_bytes']} bytes.", "",
+                    "| phase | instructions CPython / pycc-next | I1 misses | "
+                    "cond. mispredicts | ind. mispredicts |", "|---|---|---|---|---|"]
+            for ph, c in cg["counts"]["compiled"].items():
+                p = cg["counts"]["CPython"][ph]
+                out.append(f"| {ph} | " + " | ".join(
+                    f"{p[k] / 1e6:.2f} / {c[k] / 1e6:.2f}"
+                    for k in ("instructions", "i1_misses", "mispredicts_cond",
+                              "mispredicts_ind")) + " |")
             out.append("")
     return "\n".join(out)
 

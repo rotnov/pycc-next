@@ -5,7 +5,7 @@ import sys, time, json, os
 HERE = os.path.dirname(os.path.abspath(__file__))
 tree, REPEAT, INJECT, MARK = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1", sys.argv[4]
 DUMP = sys.argv[5] if len(sys.argv) > 5 else None
-src = open(os.path.join(HERE, "..", "..", "..", "bench", "pydantic_workload.py")).read()
+src = open(os.path.join(HERE, "..", "pydantic_workload.py")).read()
 src = src[: src.index("\nmain()\n")]
 sys.path.insert(0, HERE)
 import hrmark

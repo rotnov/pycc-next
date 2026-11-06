@@ -1,6 +1,6 @@
 # Library compilation: compile little, compile well
 
-Status: plan (2026-11-06), nothing below is implemented yet. Tracking issue:
+Status: in progress. Implemented: PR 1 (measurement, section 3). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -15,7 +15,7 @@ fallback chunks. On pydantic this does not pay.
 
 These figures were measured locally on 2026-11-06 with PBS CPython 3.15.2 on a 4-vCPU
 x86_64 VM, running `bench/pydantic_workload.py`'s phases with `PYTHONHASHSEED=0`. The
-harness is in [`headroom/`](headroom/) (section 10).
+harness is in [`bench/headroom/`](../../bench/headroom/) (section 10).
 
 1. **Compiling everything runs about as many instructions as the interpreter.** Over
    import, define and schema the compiled tree runs 1175M instructions against CPython's
@@ -35,7 +35,7 @@ harness is in [`headroom/`](headroom/) (section 10).
    is a 10.9 MB `.so`, mostly out-of-line helpers, and both it and the interpreter's own
    hot code compete for the cache.
 3. **Ideal code for the hot functions beats both.** Three hot functions were written by
-   hand as ideal C (`headroom/hrfast.c`): `json_schema._deduplicate_schemas`,
+   hand as ideal C (`bench/headroom/hrfast.c`): `json_schema._deduplicate_schemas`,
    `json_schema._make_json_hashable` and `_config.ConfigWrapper.__getattr__`. They were
    injected into plain CPython, with every other function left as bytecode. Replaying the
    exact inputs recorded during define and schema gave these times (median ms) and
@@ -418,8 +418,8 @@ acceptance numbers stay.
 
 ## 10. The headroom harness
 
-[`headroom/`](headroom/) holds the code behind section 1. PR 1 moves it to `bench/`.
-`PYTHONHASHSEED=0` throughout:
+[`bench/headroom/`](../../bench/headroom/) holds the code behind section 1 (moved there
+from this directory by PR 1). `PYTHONHASHSEED=0` throughout:
 
 - `hrfast.c` is the hand-written ideal C for the three functions. It returns the same
   results and raises the same exceptions as the Python source for the inputs that occur,
@@ -437,3 +437,13 @@ acceptance numbers stay.
 Build both C files against the interpreter's headers as ordinary extension modules (for
 example `cc -O2 -shared -fPIC $(python3-config --includes) hrfast.c -o
 hrfast$(python3-config --extension-suffix)`).
+
+`bench/pydantic_check.py --cachegrind [PYTHON]` measures section 3's counts for every
+pull request: each phase of `bench/pydantic_workload.py` alone, `define+schema` in one
+process (as point 2 of section 1 counted them) and the whole process, each under
+callgrind with `hrmark`'s region toggled, plus the extension's `.so` and `.text` size.
+Rerun on section 1's own trees (built 2026-11-05, before #75 and #77), it gives
+736.8M / 6.69M / 11.31M (instructions, I1 misses, conditional mispredictions) for the
+compiled tree and 710.7M / 3.39M / 9.27M for CPython over define and schema, within 1%
+of section 1. On main at 178cc87 it gives 722.4M / 6.74M / 10.80M against 704.5M /
+3.39M / 9.18M.

@@ -48,6 +48,9 @@ jobs:
             -r .github/bench-requirements.txt -r .github/competitor-requirements.txt
       - name: Install LLVM 22
         run: scripts/linux_llvm.sh
+      # callgrind for bench/pydantic_check.py --cachegrind.
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
       - name: Runner
@@ -70,7 +73,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: >-
           python3 bench/pydantic_check.py --time --competitors --runs "$PYDANTIC_RUNS"
-          --json bench-out/pydantic.json
+          --cachegrind --json bench-out/pydantic.json
       - name: Publish
         if: ${{ !cancelled() }}
         run: |

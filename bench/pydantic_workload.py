@@ -1,9 +1,16 @@
 """The pydantic timing workload of `bench/pydantic_check.py --time` (v0.7 accept 4).
 
 Usage: python3 -I bench/pydantic_workload.py TREE REPEAT [PHASES]
+       PYDANTIC_WORKLOAD_MARK=PHASE:DIR python3 -I bench/pydantic_workload.py ...
   TREE    the directory holding the `pydantic` package to time (compiled or not).
   REPEAT  how many times each phase runs; the time printed is the mean per run.
   PHASES  comma-separated phases after `define` (default `schema,roundtrip`).
+  PYDANTIC_WORKLOAD_MARK
+          run PHASE (all its repetitions; `define+schema`: both, each in its own
+          call) inside `hrmark.run`, imported from DIR
+          (`bench/headroom/hrmark.c`, built as an extension module), so that
+          `valgrind --tool=callgrind --toggle-collect=hr_mark_region` counts that
+          phase alone (`bench/pydantic_check.py --cachegrind`).
 
 Prints one JSON object, seconds per phase:
   import     `import pydantic` and the names used here, once (stdlib imported before).
@@ -20,6 +27,7 @@ import datetime
 import decimal
 import enum
 import json
+import os
 import sys
 import time
 import typing
@@ -28,13 +36,36 @@ import uuid
 sys.path.insert(0, sys.argv[1])
 REPEAT = int(sys.argv[2])
 PHASES = sys.argv[3].split(",") if len(sys.argv) > 3 else ["schema", "roundtrip"]
+MARK = os.environ.get("PYDANTIC_WORKLOAD_MARK", "")
+if MARK:
+    MARK, _dir = MARK.split(":", 1)
+    MARK = MARK.split("+")
+    sys.path.insert(0, _dir)
+    import hrmark
+
+
+def phase(name, fn, *args):
+    """`fn(*args)`, inside `hrmark.run` when `name` is the marked phase."""
+    if name not in MARK:
+        return fn(*args)
+    out = []
+    hrmark.run(lambda: out.append(fn(*args)))
+    return out[0]
+
+
+def imports():
+    global pydantic, BaseModel, ConfigDict, Field, TypeAdapter, computed_field
+    global field_serializer, field_validator, model_validator, pdataclass
+    import pydantic
+    from pydantic import (
+        BaseModel, ConfigDict, Field, TypeAdapter, computed_field, field_serializer,
+        field_validator, model_validator,
+    )
+    from pydantic.dataclasses import dataclass as pdataclass
+
+
 t0 = time.perf_counter()
-import pydantic  # noqa: E402
-from pydantic import (  # noqa: E402
-    BaseModel, ConfigDict, Field, TypeAdapter, computed_field, field_serializer,
-    field_validator, model_validator,
-)
-from pydantic.dataclasses import dataclass as pdataclass  # noqa: E402
+phase("import", imports)
 times = {"import": time.perf_counter() - t0}
 assert pydantic.__file__.startswith(sys.argv[1]), pydantic.__file__
 
@@ -179,12 +210,13 @@ def roundtrip(models, data, page):
 def main():
     # `Page[User]` (in define()) walks `sys._getframe(3)` to find its caller, which
     # needs that many frames above it: define() runs three calls deep in both trees.
-    models, times["define"] = timed(define)
+    models, times["define"] = phase("define", timed, define)
     if "schema" in PHASES:
-        times["schema"] = timed(schemas, models)[1]
+        times["schema"] = phase("schema", timed, schemas, models)[1]
     if "roundtrip" in PHASES:
         data = [sample(i) for i in range(200)]
-        times["roundtrip"] = timed(roundtrip, models, data, {"items": data[:20], "total": 20})[1]
+        times["roundtrip"] = phase("roundtrip", timed, roundtrip, models, data,
+                                   {"items": data[:20], "total": 20})[1]
 
 
 main()

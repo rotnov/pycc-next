@@ -18,6 +18,7 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
                                        [--jobs N] [--tests PYTHON]
                                        [--time [PYTHON]] [--runs N] [--repeat R]
                                        [--separate] [--json PATH] [--competitors]
+                                       [--cachegrind [PYTHON]] [--cg-repeat R]
                                        [MODULE ...]
   MODULE   build only the modules whose path contains one of these strings
            (implies --separate).
@@ -47,6 +48,20 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
   --json PATH
            with --time, also write every sample per phase and tree and their
            summaries (`bench/stats.py`).
+  --cachegrind
+           also count, per phase and for the whole process, the instructions, I1
+           misses and branch mispredictions of the compiled tree and of the unchanged
+           sources, with PYTHON (default: this interpreter), under `valgrind
+           --tool=callgrind --cache-sim=yes --branch-sim=yes` with
+           `PYTHONHASHSEED=0` (`docs/design/compile-little.md`, section 3). Each phase
+           is its own process, the phase run inside `bench/headroom/hrmark.c`'s
+           `hr_mark_region` (built here with `cc` against PYTHON's headers) and
+           callgrind collecting only there (`--toggle-collect`); `define+schema`
+           counts both phases of one process, as docs/design/compile-little.md's
+           section 1 does. Each phase is repeated R
+           (`--cg-repeat`, default 5) times. One discarded warm-up run per tree comes
+           first. Also prints the size of the compiled tree's extensions (`.so` and
+           their `.text`). With --json, written under `cachegrind`.
   --competitors
            with --time, also build pydantic (but `pydantic.v1`), unchanged, with
            Cython and with mypyc (`bench/competitors.py`; Cython in its default
@@ -163,6 +178,88 @@ def time_trees(python: str, trees: dict[str, pathlib.Path], cwd: pathlib.Path,
     return out
 
 
+HEADROOM = pathlib.Path(__file__).resolve().parent / "headroom"
+CG_FIELDS = {"instructions": r"I\s+refs:\s+([\d,]+)",
+             "i1_misses": r"I1\s+misses:\s+([\d,]+)",
+             "mispredicts_cond": r"Mispredicts:\s+[\d,]+\s+\(\s*([\d,]+) cond",
+             "mispredicts_ind": r"Mispredicts:\s+[\d,]+\s+\(\s*[\d,]+ cond \+\s+([\d,]+) ind"}
+
+
+# The phases callgrind counts: each alone, define and schema together in one
+# process (as docs/design/compile-little.md's section 1 measured them), and
+# the whole process.
+CG_ROWS = (*PHASES, "define+schema", "process")
+
+
+def build_hrmark(python: str, out: pathlib.Path) -> pathlib.Path:
+    """Builds `bench/headroom/hrmark.c` against `python`'s headers into `out`."""
+    info = subprocess.run([python, "-c", "import sysconfig; print(sysconfig.get_paths()['include']);"
+                           "print(sysconfig.get_config_var('EXT_SUFFIX'))"],
+                          capture_output=True, text=True, check=True).stdout.split()
+    out.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["cc", "-O2", "-shared", "-fPIC", "-I", info[0], str(HEADROOM / "hrmark.c"),
+                    "-o", str(out / ("hrmark" + info[1]))], check=True)
+    return out
+
+
+def callgrind(python: str, tree: pathlib.Path, cwd: pathlib.Path, mark: str | None,
+              repeat: int, hrmark: pathlib.Path) -> dict[str, int]:
+    """One callgrind run of the workload on `tree`: of phase `mark` alone, or of the
+    whole process when `mark` is None."""
+    env = dict(os.environ, PYTHONHASHSEED="0")
+    cmd = ["valgrind", "--tool=callgrind", "--cache-sim=yes", "--branch-sim=yes",
+           f"--callgrind-out-file={cwd / 'callgrind.out'}"]
+    if mark:
+        env["PYDANTIC_WORKLOAD_MARK"] = f"{mark}:{hrmark}"
+        cmd.append("--toggle-collect=hr_mark_region")
+    r = subprocess.run([*cmd, python, "-I", str(WORKLOAD), str(tree.resolve()), str(repeat)],
+                       cwd=cwd, capture_output=True, text=True, timeout=7200, env=env)
+    if r.returncode != 0:
+        sys.exit(f"callgrind failed on {tree}:\n{r.stderr[-4000:]}")
+    out = {}
+    for k, rx in CG_FIELDS.items():
+        m = re.search(rx, r.stderr)
+        if not m:
+            sys.exit(f"no {k} in callgrind's output:\n{r.stderr[-4000:]}")
+        out[k] = int(m[1].replace(",", ""))
+    return out
+
+
+def cachegrind(python: str, trees: dict[str, pathlib.Path], cwd: pathlib.Path,
+               repeat: int, hrmark: pathlib.Path) -> dict[str, dict[str, dict[str, int]]]:
+    """Callgrind counts per tree and per row of `CG_ROWS` (`process`: the whole run)."""
+    for tree in trees.values():
+        subprocess.run([python, "-I", str(WORKLOAD), str(tree.resolve()), "1"], cwd=cwd,
+                       capture_output=True, check=True, timeout=900)
+    return {name: {row: callgrind(python, tree, cwd, None if row == "process" else row,
+                                  repeat, hrmark) for row in CG_ROWS}
+            for name, tree in trees.items()}
+
+
+def so_sizes(tree: pathlib.Path) -> dict[str, int]:
+    """Total bytes of the extensions under `tree`, and of their `.text` sections."""
+    files = [q for q in tree.rglob("*") if q.suffix in (".so", ".pyd")]
+    text = 0
+    for q in files:
+        r = subprocess.run(["size", "-A", str(q)], capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            f = line.split()
+            if f and f[0] == ".text":
+                text += int(f[1])
+    return {"so_bytes": sum(q.stat().st_size for q in files), "text_bytes": text}
+
+
+def report_cachegrind(counts: dict[str, dict[str, dict[str, int]]], sizes: dict[str, int]) -> None:
+    """Prints the callgrind counts in millions, compiled against CPython."""
+    print(f"callgrind (millions)  {'instructions':>22} {'I1 misses':>18} "
+          f"{'cond mispredicts':>18} {'ind mispredicts':>18}")
+    print(f"{'phase':10} {'':10}" + "".join(f" {'compiled':>8} {'CPython':>8} " for _ in CG_FIELDS))
+    for row in CG_ROWS:
+        c, p = counts["compiled"][row], counts["CPython"][row]
+        print(f"{row:21}" + "".join(f" {c[k] / 1e6:8.2f} {p[k] / 1e6:8.2f} " for k in CG_FIELDS))
+    print(f"extension size: {sizes['so_bytes']} bytes, .text {sizes['text_bytes']} bytes")
+
+
 def competitor_trees(src: pathlib.Path, tmp: pathlib.Path, cwd: pathlib.Path, python: str,
                      jobs: int) -> tuple[dict[str, pathlib.Path], list[dict]]:
     """Builds pydantic (but `pydantic.v1`) with Cython and with mypyc
@@ -231,6 +328,8 @@ def main() -> int:
     p.add_argument("--separate", action="store_true")
     p.add_argument("--json")
     p.add_argument("--competitors", action="store_true")
+    p.add_argument("--cachegrind", nargs="?", const=sys.executable)
+    p.add_argument("--cg-repeat", type=int, default=5)
     a = p.parse_args()
     archive = package_check.fetch(PYDANTIC, pathlib.Path(a.cache))
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -267,7 +366,7 @@ def main() -> int:
             sys.stdout.flush()
         print(f"TOTAL: {total - fell_total}/{total} functions native, "
               f"{failed} modules failed to build")
-        if not a.tests and not a.time:
+        if not a.tests and not a.time and not a.cachegrind:
             return 1 if failed else 0
         for py in mods:
             # A module whose separate build failed stays Python.
@@ -275,32 +374,42 @@ def main() -> int:
                     q.name.startswith(py.stem + ".") and q.suffix in (".so", ".pyd")
                     for q in py.parent.iterdir()):
                 py.unlink()
+        plain = tmp / "plain"
+        shutil.copytree(src / "pydantic", plain / "pydantic")
+        work = tmp / "work"
+        work.mkdir()
+        doc: dict = {"version": PYDANTIC.version, "native": f"{total - fell_total}/{total}"}
+        if a.cachegrind:
+            cgpy = str(pathlib.Path(a.cachegrind).absolute()) if "/" in a.cachegrind \
+                else a.cachegrind
+            counts = cachegrind(cgpy, {"compiled": tree, "CPython": plain}, work, a.cg_repeat,
+                                build_hrmark(cgpy, tmp / "hrmark"))
+            sizes = so_sizes(tree / "pydantic")
+            report_cachegrind(counts, sizes)
+            doc["cachegrind"] = {"repeat": a.cg_repeat, "counts": counts, **sizes}
+            sys.stdout.flush()
         if a.time:
-            plain = tmp / "plain"
-            shutil.copytree(src / "pydantic", plain / "pydantic")
-            work = tmp / "work"
-            work.mkdir()
             python = str(pathlib.Path(a.time).absolute()) if "/" in a.time else a.time
             others, builds = competitor_trees(src, tmp, work, python, a.jobs) \
                 if a.competitors else ({}, [])
             times = time_trees(python, {"compiled": tree, "CPython": plain, **others}, work,
                                a.runs, a.repeat)
             report(times)
-            if a.json:
-                pathlib.Path(a.json).write_text(json.dumps({"pydantic": {
-                    "competitors": {"versions": competitors.versions(), "builds": builds,
-                                    "modes": {b["tool"]: b["mode"] for b in builds
-                                              if b.get("timed")}},
-                    "version": PYDANTIC.version, "runs": a.runs, "repeat": a.repeat,
-                    "native": f"{total - fell_total}/{total}",
-                    "phases": {ph: {"seconds": {side: stats.summary([r[ph] for r in rs])
-                                                for side, rs in times.items()},
-                                    "ratio": statistics.median(r[ph] for r in times["CPython"])
-                                    / statistics.median(r[ph] for r in times["compiled"])}
-                               for ph in ROWS}}}, indent=1))
-            sys.stdout.flush()
-            if not a.tests:
-                return 1 if failed else 0
+            doc.update({
+                "competitors": {"versions": competitors.versions(), "builds": builds,
+                                "modes": {b["tool"]: b["mode"] for b in builds
+                                          if b.get("timed")}},
+                "runs": a.runs, "repeat": a.repeat,
+                "phases": {ph: {"seconds": {side: stats.summary([r[ph] for r in rs])
+                                            for side, rs in times.items()},
+                                "ratio": statistics.median(r[ph] for r in times["CPython"])
+                                / statistics.median(r[ph] for r in times["compiled"])}
+                           for ph in ROWS}})
+        if a.json:
+            pathlib.Path(a.json).write_text(json.dumps({"pydantic": doc}, indent=1))
+        sys.stdout.flush()
+        if not a.tests:
+            return 1 if failed else 0
         shutil.copytree(src / "tests", tree / "tests")
         shutil.copy(src / "pyproject.toml", tree / "pyproject.toml")
         tests = str(pathlib.Path(a.tests).absolute()) if "/" in a.tests else a.tests
