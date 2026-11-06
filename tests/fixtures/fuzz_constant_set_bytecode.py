@@ -21,3 +21,18 @@ def f():
 b1_f0(0, 1)
 f()
 print({40, 8, 0, 16}, {-1, -9, 7})
+
+
+def mixed():
+    # Equal values of different types fold into different constants.
+    a = {1, 8, 0}
+    b = {8.0, 1.0, 0.0}
+    c = {1, True, 9, 17}
+    d = {0, 0.0, False, 8, 16}
+    e = {(1, 8.0), (8, 1), (0, 0.0)}
+    f = {(1.0, 8), (8, 1), (0.0, 0)}
+    g = {True, 8, 16}
+    return a, b, c, d, e, f, g
+
+
+print(mixed())

@@ -55,19 +55,29 @@ pub(crate) struct Precompiled {
 /// `path`, rebuilt as `frozenset(elements)`. A constant is rebuilt when its
 /// hashes are `fixed` (no `str` or `bytes`, whose hashes are randomized per
 /// process), `marshal` changes its table, and a set display in the chunk's
-/// source, in source order, rebuilds the compiled table (`same`: the same
-/// iteration order, also once copied into a set and grown, as `SET_UPDATE`
-/// and later `add`s would). `marshal` data rather than JSON: importing
-/// `json` doubled the interpreter's start-up, and the script runs once per
-/// built module; `ast` is imported only for a chunk with such a constant.
+/// source, in source order, rebuilds the compiled table. The display is the
+/// one at the source position of the first instruction that loads the
+/// constant (`loaded_at`), or, for a constant merged with an equal one
+/// folded elsewhere, another display that rebuilds it. Either way it must
+/// rebuild the table (`same`): the same elements, compared by type and
+/// `repr` (recursively through tuples, so that `{1, 0}` never stands for
+/// `{1.0, 0.0}` nor `{True, 0}`), in the same iteration order, also once
+/// copied into a set and grown, as `SET_UPDATE` and later `add`s would.
+/// `marshal` data rather than JSON: importing `json` doubled the
+/// interpreter's start-up, and the script runs once per built module; `ast`
+/// and `dis` are imported only for a chunk with such a constant.
 const COMPILE_SCRIPT: &str = "\
 import importlib.util, marshal, sys
+def key(value):
+    if isinstance(value, tuple):
+        return type(value), tuple(key(item) for item in value)
+    return type(value), repr(value)
 def same(a, b):
-    if list(a) != list(b):
+    if [key(v) for v in a] != [key(v) for v in b]:
         return False
     for extra in range(-8, 40):
         x = set(a); y = set(b); x.add(extra); y.add(extra)
-        if list(x) != list(y):
+        if [key(v) for v in x] != [key(v) for v in y]:
             return False
     return True
 def fixed(value):
@@ -79,23 +89,31 @@ def rebuilds(order, const):
         built = frozenset(order)
     except TypeError:
         return False
-    return built == const and same(built, const)
+    return same(built, const)
 def frozensets(code, path):
     for index, const in enumerate(code.co_consts):
         if isinstance(const, frozenset):
-            yield path, index, const
+            yield code, path, index, const
         elif hasattr(const, 'co_consts'):
             yield from frozensets(const, path + (index,))
 def displays(source):
     import ast
-    out = []
+    out = {}
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Set):
             try:
-                out.append(tuple(ast.literal_eval(e) for e in node.elts))
+                order = tuple(ast.literal_eval(e) for e in node.elts)
             except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-                pass
+                continue
+            out[(node.lineno, node.col_offset, node.end_lineno, node.end_col_offset)] = order
     return out
+def loaded_at(code, index):
+    import dis
+    for ins in dis.get_instructions(code):
+        if ins.opname == 'LOAD_CONST' and ins.arg == index and ins.positions is not None:
+            p = ins.positions
+            return p.lineno, p.col_offset, p.end_lineno, p.end_col_offset
+    return None
 chunks = marshal.loads(sys.stdin.buffer.read())
 codes = []
 fixups = []
@@ -106,12 +124,13 @@ for k, (source, filename) in enumerate(chunks):
         code = None
     codes.append(code)
     orders = None
-    for path, index, const in (() if code is None else frozensets(code, ())):
+    for owner, path, index, const in (() if code is None else frozensets(code, ())):
         if not fixed(const) or same(marshal.loads(marshal.dumps(const)), const):
             continue
         if orders is None:
             orders = displays(source)
-        for order in orders:
+        first = orders.get(loaded_at(owner, index))
+        for order in ([first] if first is not None else []) + list(orders.values()):
             if rebuilds(order, const):
                 fixups.append((k, path, index, order))
                 break
