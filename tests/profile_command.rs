@@ -177,3 +177,102 @@ fn a_workload_that_fails_or_is_missing_is_an_error() {
     let r = profile(&dir.join("nope"), &out, &[], &[bad.as_os_str()]);
     assert!(String::from_utf8_lossy(&r.stderr).contains("no such package or module"));
 }
+
+/// A profile whose workload sees `PYTHONHASHSEED=0` (set-iteration order, so
+/// call counts, are then the same every run), no other `PYTHON*` variable,
+/// and the profiled sources first on `sys.path`, wherever the script is.
+#[test]
+fn the_workload_runs_with_a_fixed_hash_seed_against_the_profiled_sources() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    // A decoy copy of the package on `PYTHONPATH`, and the script elsewhere.
+    let decoy = dir.join("decoy");
+    std::fs::create_dir_all(decoy.join("pkg")).unwrap();
+    std::fs::write(decoy.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(decoy.join("pkg/hot.py"), "def hot(d, k):\n    return None\n").unwrap();
+    let away = dir.join("away");
+    std::fs::create_dir_all(&away).unwrap();
+    let work = away.join("seeded.py");
+    std::fs::write(
+        &work,
+        "import sys\n\
+         if sys.flags.hash_randomization:\n    raise SystemExit(5)\n\
+         from pkg import hot\n\
+         hot.hot({}, 0)\n\
+         for s in {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'}:\n    if s == 'd':\n        break\n    hot.hot({}, s)\n",
+    )
+    .unwrap();
+    let run = |out: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_pycc"))
+            .arg("profile")
+            .arg(&pkg)
+            .arg("-o")
+            .arg(out)
+            .args(["--runs", "1", "--select-share", "0", "--select-calls", "1"])
+            .arg("--")
+            .arg(python())
+            .arg(&work)
+            .env("PYTHONPATH", &decoy)
+            .env("PYTHONHASHSEED", "random")
+            .output()
+            .expect("pycc runs")
+    };
+    let (a, b) = (dir.join("a.json"), dir.join("b.json"));
+    for out in [&a, &b] {
+        let r = run(out);
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    }
+    let p = read(&a);
+    let hot = p["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["qualname"] == "hot")
+        .unwrap_or_else(|| panic!("{p}"))
+        .clone();
+    // The profiled sources' `hot` (line 1 of HOT, its hash), not the decoy's.
+    assert_eq!(hot["module"], "pkg.hot");
+    assert_eq!(untimed(&read(&b)), untimed(&p));
+    // Under PYTHONHASHSEED=0 the set's order is fixed: the count is the one
+    // CPython gives with that seed (plus the first call).
+    let expected = Command::new(python())
+        .args(["-c", "n = 0\nfor s in {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'}:\n    if s == 'd':\n        break\n    n += 1\nprint(n + 1)"])
+        .env("PYTHONHASHSEED", "0")
+        .output()
+        .unwrap();
+    let expected: u64 = String::from_utf8_lossy(&expected.stdout).trim().parse().unwrap();
+    assert_eq!(hot["calls"], expected);
+}
+
+#[test]
+fn a_workload_that_imports_none_of_the_package_or_another_copy_is_an_error() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    let out = dir.join("p.json");
+    let none = dir.join("none.py");
+    std::fs::write(&none, "print('nothing')\n").unwrap();
+    let r = profile(&pkg, &out, &[], &[none.as_os_str()]);
+    assert!(!r.status.success());
+    assert!(
+        String::from_utf8_lossy(&r.stderr).contains("the workload imported no module of"),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    // A workload that puts another copy first itself.
+    let other = dir.join("other");
+    std::fs::create_dir_all(other.join("pkg")).unwrap();
+    std::fs::write(other.join("pkg/__init__.py"), "").unwrap();
+    let elsewhere = dir.join("elsewhere.py");
+    std::fs::write(
+        &elsewhere,
+        format!("import sys\nsys.path.insert(0, {:?})\nimport pkg\n", other.to_str().unwrap()),
+    )
+    .unwrap();
+    let r = profile(&pkg, &out, &[], &[elsewhere.as_os_str()]);
+    assert!(!r.status.success());
+    assert!(
+        String::from_utf8_lossy(&r.stderr).contains("the workload imported pkg from"),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+}

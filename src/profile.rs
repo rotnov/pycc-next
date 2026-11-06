@@ -403,8 +403,16 @@ struct Driver<'a> {
 impl Driver<'_> {
     fn run(&self, mode: &str, out: &Path, extra: &[&OsStr], workload: &[OsString]) -> Result<(), String> {
         let mut command = std::process::Command::new(self.python);
+        // `-I` would also ignore `PYTHONHASHSEED`; the `PYTHON*` variables it
+        // stands for are removed instead, so the seed is the only one left.
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("PYTHON") {
+                command.env_remove(name);
+            }
+        }
         command
-            .arg("-I")
+            .arg("-P")
+            .arg("-s")
             .arg(self.script)
             .arg(mode)
             .arg(self.pkg)

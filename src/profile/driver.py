@@ -1,5 +1,7 @@
 # pycc's profile driver (`pycc profile`, src/profile.rs), run by the target
-# interpreter as `python -I driver.py MODE PKG OUT [CANDIDATES] -- SCRIPT [ARGS]`.
+# interpreter as `python -P -s driver.py MODE PKG OUT [CANDIDATES] -- SCRIPT [ARGS]`,
+# with no `PYTHON*` variable in its environment but `PYTHONHASHSEED=0` (`-I`
+# would ignore that too).
 #
 #   index  PKG OUT          every function of the package's sources: its module,
 #                           qualified name, first line (its first decorator's, as
@@ -17,8 +19,10 @@
 #                           the exact types of its arguments in its first 1,000
 #                           calls (type name to count, per parameter).
 #
-# SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own; a
-# `SystemExit` it raises ends it as it would end the interpreter.
+# SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own and
+# PKG's directory first on `sys.path`; a `SystemExit` it raises ends it as it
+# would end the interpreter. A pass whose workload imports no module of PKG,
+# or one from elsewhere, fails.
 import ast
 import hashlib
 import json
@@ -103,15 +107,28 @@ def index(pkg):
     return out
 
 
-def run(script, args):
+def run(pkg, script, args):
     import runpy
     sys.argv = [script, *args]
     sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+    # PKG's sources, not a copy installed or beside the script.
+    sys.path.insert(0, os.path.dirname(os.path.realpath(pkg)))
     try:
         runpy.run_path(script, run_name="__main__")
     except SystemExit as e:
         if e.code not in (None, 0):
             raise
+    loaded = 0
+    for name, path in modules(pkg):
+        m = sys.modules.get(name)
+        if m is None:
+            continue
+        found = getattr(m, "__file__", None)
+        if found is None or os.path.realpath(found) != path:
+            sys.exit(f"pycc profile: the workload imported {name} from {found}, not from {path}")
+        loaded += 1
+    if not loaded:
+        sys.exit(f"pycc profile: the workload imported no module of {pkg}")
 
 
 def package_files(pkg):
@@ -124,7 +141,7 @@ def calls(pkg, script, args):
     prof = cProfile.Profile()
     prof.enable()
     try:
-        run(script, args)
+        run(pkg, script, args)
     finally:
         prof.disable()
     total = 0.0
@@ -187,7 +204,7 @@ def types(pkg, candidates, script, args):
     mon.register_callback(tool, mon.events.PY_START, start)
     mon.set_events(tool, mon.events.PY_START)
     try:
-        run(script, args)
+        run(pkg, script, args)
     finally:
         mon.set_events(tool, 0)
         mon.free_tool_id(tool)
