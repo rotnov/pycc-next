@@ -90,9 +90,10 @@ pub(crate) struct Measured {
     /// not: it was never timed, and is rejected for this reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) refused: Option<String>,
-    /// The workload's times (as `compiled_ns`) with only the hot functions of
-    /// its region compiled, when that was faster than with this function
-    /// too: it is rejected, the region winning without it.
+    /// The workload's times (as `compiled_ns`) with the selected set
+    /// compiled, when that set leaves this function out of a set it was
+    /// measured in, or this function's own set won too: it is rejected,
+    /// the selection winning without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) without: Option<[u64; 3]>,
 }
@@ -120,7 +121,7 @@ impl Measured {
         let ms = |ns: u64| ns as f64 / 1e6;
         if let Some(without) = self.without {
             return format!(
-                "faster without it: the workload took {:.1} ms with only its region's hot functions compiled, against {:.1} ms with it and {} other functions",
+                "faster without it: the workload took {:.1} ms with a measured set of candidates that leaves it out compiled, against {:.1} ms with it and {} other functions",
                 ms(without[1]),
                 ms(self.compiled_ns[1]),
                 self.with - 1,

@@ -171,6 +171,34 @@ fn a_member_that_imports_its_sibling_is_measured() {
     assert_eq!(measured(&out, "work")["compiled"], true);
 }
 
+/// A training script reads its data beside the package, from the project
+/// root it is given (`PYCC_PROFILE_ROOT`), as a package check's tests and
+/// benchmark do: pass 3's copy holds the whole project, so the script finds
+/// its files there too.
+#[test]
+fn a_workload_that_reads_files_beside_the_package_is_measured() {
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = package(
+        &dir,
+        "import os\nfrom pkg import m\n\
+         root = os.environ[\"PYCC_PROFILE_ROOT\"]\n\
+         n = int(open(os.path.join(root, \"data\", \"n.txt\")).read())\n\
+         assert os.path.isfile(os.path.join(root, \"tests\", \"test_m.py\")), root\n\
+         for i in range(60):\n    m.work(n)\n",
+    );
+    std::fs::create_dir_all(dir.join("data")).unwrap();
+    std::fs::write(dir.join("data/n.txt"), "20000\n").unwrap();
+    std::fs::create_dir_all(dir.join("tests")).unwrap();
+    std::fs::write(dir.join("tests/test_m.py"), "from pkg import m\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
+    assert_eq!(measured(&out, "work")["compiled"], true);
+}
+
 #[test]
 fn a_workload_that_sets_up_its_environment_before_importing_is_measured() {
     let _turn = timing();

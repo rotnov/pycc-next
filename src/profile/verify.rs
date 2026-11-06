@@ -10,17 +10,24 @@
 //! interquartile ranges are apart):
 //!
 //! 1. all the candidates together, and the hot ones among them (each at
-//!    least the rule's share and calls on its own) alone: the faster of the
-//!    two (the compiled median under CPython's first quartile, and the lower
-//!    one) is kept, so a region pulls a cold function in only when that pays;
-//! 2. else each region (the candidates connected by calls among them), most
-//!    self time first, alone and its hot functions alone, the same way;
-//! 3. then the regions kept alone, together, once more.
+//!    least the rule's share and calls on its own) alone;
+//! 2. when neither wins, each region (the candidates connected by calls
+//!    among them), most self time first, alone and its hot functions
+//!    alone, the same way;
+//! 3. then the regions that won, together, once more: one build is
+//!    reserved for this check before any region is measured.
+//!
+//! The selection is exactly one set measured as a whole that won (the
+//! compiled median under CPython's first quartile): the one with the lowest
+//! median, the smaller on a tie ([`decide`]). It is never a union of sets
+//! measured apart, so a region pulls a cold function in only when that
+//! pays, and when the regions together cannot be measured, or lose, the
+//! best single winner is kept.
 //!
 //! A win inside CPython's interquartile range is noise, and a function that wins
 //! only by noise adds size and risk for no gain, so it is not kept. At most
 //! [`MAX_BUILDS`] builds. A function a check does not find faster, or one no
-//! check could reach within the budget, is recorded as not faster; the
+//! check could reach within the budget, is not selected; the
 //! selection rule rejects it from then on, in `--check` and in builds alike.
 //! A later `pycc profile` keeps every verdict, a win as well as a rejection,
 //! while the function's source hash is unchanged (`carry_verdicts`), and
@@ -154,7 +161,8 @@ pub(crate) fn clear(plain: &[u64], built: &[u64]) -> bool {
 }
 
 /// The outcome of one check.
-struct Check {
+#[derive(Debug, Clone)]
+pub(super) struct Check {
     cpython: [u64; 3],
     compiled: [u64; 3],
     instructions: Option<i64>,
@@ -198,38 +206,9 @@ pub(super) fn verify(
         return Ok(());
     }
     let started = Instant::now();
-    let mut builds = 0usize;
-    let mut verdicts: BTreeMap<FunctionKey, Measured> = BTreeMap::new();
-    let mut pass = Pass {
-        cx,
-        builds: &mut builds,
-        verdicts: &mut verdicts,
-    };
-    let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
-    if !pass.best_of(&all, core)? {
-        let regions = regions(profile, &candidates);
-        if regions.len() > 1 {
-            let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
-            let mut kept_regions = 0;
-            for region in &regions {
-                // One build stays for the kept regions together.
-                if *pass.builds >= MAX_BUILDS - 1 {
-                    break;
-                }
-                let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
-                if pass.best_of(&set, core)? {
-                    kept.extend(set.into_iter().filter(|k| pass.verdicts.get(k).is_some_and(|m| m.compiled)));
-                    kept_regions += 1;
-                }
-            }
-            if kept_regions > 1
-                && *pass.builds < MAX_BUILDS
-                && let Some((kept, c)) = measure(kept, cx, pass.builds, pass.verdicts)?
-            {
-                record(pass.verdicts, &kept, &c);
-            }
-        }
-    }
+    let regions = regions(profile, &candidates);
+    let mut run = |set: &BTreeSet<FunctionKey>, builds: usize| check(set, cx, builds);
+    let (mut verdicts, builds) = decide(&candidates, &regions, core, MAX_BUILDS, &mut run)?;
     let kept = verdicts.values().filter(|m| m.compiled).count();
     for e in &mut profile.functions {
         if let Some(m) = verdicts.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
@@ -242,6 +221,67 @@ pub(super) fn verify(
         started.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+/// The outcome of a check's build and timing: the check, or the functions
+/// the build refused, each with why.
+pub(super) type Outcome = Result<Result<Check, BTreeMap<FunctionKey, String>>, String>;
+
+/// One check of a set: its build and timing (`check`). Its second argument
+/// is the number of the build.
+pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 'r;
+
+/// Pass 3's decision over `candidates` (in `regions`, most self time
+/// first) within `budget` builds, each check made by `run`: a verdict for
+/// every candidate, and the builds made.
+///
+/// The invariant: the functions selected are exactly one set that was
+/// measured as a whole and won (its compiled median under CPython's first
+/// quartile), the one with the lowest median, the smaller on a tie; never
+/// a union of sets each measured alone. The sets measured are all the
+/// candidates and their hot core; when neither wins, each region and its
+/// hot core, most self time first; then the regions that won, together.
+/// One build of the budget is reserved for that last check before any
+/// region is measured. When it cannot run, or loses, the best set that won
+/// as a whole is selected: one region, a core, or nothing.
+pub(super) fn decide(
+    candidates: &[FunctionKey],
+    regions: &[Vec<FunctionKey>],
+    core: &BTreeSet<FunctionKey>,
+    budget: usize,
+    run: &mut Run<'_>,
+) -> Result<(BTreeMap<FunctionKey, Measured>, usize), String> {
+    let mut pass = Pass {
+        run,
+        builds: 0,
+        verdicts: BTreeMap::new(),
+        winners: Vec::new(),
+        sets: Vec::new(),
+        last: BTreeMap::new(),
+    };
+    let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
+    if pass.best_of(&all, core, budget)?.is_none() && regions.len() > 1 {
+        // The build for the regions that win, together.
+        let limit = budget.saturating_sub(1);
+        let mut union: BTreeSet<FunctionKey> = BTreeSet::new();
+        let mut won = 0;
+        for region in regions {
+            if pass.builds >= limit {
+                break;
+            }
+            let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
+            if let Some(winner) = pass.best_of(&set, core, limit)? {
+                union.extend(winner);
+                won += 1;
+            }
+        }
+        if won > 1
+            && let Some((union, c)) = pass.measure(union, budget)?
+        {
+            pass.record(&union, c);
+        }
+    }
+    Ok(pass.finish())
 }
 
 /// Records `c`'s outcome on each function of `set`.
@@ -262,67 +302,129 @@ fn record(verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<Functio
     }
 }
 
-/// Pass 3's builds and verdicts so far.
-struct Pass<'a, 'c> {
-    cx: &'a Context<'c>,
-    builds: &'a mut usize,
-    verdicts: &'a mut BTreeMap<FunctionKey, Measured>,
+/// Pass 3's builds, verdicts and the sets that won so far.
+struct Pass<'r, 's> {
+    run: &'r mut Run<'s>,
+    builds: usize,
+    verdicts: BTreeMap<FunctionKey, Measured>,
+    /// Each set measured as a whole that was faster than CPython.
+    winners: Vec<(BTreeSet<FunctionKey>, Check)>,
+    /// Each set measured, and per function the last one it was measured in.
+    sets: Vec<BTreeSet<FunctionKey>>,
+    last: BTreeMap<FunctionKey, usize>,
 }
 
 impl Pass<'_, '_> {
-    /// Checks `set` and, when its hot functions (`set` and `core`) are not
-    /// all of it, those alone; keeps whichever is faster than CPython with
-    /// the lower median, the hot ones on a tie. A function the hot ones won
-    /// without is recorded as not faster, with their times (`without`).
-    /// Whether one of the two was faster.
-    fn best_of(&mut self, set: &BTreeSet<FunctionKey>, core: &BTreeSet<FunctionKey>) -> Result<bool, String> {
-        let Some((set, whole)) = measure(set.clone(), self.cx, self.builds, self.verdicts)? else {
-            return Ok(false);
-        };
-        record(self.verdicts, &set, &whole);
-        let hot: BTreeSet<FunctionKey> = set.intersection(core).cloned().collect();
-        if hot.is_empty() || hot.len() == set.len() || *self.builds >= MAX_BUILDS {
-            return Ok(whole.faster());
+    /// Records `c` on each function of `set`, and `set` as a winner when it
+    /// won.
+    fn record(&mut self, set: &BTreeSet<FunctionKey>, c: Check) {
+        record(&mut self.verdicts, set, &c);
+        for key in set {
+            self.last.insert(key.clone(), self.sets.len());
         }
-        let Some((hot, alone)) = measure(hot, self.cx, self.builds, self.verdicts)? else {
-            return Ok(whole.faster());
-        };
-        if alone.faster() && (!whole.faster() || alone.compiled[1] <= whole.compiled[1]) {
-            record(self.verdicts, &hot, &alone);
-            for key in set.difference(&hot) {
-                if let Some(m) = self.verdicts.get_mut(key).filter(|m| m.refused.is_none()) {
-                    m.compiled = false;
-                    m.without = Some(alone.compiled);
-                }
-            }
-            return Ok(true);
+        self.sets.push(set.clone());
+        if c.faster() {
+            self.winners.push((set.clone(), c));
         }
-        Ok(whole.faster())
     }
-}
 
-/// Checks `set`, leaving out every function a build refuses (recorded in
-/// `verdicts` as refused, never timed) until a build compiles the whole
-/// rest: that rest and its check, or None when the build compiles none.
-fn measure(
-    mut set: BTreeSet<FunctionKey>,
-    cx: &Context<'_>,
-    builds: &mut usize,
-    verdicts: &mut BTreeMap<FunctionKey, Measured>,
-) -> Result<Option<(BTreeSet<FunctionKey>, Check)>, String> {
-    while !set.is_empty() {
-        match check(&set, cx, builds)? {
-            Ok(c) => return Ok(Some((set, c))),
-            Err(refused) => {
-                let with = set.len();
-                for (key, reason) in refused {
-                    set.remove(&key);
-                    verdicts.insert(key, Measured::refused(with, reason));
+    /// Checks `set` and, when its hot functions (`set` and `core`) are not
+    /// all of it, those alone, within `limit` builds: the one of the two
+    /// that won with the lower median (the hot ones on a tie), if either
+    /// won.
+    fn best_of(
+        &mut self,
+        set: &BTreeSet<FunctionKey>,
+        core: &BTreeSet<FunctionKey>,
+        limit: usize,
+    ) -> Result<Option<BTreeSet<FunctionKey>>, String> {
+        let Some((set, whole)) = self.measure(set.clone(), limit)? else {
+            return Ok(None);
+        };
+        let whole_median = whole.faster().then_some(whole.compiled[1]);
+        self.record(&set, whole);
+        let hot: BTreeSet<FunctionKey> = set.intersection(core).cloned().collect();
+        if hot.is_empty() || hot.len() == set.len() {
+            return Ok(whole_median.map(|_| set));
+        }
+        let Some((hot, alone)) = self.measure(hot, limit)? else {
+            return Ok(whole_median.map(|_| set));
+        };
+        let alone_median = alone.faster().then_some(alone.compiled[1]);
+        self.record(&hot, alone);
+        Ok(match (whole_median, alone_median) {
+            (Some(w), Some(a)) if w < a => Some(set),
+            (_, Some(_)) => Some(hot),
+            (Some(_), None) => Some(set),
+            (None, None) => None,
+        })
+    }
+
+    /// Checks `set` within `limit` builds, leaving out every function a
+    /// build refuses (recorded as refused, never timed) until a build
+    /// compiles the whole rest: that rest and its check, or None when no
+    /// build compiles any of it within the limit.
+    fn measure(
+        &mut self,
+        mut set: BTreeSet<FunctionKey>,
+        limit: usize,
+    ) -> Result<Option<(BTreeSet<FunctionKey>, Check)>, String> {
+        while !set.is_empty() && self.builds < limit {
+            self.builds += 1;
+            match (self.run)(&set, self.builds)? {
+                Ok(c) => return Ok(Some((set, c))),
+                Err(refused) => {
+                    let with = set.len();
+                    for (key, reason) in refused {
+                        set.remove(&key);
+                        self.verdicts.insert(key, Measured::refused(with, reason));
+                    }
                 }
             }
         }
+        Ok(None)
     }
-    Ok(None)
+
+    /// The verdicts, with the selection settled: the winner with the lowest
+    /// median (the smaller on a tie) is compiled, on its own check's times;
+    /// every other function measured is not. One that the winner left out of
+    /// a set it was measured in (the winner is part of that set), or whose
+    /// own set won too, records the winner's times (`without`); any other
+    /// keeps its own check's. The builds made.
+    fn finish(mut self) -> (BTreeMap<FunctionKey, Measured>, usize) {
+        let best = self
+            .winners
+            .iter()
+            .min_by_key(|(set, c)| (c.compiled[1], set.len()))
+            .map(|(set, c)| (set.clone(), c.clone()));
+        for (key, m) in &mut self.verdicts {
+            if m.refused.is_some() {
+                continue;
+            }
+            match &best {
+                Some((set, c)) if set.contains(key) => {
+                    *m = Measured {
+                        compiled: true,
+                        with: set.len(),
+                        cpython_ns: c.cpython,
+                        compiled_ns: c.compiled,
+                        instructions: c.instructions,
+                        refused: None,
+                        without: None,
+                    };
+                }
+                Some((set, c)) => {
+                    let within = self.last.get(key).is_some_and(|&i| set.is_subset(&self.sets[i]));
+                    if m.compiled || within {
+                        m.without = Some(c.compiled);
+                    }
+                    m.compiled = false;
+                }
+                None => m.compiled = false,
+            }
+        }
+        (self.verdicts, self.builds)
+    }
 }
 
 /// Builds exactly `set` into a copy of the package and times the workload
@@ -331,9 +433,8 @@ fn measure(
 fn check(
     set: &BTreeSet<FunctionKey>,
     cx: &Context<'_>,
-    builds: &mut usize,
-) -> Result<Result<Check, BTreeMap<FunctionKey, String>>, String> {
-    *builds += 1;
+    builds: usize,
+) -> Outcome {
     let dir = cx.scratch.join(format!("verify{builds}"));
     let copy = copy_package(cx.driver.pkg, &dir.join("tree"))?;
     let refused = build(&copy, set, cx)?;
@@ -545,41 +646,44 @@ pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<Fu
         .collect()
 }
 
-/// Copies the package (or single module) `pkg` under `root` at the same path
-/// below its import root; returns the copy's path. A module or subpackage
-/// inside a package brings its whole top-level package, so its imports of
-/// the package's other modules find them.
+/// Copies the project `pkg` (a package or single module) lives in under
+/// `root`, and returns the copy of `pkg`: the whole directory `pkg` is
+/// imported from (the parent of its top-level package, or of the module),
+/// so the workload's files beside the package (its tests, data,
+/// `pyproject.toml`) are found at the same relative paths as in the
+/// original. Hidden entries and `__pycache__` are left out, and so is
+/// `root` itself when it lies inside the project.
 pub(crate) fn copy_package(pkg: &Path, root: &Path) -> Result<PathBuf, String> {
     let mut base = pkg.parent().unwrap_or(Path::new("")).to_path_buf();
-    let mut top = None;
     while base.join("__init__.py").is_file() {
-        top = Some(base.clone());
         match base.parent() {
             Some(parent) => base = parent.to_path_buf(),
             None => break,
         }
     }
-    let rel = pkg.strip_prefix(&base).map_err(|e| e.to_string())?;
-    match top {
-        Some(top) => copy_dir(&top, &root.join(top.strip_prefix(&base).map_err(|e| e.to_string())?))?,
-        None if pkg.is_file() => {
-            std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
-            std::fs::copy(pkg, root.join(rel)).map_err(|e| e.to_string())?;
-        }
-        None => copy_dir(pkg, &root.join(rel))?,
+    let rel = pkg.strip_prefix(&base).map_err(|e| e.to_string())?.to_path_buf();
+    if base.as_os_str().is_empty() {
+        base = PathBuf::from(".");
     }
+    std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    let skip = root.canonicalize().map_err(|e| e.to_string())?;
+    copy_dir(&base, root, &skip)?;
     Ok(root.join(rel))
 }
 
-fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
+fn copy_dir(from: &Path, to: &Path, skip: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(from).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let kind = entry.file_type().map_err(|e| e.to_string())?;
         let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
         if kind.is_dir() {
-            if name != "__pycache__" {
-                copy_dir(&entry.path(), &to.join(&name))?;
+            let path = entry.path();
+            if name != "__pycache__" && path.canonicalize().map_err(|e| e.to_string())? != skip {
+                copy_dir(&path, &to.join(&name), skip)?;
             }
         } else if kind.is_file() {
             std::fs::copy(entry.path(), to.join(&name)).map_err(|e| e.to_string())?;

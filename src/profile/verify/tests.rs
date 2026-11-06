@@ -126,7 +126,7 @@ fn the_rule_rejects_a_function_measured_slower() {
     });
     let decided = crate::profile::select(1000, &[candidate(&a), candidate(&b)], Rule::default());
     let why = decided[0].rejected.as_deref().unwrap();
-    assert!(why.starts_with("faster without it: the workload took 0.0 ms with only its region's hot functions compiled"), "{why}");
+    assert!(why.starts_with("faster without it: the workload took 0.0 ms with a measured set of candidates that leaves it out compiled"), "{why}");
 }
 
 #[test]
@@ -152,7 +152,34 @@ fn a_member_is_copied_with_the_packages_above_it() {
     std::fs::write(src.join("alone.py"), "z = 3\n").unwrap();
     let single = copy_package(&src.join("alone.py"), &dir.join("two")).unwrap();
     assert_eq!(single, dir.join("two/alone.py"));
-    assert!(!dir.join("two/top").exists());
+}
+
+/// The workload reads files beside the package by their paths from the
+/// project root (a test directory, benchmark data, `pyproject.toml`): the
+/// copy pass 3 times is of the whole project, not only the package.
+#[test]
+fn the_copy_holds_the_project_files_beside_the_package() {
+    let dir = pycc_scratch::ScratchDir::new("verify-copy-root").unwrap();
+    let src = dir.join("src");
+    std::fs::create_dir_all(src.join("pkg")).unwrap();
+    std::fs::create_dir_all(src.join("tests/data")).unwrap();
+    std::fs::create_dir_all(src.join(".git")).unwrap();
+    std::fs::write(src.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(src.join("tests/test_pkg.py"), "import pkg\n").unwrap();
+    std::fs::write(src.join("tests/data/case.txt"), "case\n").unwrap();
+    std::fs::write(src.join("pyproject.toml"), "[project]\n").unwrap();
+    std::fs::write(src.join(".git/HEAD"), "x").unwrap();
+    let copy = copy_package(&src.join("pkg"), &dir.join("out")).unwrap();
+    assert_eq!(copy, dir.join("out/pkg"));
+    assert_eq!(std::fs::read_to_string(dir.join("out/tests/data/case.txt")).unwrap(), "case\n");
+    assert!(dir.join("out/tests/test_pkg.py").is_file());
+    assert!(dir.join("out/pyproject.toml").is_file());
+    assert!(!dir.join("out/.git").exists());
+    // A copy made inside the project does not copy itself.
+    let inner = copy_package(&src.join("pkg"), &src.join("build/tree")).unwrap();
+    assert_eq!(inner, src.join("build/tree/pkg"));
+    assert!(src.join("build/tree/tests/data/case.txt").is_file());
+    assert!(!src.join("build/tree/build/tree").exists());
 }
 
 #[test]
@@ -180,4 +207,127 @@ fn a_refusal_is_read_from_the_build_report() {
         .collect()
     );
     assert!(refusals(&set, "compiled: m:a\ncompiled: m:b\ncompiled: m:c\n").is_empty());
+}
+
+/// A fake check for [`decide`]: CPython at 100 ms (IQR 90-110); each hot
+/// function compiled saves 15 and each cold one 5, but each function of
+/// region `c` costs 20, and a set that spans more than one region costs
+/// `spanning` (their crossings). Records each set it is asked to time.
+fn fake(spanning: i64, asked: &mut Vec<BTreeSet<FunctionKey>>) -> impl FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + '_ {
+    move |set, _| {
+        asked.push(set.clone());
+        let regions: BTreeSet<char> = set.iter().map(|k| k.1.chars().next().unwrap()).collect();
+        let mut ms: i64 = 100;
+        for key in set {
+            ms -= if key.1.starts_with('c') {
+                -20
+            } else if key.1.ends_with("hot") {
+                15
+            } else {
+                5
+            };
+        }
+        if regions.len() > 1 {
+            ms += spanning;
+        }
+        let ns = ms as u64;
+        Ok(Ok(Check {
+            cpython: [90, 100, 110],
+            compiled: [ns - 1, ns, ns + 1],
+            instructions: None,
+        }))
+    }
+}
+
+fn regions_of(names: &[&str]) -> (Vec<FunctionKey>, Vec<Vec<FunctionKey>>, BTreeSet<FunctionKey>) {
+    let regions: Vec<Vec<FunctionKey>> = names
+        .iter()
+        .map(|r| vec![k(&format!("{r}_hot")), k(&format!("{r}_cold"))])
+        .collect();
+    let candidates = regions.concat();
+    let core = candidates.iter().filter(|key| key.1.ends_with("hot")).cloned().collect();
+    (candidates, regions, core)
+}
+
+fn compiled(verdicts: &BTreeMap<FunctionKey, Measured>) -> BTreeSet<FunctionKey> {
+    verdicts.iter().filter(|(_, m)| m.compiled).map(|(key, _)| key.clone()).collect()
+}
+
+/// Three regions each with a cold member, under a budget too tight for every
+/// region: the union of the regions that won alone loses, and the
+/// selection is one region that won as a whole, never that union.
+#[test]
+fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
+    let (candidates, regions, core) = regions_of(&["a", "b", "c"]);
+    let mut asked = Vec::new();
+    let mut run = fake(60, &mut asked);
+    let (verdicts, builds) = decide(&candidates, &regions, &core, 6, &mut run).unwrap();
+    drop(run);
+    let asked = asked;
+    // All (lost), its core (lost), region a and its core, region b (its
+    // core: no build left before the reserved one), then a and b together.
+    assert_eq!(builds, 6);
+    let a: BTreeSet<FunctionKey> = regions[0].iter().cloned().collect();
+    let b: BTreeSet<FunctionKey> = regions[1].iter().cloned().collect();
+    assert_eq!(asked[2], a);
+    assert_eq!(asked[4], b);
+    let union: BTreeSet<FunctionKey> = a.union(&b).cloned().collect();
+    assert_eq!(asked[5], union);
+    let selected = compiled(&verdicts);
+    assert_eq!(selected, a, "{verdicts:?}");
+    assert!(asked.contains(&selected));
+    // b won alone but is left out, with the winner's times; c, past the
+    // budget, was measured only within all the candidates and their core,
+    // which lost.
+    assert_eq!(verdicts[&k("b_hot")].without, Some([79, 80, 81]));
+    assert_eq!(asked.len(), 6);
+    assert!(asked[2..].iter().all(|set| !set.contains(&k("c_hot"))));
+    assert!(!verdicts[&k("c_hot")].compiled);
+    // With a budget that leaves no build for the union, still one region.
+    let mut asked = Vec::new();
+    let mut run = fake(60, &mut asked);
+    let (verdicts, builds) = decide(&candidates, &regions, &core, 5, &mut run).unwrap();
+    drop(run);
+    assert_eq!(builds, 4);
+    assert_eq!(compiled(&verdicts), a);
+    // When the regions together win and are fastest, they are selected,
+    // measured as a whole.
+    let mut asked = Vec::new();
+    let mut run = fake(10, &mut asked);
+    let (verdicts, _) = decide(&candidates, &regions, &core, 6, &mut run).unwrap();
+    drop(run);
+    assert_eq!(compiled(&verdicts), union);
+    assert!(asked.contains(&union));
+}
+
+/// The first check wins: the faster of all the candidates and their core is
+/// selected, the core on a tie, and no region is measured.
+#[test]
+fn the_faster_of_the_whole_set_and_its_core_is_selected() {
+    let (candidates, regions, core) = regions_of(&["a", "b"]);
+    let mut asked = Vec::new();
+    let mut run = fake(0, &mut asked);
+    let (verdicts, builds) = decide(&candidates, &regions, &core, 8, &mut run).unwrap();
+    drop(run);
+    // All: 60 ms; the core: 70 ms.
+    assert_eq!(builds, 2);
+    let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
+    assert_eq!(compiled(&verdicts), all);
+    // A cold member left out by a faster core records the core's times.
+    let mut asked = Vec::new();
+    let mut run = move |set: &BTreeSet<FunctionKey>, n: usize| {
+        let all = set.len() == 4;
+        fake(0, &mut asked)(set, n).map(|r| {
+            r.map(|mut c| {
+                if all {
+                    c.compiled = [84, 85, 86];
+                }
+                c
+            })
+        })
+    };
+    let (verdicts, _) = decide(&candidates, &regions, &core, 8, &mut run).unwrap();
+    assert_eq!(compiled(&verdicts), core);
+    assert_eq!(verdicts[&k("a_cold")].without, Some([69, 70, 71]));
+    assert_eq!(verdicts[&k("a_cold")].compiled_ns, [84, 85, 86]);
 }

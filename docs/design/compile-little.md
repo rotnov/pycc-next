@@ -210,7 +210,9 @@ profile's numbers, never a function's name.
 
 The rule's picks are candidates, not the selection: only measured winners are
 selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidates into
-a copy of the package and times the training workload with them compiled against the
+a copy of the project (the whole directory the package is imported from, so the
+workload's tests, data and `pyproject.toml` are found at the same paths; the workload
+reads that root from `PYCC_PROFILE_ROOT`) and times the training workload with them compiled against the
 unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
 (`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
 verdict is on wall time: the compiled median must be under CPython's first quartile. A
@@ -223,10 +225,15 @@ diff_main (best of 3), CPython took 4.89 s, `diff_bisect` alone compiled 1.75 s 
 its whole region compiled 1.88 s (2.6x) and `--select all` 2.11 s (2.3x): a generic lift
 of a cold function costs more than its bytecode. So pass 3 checks all the candidates
 together and their hot functions (each at least 0.5% and 50 calls on its own) alone, and
-keeps the faster of the two, the hot ones on a tie; a function the hot ones won without
-is rejected ("faster without it", `measured.without`). If neither is faster, each region
-(the candidates connected by calls among them, most self time first) is checked the same
-way alone, then the regions kept alone are checked together once more; at most 8 builds. Every candidate gets its
+If neither is faster, each region (the candidates connected by calls among them, most
+self time first) is checked the same way alone, then the regions that won are checked
+together once more; at most 8 builds, one of them reserved for that last check before any
+region is measured. The selection is always exactly one set that was measured as a whole
+and won: the winner with the lowest median, the smaller on a tie, never a union of sets
+measured apart. When the regions together cannot be built within the budget, or lose,
+the best single winner is kept (a region, a core, or nothing). A function the winner
+leaves out of a set it was measured in is rejected ("faster without it",
+`measured.without`). Every candidate gets its
 last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
 `compiled_ns` as first quartile, median and third quartile, and with
 `--verify-instructions` the instruction delta under callgrind, as evidence only). A
