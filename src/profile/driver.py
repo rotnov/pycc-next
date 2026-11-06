@@ -143,15 +143,38 @@ def run(pkg, script, args):
         if m is None:
             continue
         found = getattr(m, "__file__", None)
-        if found is None or os.path.realpath(found) != path:
+        if found is None or identity(found) != identity(path):
             sys.exit(f"pycc profile: the workload imported {name} from {found}, not from {path}")
         loaded += 1
     if not loaded:
         sys.exit(f"pycc profile: the workload imported no module of {pkg}")
 
 
+_IDENTITY = {}
+
+
+def identity(path):
+    """The file `path` names, as `(st_dev, st_ino)`, or None: a code object's file
+    name is the one the import system used, which on Windows can spell the same file
+    another way (an 8.3 short name, another case, a `\\\\?\\` prefix)."""
+    try:
+        return _IDENTITY[path]
+    except KeyError:
+        pass
+    try:
+        st = os.stat(path)
+        found = (st.st_dev, st.st_ino)
+    except (OSError, ValueError, TypeError):
+        found = None
+    _IDENTITY[path] = found
+    return found
+
+
 def package_files(pkg):
-    return {path: name for name, path in modules(pkg)}
+    """The package's modules by file identity."""
+    files = {identity(path): name for name, path in modules(pkg)}
+    files.pop(None, None)
+    return files
 
 
 def calls(pkg, script, args):
@@ -170,7 +193,7 @@ def calls(pkg, script, args):
         code = e.code
         if isinstance(code, str):
             continue
-        name = files.get(os.path.realpath(code.co_filename))
+        name = files.get(identity(code.co_filename))
         if name is None:
             continue
         key = f"{name}\0{code.co_qualname}\0{code.co_firstlineno}"
@@ -181,7 +204,7 @@ def calls(pkg, script, args):
         for sub in e.calls or ():
             if isinstance(sub.code, str):
                 continue
-            callee = files.get(os.path.realpath(sub.code.co_filename))
+            callee = files.get(identity(sub.code.co_filename))
             callee = "*" if callee is None else \
                 f"{callee}:{sub.code.co_qualname}:{sub.code.co_firstlineno}"
             out[callee] = out.get(callee, 0) + sub.callcount
@@ -199,7 +222,7 @@ def types(pkg, candidates, script, args):
     tool = mon.PROFILER_ID
 
     def start(code, offset):
-        name = files.get(os.path.realpath(code.co_filename))
+        name = files.get(identity(code.co_filename))
         key = (name, code.co_qualname, code.co_firstlineno)
         if key not in wanted:
             return mon.DISABLE

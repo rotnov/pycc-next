@@ -507,7 +507,8 @@ pub(crate) fn run_profile(
     if !pkg.exists() {
         return Err(format!("{}: no such package or module", pkg.display()));
     }
-    let pkg = std::fs::canonicalize(pkg).map_err(|e| e.to_string())?;
+    // Without a Windows verbatim prefix: the path goes on the workload's `sys.path`.
+    let pkg = crate::canonical::canonicalize(pkg).map_err(|e| e.to_string())?;
     let sources = index(python, &pkg)?;
     let scratch = pycc_scratch::ScratchDir::new("profile").map_err(|e| e.to_string())?;
     let script = scratch.join("driver.py");
