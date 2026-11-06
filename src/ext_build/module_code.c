@@ -5,8 +5,9 @@
  */
 static int pycc_ext_chunk_usable = -1;
 static PyObject *pycc_ext_chunk_loads = NULL;
-/* The unmarshalled tuple (`pycc_ext_chunk_table_data`), from the hook's
- * first call until the body has run. */
+/* The tuple of code objects unmarshalled from `pycc_ext_chunk_table_data`
+ * (with its `frozenset` constants rebuilt), from the hook's first call
+ * until the body has run. */
 static PyObject *pycc_ext_chunk_table = NULL;
 
 static int pycc_ext_chunks_usable(void)
@@ -41,6 +42,104 @@ static PyObject *pycc_ext_chunk_compile(const struct pycc_ext_chunk *chunk)
     return result;
 }
 
+/* `code` with `co_consts[path[at]]` (recursively, then `co_consts[index]`
+ * at the end of `path`) replaced by `frozenset(elements)`: a new
+ * reference, or NULL with an exception set. */
+static PyObject *pycc_ext_chunk_refold(PyObject *code, PyObject *path, Py_ssize_t at,
+                                       Py_ssize_t index, PyObject *elements)
+{
+    PyObject *consts = PyObject_GetAttrString(code, "co_consts");
+    PyObject *list = consts == NULL || !PyTuple_Check(consts) ? NULL : PySequence_List(consts);
+    PyObject *slot = NULL;
+    PyObject *replaced = NULL;
+    PyObject *result = NULL;
+    Py_ssize_t target = index;
+
+    if (list == NULL) {
+        goto done;
+    }
+    if (at < PyTuple_Size(path)) {
+        target = PyLong_AsSsize_t(PyTuple_GetItem(path, at));
+    }
+    if (target < 0 || target >= PyList_Size(list)) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "pycc: a frozenset fix-up names no constant");
+        }
+        goto done;
+    }
+    slot = at < PyTuple_Size(path)
+               ? pycc_ext_chunk_refold(PyList_GetItem(list, target), path, at + 1, index, elements)
+               : PyFrozenSet_New(elements);
+    if (slot == NULL || PyList_SetItem(list, target, slot) < 0) {
+        goto done;
+    }
+    replaced = PyList_AsTuple(list);
+    if (replaced != NULL) {
+        PyObject *replace = PyObject_GetAttrString(code, "replace");
+        PyObject *args = replace == NULL ? NULL : PyTuple_New(0);
+        PyObject *kwargs = args == NULL ? NULL : Py_BuildValue("{sO}", "co_consts", replaced);
+
+        result = kwargs == NULL ? NULL : PyObject_Call(replace, args, kwargs);
+        Py_XDECREF(kwargs);
+        Py_XDECREF(args);
+        Py_XDECREF(replace);
+    }
+done:
+    Py_XDECREF(replaced);
+    Py_XDECREF(list);
+    Py_XDECREF(consts);
+    return result;
+}
+
+/* The unmarshalled `(codes, fix-ups)` pair as the tuple of code objects,
+ * each `frozenset` constant the build recorded rebuilt from its source
+ * display (`module_code.rs`): a new reference, or NULL. */
+static PyObject *pycc_ext_chunk_refolded(PyObject *pair)
+{
+    PyObject *codes;
+    PyObject *fixups;
+    Py_ssize_t i;
+
+    if (!PyTuple_Check(pair) || PyTuple_Size(pair) != 2) {
+        return NULL;
+    }
+    codes = PyTuple_GetItem(pair, 0);
+    fixups = PyTuple_GetItem(pair, 1);
+    if (!PyTuple_Check(codes) || PyTuple_Size(codes) != pycc_ext_chunk_count || !PyTuple_Check(fixups)) {
+        return NULL;
+    }
+    if (PyTuple_Size(fixups) == 0) {
+        return Py_NewRef(codes);
+    }
+    codes = PySequence_List(codes);
+    for (i = 0; codes != NULL && i < PyTuple_Size(fixups); i++) {
+        PyObject *fixup = PyTuple_GetItem(fixups, i);
+        Py_ssize_t chunk = -1;
+        Py_ssize_t index = -1;
+        PyObject *path = NULL;
+        PyObject *elements = NULL;
+        PyObject *code;
+
+        if (!PyArg_ParseTuple(fixup, "nO!nO!", &chunk, &PyTuple_Type, &path, &index,
+                              &PyTuple_Type, &elements)
+            || chunk < 0 || chunk >= pycc_ext_chunk_count) {
+            Py_CLEAR(codes);
+            break;
+        }
+        code = pycc_ext_chunk_refold(PyList_GetItem(codes, chunk), path, 0, index, elements);
+        if (code == NULL || PyList_SetItem(codes, chunk, code) < 0) {
+            Py_CLEAR(codes);
+        }
+    }
+    if (codes != NULL) {
+        PyObject *tuple = PyList_AsTuple(codes);
+
+        Py_DECREF(codes);
+        codes = tuple;
+    }
+    return codes;
+}
+
 /* Chunk `index`'s code object from the embedded tuple (unmarshalled on the
  * first call), a new reference; NULL with no exception set when it cannot
  * be had that way. */
@@ -54,16 +153,14 @@ static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
     if (pycc_ext_chunk_table == NULL) {
         PyObject *view = PyMemoryView_FromMemory((char *)pycc_ext_chunk_table_data,
                                                  pycc_ext_chunk_table_len, PyBUF_READ);
+        PyObject *pair = NULL;
 
         if (view != NULL) {
-            pycc_ext_chunk_table = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
+            pair = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
             Py_DECREF(view);
         }
-        if (pycc_ext_chunk_table != NULL
-            && (!PyTuple_Check(pycc_ext_chunk_table)
-                || PyTuple_Size(pycc_ext_chunk_table) != pycc_ext_chunk_count)) {
-            Py_CLEAR(pycc_ext_chunk_table);
-        }
+        pycc_ext_chunk_table = pair == NULL ? NULL : pycc_ext_chunk_refolded(pair);
+        Py_XDECREF(pair);
         if (pycc_ext_chunk_table == NULL) {
             PyErr_Clear();
             return NULL;

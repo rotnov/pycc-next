@@ -17,9 +17,17 @@
 //! and tracebacks are the same either way. A build that cannot run the
 //! interpreter (`PYCC_PYTHON_INCLUDE` without one) embeds the source only.
 //!
-//! As from a `.pyc`, a `frozenset` constant iterates in `marshal`'s order,
-//! which can differ from a fresh compile's: that is CPython's own behavior
-//! for a module loaded from its bytecode cache.
+//! `marshal` writes a `frozenset`'s elements sorted, so a `frozenset`
+//! constant (a display of three or more constants, or `x in {...}`) loaded
+//! from it would iterate in that order, not in a fresh compile's -- the
+//! order of `print({1, 8, 0})` run from source, which is what pycc matches.
+//! The build therefore also records, for each such constant of numbers
+//! (and tuples of them) whose order `marshal` changes, the source display
+//! it was folded from (its elements in source order, checked to rebuild the
+//! compiled table), and the hook rebuilds those constants from it after
+//! unmarshalling. A constant with a `str` or `bytes` keeps `marshal`'s
+//! order (docs/DEVIATIONS.md): its fresh-compile order depends on the
+//! process's hash key and on what it interned before.
 
 use crate::fallback::CodeChunk;
 use std::ffi::OsStr;
@@ -40,22 +48,77 @@ pub(crate) struct Precompiled {
 
 /// Compiles the chunks of its stdin (`marshal`'s form of `((source,
 /// filename), ...)`) and writes the bytecode magic number (four bytes), one
-/// byte per chunk (1 when it compiled) and the `marshal`led tuple of their
-/// code objects. `marshal` data rather than JSON: importing `json` doubled
-/// the interpreter's start-up, and the script runs once per built module.
+/// byte per chunk (1 when it compiled) and the `marshal`led pair of their
+/// code objects and the `frozenset` constants to rebuild after loading:
+/// `(chunk, path, index, elements)`, the constant at `co_consts[index]` of
+/// the code object reached from the chunk's by the `co_consts` indexes in
+/// `path`, rebuilt as `frozenset(elements)`. A constant is rebuilt when its
+/// hashes are `fixed` (no `str` or `bytes`, whose hashes are randomized per
+/// process), `marshal` changes its table, and a set display in the chunk's
+/// source, in source order, rebuilds the compiled table (`same`: the same
+/// iteration order, also once copied into a set and grown, as `SET_UPDATE`
+/// and later `add`s would). `marshal` data rather than JSON: importing
+/// `json` doubled the interpreter's start-up, and the script runs once per
+/// built module; `ast` is imported only for a chunk with such a constant.
 const COMPILE_SCRIPT: &str = "\
 import importlib.util, marshal, sys
+def same(a, b):
+    if list(a) != list(b):
+        return False
+    for extra in range(-8, 40):
+        x = set(a); y = set(b); x.add(extra); y.add(extra)
+        if list(x) != list(y):
+            return False
+    return True
+def fixed(value):
+    if isinstance(value, (tuple, frozenset)):
+        return all(fixed(item) for item in value)
+    return value is None or isinstance(value, (int, float, complex))
+def rebuilds(order, const):
+    try:
+        built = frozenset(order)
+    except TypeError:
+        return False
+    return built == const and same(built, const)
+def frozensets(code, path):
+    for index, const in enumerate(code.co_consts):
+        if isinstance(const, frozenset):
+            yield path, index, const
+        elif hasattr(const, 'co_consts'):
+            yield from frozensets(const, path + (index,))
+def displays(source):
+    import ast
+    out = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Set):
+            try:
+                out.append(tuple(ast.literal_eval(e) for e in node.elts))
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                pass
+    return out
 chunks = marshal.loads(sys.stdin.buffer.read())
 codes = []
-for source, filename in chunks:
+fixups = []
+for k, (source, filename) in enumerate(chunks):
     try:
-        codes.append(compile(source, filename, 'exec', dont_inherit=True, optimize=0))
+        code = compile(source, filename, 'exec', dont_inherit=True, optimize=0)
     except (SyntaxError, ValueError):
-        codes.append(None)
+        code = None
+    codes.append(code)
+    orders = None
+    for path, index, const in (() if code is None else frozensets(code, ())):
+        if not fixed(const) or same(marshal.loads(marshal.dumps(const)), const):
+            continue
+        if orders is None:
+            orders = displays(source)
+        for order in orders:
+            if rebuilds(order, const):
+                fixups.append((k, path, index, order))
+                break
 out = sys.stdout.buffer
 out.write(importlib.util.MAGIC_NUMBER)
 out.write(bytes(c is not None for c in codes))
-out.write(marshal.dumps(tuple(codes)))
+out.write(marshal.dumps((tuple(codes), tuple(fixups))))
 ";
 
 /// Compiles `chunks` with `interpreter`; `None` when it cannot run or
