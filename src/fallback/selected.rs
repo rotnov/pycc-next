@@ -217,8 +217,8 @@ impl Plan {
             placed.push(unit);
         }
         let start = out.text.len() as u32;
-        let module = self.exec_text_as(&mut out.chunks, src, &self.display, false);
-        let file = self.exec_text_as(&mut out.chunks, FILE_FIXUP, "<pycc>", false);
+        let file = Self::chunk_text(&mut out.chunks, FILE_FIXUP, "<pycc>");
+        let module = Self::chunk_text(&mut out.chunks, src, &self.display);
         out.text.push_str(&format!(
             "import sys as {SYS}; import builtins as {BUILTINS}; {NS} = {SYS}.modules[__name__].__dict__\n\
              {file}\n{module}\n"

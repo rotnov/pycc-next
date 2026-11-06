@@ -63,7 +63,7 @@ mod selected;
 
 pub(crate) use lift::LIFT_PREFIX;
 pub(crate) use driver::{can_fall_back, with_fallback};
-pub(crate) use render::{CodeChunk, CodeRewrite, Rendered};
+pub(crate) use render::{CodeChunk, Rendered};
 
 use pycc_ast::Stmt;
 use pycc_diag::Diagnostic;

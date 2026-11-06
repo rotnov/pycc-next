@@ -2,7 +2,8 @@
 
 Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted,
 section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`), PR 4 (the switch,
-sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`). Tracking issue:
+sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`), PR 5 (the chunk machinery
+deleted, section 7 items 1-5; `src/ext_build/module_code.rs`). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -198,16 +199,21 @@ selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidat
 a copy of the package and times the training workload with them compiled against the
 unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
 (`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
-verdict is on wall time: the compiled median must not exceed CPython's third quartile.
-If all the candidates together are slower, each region (the candidates connected by
-calls among them, most self time first) is checked alone, then the regions that were no
-slower alone are checked together once more; at most 6 builds. Every candidate gets its
+verdict is on wall time: the compiled median must be under CPython's first quartile. A
+median inside CPython's interquartile range is noise, and a function that wins only by
+noise adds size and risk for no gain, so it is not kept (PR 5 measured pydantic's 5
+training candidates kept in one run and rejected in another under the earlier "no
+slower than CPython's third quartile").
+If all the candidates together are not faster, each region (the candidates connected by
+calls among them, most self time first) is checked alone, then the regions that were
+faster alone are checked together once more; at most 6 builds. Every candidate gets its
 last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
 `compiled_ns` as first quartile, median and third quartile, and with
 `--verify-instructions` the instruction delta under callgrind, as evidence only). A
-function measured slower is rejected ("slower when compiled") by builds and `--check`
-alike, and a later `pycc profile` keeps the rejection while the function's source hash
-is unchanged, so builds do not flap (deleting the profile measures every function
+function measured not faster is rejected ("not faster when compiled") by builds and `--check`
+alike. A later `pycc profile` keeps every verdict, a win as well as a rejection, while
+the function's source hash is unchanged, and measures only the candidates without one,
+so a re-run never flips a recorded verdict and builds do not flap (deleting the profile measures every function
 again, as a new pycc whose code got faster should); `--no-verify` skips the pass.
 Each check's build compiles exactly its set (`--select none --compile MODULE:QUALNAME`)
 and reports what it compiled (`--report-fallbacks`); a candidate the build leaves
@@ -255,10 +261,13 @@ rejected with the reason.
   embedded source. The module's `__file__` and `__spec__.origin` name its `.py` file, as
   CPython's own would. Its loader has `get_code` and `get_source`.
 
-  As of PR 4, the whole source is one precompiled chunk of the existing chunk machinery,
-  run in the module's namespace. `__file__` and `__spec__.origin` name the `.py` file,
-  which ships beside the extension, so `inspect` and tracebacks read it. The loader
-  does not have `get_code` and `get_source` yet: PR 5 replaces the chunk machinery.
+  As of PR 5, the build compiles the module's source once with the target interpreter
+  and embeds the code object, marshalled with the interpreter's magic number
+  (`src/ext_build/module_code.rs`); the extension runs it in the module's namespace
+  (`module_code.c`), or `compile()`s the embedded source when the running interpreter's
+  magic number differs or it runs with `-O`. `__file__` and `__spec__.origin` name the
+  `.py` file, which ships beside the extension, so `inspect` and tracebacks read it. The
+  loader does not have `get_code` and `get_source` yet.
 - **Patching.** After the body has run, each selected function is patched in place, with
   the frameless forwarder mechanism v0.8 built (`src/ext/module/forward.c`; the hook is `patch.c`):
   - its `vectorcall` becomes a trampoline into the native body;

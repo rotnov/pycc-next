@@ -1,13 +1,7 @@
 //! v0.11 accept 3: what a whole-package extension reads by name while its
-//! modules import is read once per artifact, or by the interned key the
-//! module already holds, and still answers as before.
+//! modules import is read by the interned key the module already holds, and
+//! still answers as before, with and without `-O`.
 //!
-//! * Each member's fallback code is unmarshalled when the interpreter can
-//!   load it (the same bytecode magic number, no `-O`) and compiled from its
-//!   embedded source otherwise. The interpreter's side of that check is read
-//!   once for the whole extension (`pycc_ext_marshal_loads` in the shim's
-//!   runtime unit), so every member, not only the first one imported, must
-//!   still decide it correctly, with and without `-O`.
 //! * A module's interface table (the functions other members call
 //!   natively) is filled by the keys its body published them with
 //!   (`pycc_ext_publish_key`): a call from another member is native while
@@ -72,21 +66,11 @@ def use(n: int) -> int:
     return a.twice(n) + a.thrice(n)
 "#;
 
-/// Counts the `compile()` calls for the package's own files while it is
-/// imported (to stderr), then exercises both members.
+/// Imports the package, then exercises both members.
 const DRIVER: &str = r#"
-import builtins, sys
+import sys
 sys.path.insert(0, sys.argv[1])
-calls = []
-real = builtins.compile
-def counting(source, filename, *args, **kwargs):
-    if "pki" in str(filename):
-        calls.append(filename)
-    return real(source, filename, *args, **kwargs)
-builtins.compile = counting
 from pki import a, b
-builtins.compile = real
-print("compiled at import:", len(calls), file=sys.stderr)
 t = a.Tally()
 print(t.bump("x"), t.bump("x"), b.Log().note("k"))
 for bad in (lambda: a.Tally().bump(3), lambda: b.Log().note("")):
@@ -124,7 +108,7 @@ fn run(root: &Path, optimize: bool) -> Output {
 }
 
 #[test]
-fn every_member_decides_its_fallback_code_and_its_native_calls_as_cpython_does() {
+fn every_member_s_native_calls_answer_as_cpython_does() {
     let compiled = ScratchDir::new("package_import_names").expect("scratch");
     write_package(&compiled);
     let package = compiled.join("pki");
@@ -153,15 +137,6 @@ fn every_member_decides_its_fallback_code_and_its_native_calls_as_cpython_does()
         let stderr = text(&ours.stderr);
         assert_eq!(ours.status.code(), Some(0), "{stderr}");
         assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{stderr}");
-        // Unoptimized, both members unmarshal their chunks; under `-O`
-        // (whose `assert`s the embedded code still holds) both compile
-        // them from the embedded sources.
-        let count = stderr.lines().next().unwrap_or_default();
-        if optimize {
-            assert_ne!(count, "compiled at import: 0", "{stderr}");
-        } else {
-            assert_eq!(count, "compiled at import: 0", "{stderr}");
-        }
     }
     let oracle = text(&run(&plain, false).stdout);
     assert_eq!(

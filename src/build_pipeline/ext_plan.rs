@@ -214,7 +214,7 @@ pub(super) fn plan_ext(
         .precompile_interpreter()
         .filter(|_| !chunks.is_empty())
         .and_then(|python| ext_build::precompile(python, &chunks));
-    let inc_body = ext_build::install_precompiled(inc_body, &chunks, compiled.as_ref());
+    let inc_body = ext_build::install_module_code(inc_body, &chunks, compiled.as_ref());
     let inc_body = ext_build::with_module_doc(inc_body, &entry_source);
     let sources = ext_build::shim_sources(obj_path, &inc_body);
     for (path, text) in &sources {

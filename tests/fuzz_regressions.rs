@@ -326,6 +326,24 @@ fn a_compiled_handler_catches_a_fallback_exception_subclass() {
 /// Builds `tests/fixtures/<name>.py` as an `--ext --non-strict` module and
 /// compares importing it with running the source under CPython.
 fn assert_ext_non_strict_matches(name: &str) {
+    assert_ext_non_strict_matches_selecting(name, "module");
+}
+
+/// A frozenset constant of a module that runs as CPython bytecode iterates
+/// as a compile of its source orders it, though `marshal`, which loads the
+/// code objects, writes its elements sorted: in a selected function's lift
+/// and in the module body, which runs as bytecode once a function is
+/// selected (`--select all`).
+#[test]
+fn a_constant_set_display_in_bytecode_iterates_as_compiled_from_source() {
+    assert_ext_non_strict_matches_selecting("fuzz_constant_set_bytecode", "all");
+    // A display the build cannot read back (`{1 + 0, 8, 0}`), in the module,
+    // a lambda and a nested function: the module compiles at import.
+    assert_ext_non_strict_matches_selecting("fuzz_constant_set_folded", "all");
+}
+
+/// [`assert_ext_non_strict_matches`] under `--select <select>`.
+fn assert_ext_non_strict_matches_selecting(name: &str, select: &str) {
     let source = fixture(&format!("{name}.py"));
     let expected = observed(&Command::new(python()).arg(&source).output().expect("runs"), "__main__");
     let dir = ScratchDir::new(&format!("fuzz_{name}")).expect("scratch");
@@ -334,7 +352,7 @@ fn assert_ext_non_strict_matches(name: &str) {
         .arg(&source)
         .arg("-o")
         .arg(dir.join(name))
-        .args(["--ext", "--non-strict", "--select", "module"])
+        .args(["--ext", "--non-strict", "--select", select])
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", rendered(&build));

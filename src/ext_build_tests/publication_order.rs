@@ -214,7 +214,7 @@ fn each_exec_publishes_classes_from_its_own_snapshot() {
         "{exec}"
     );
     // Released if the pre-compiled code hook cannot be bound
-    // (`src/ext_build/precompiled.rs`), if it cannot be installed, on the
+    // (`src/ext_build/module_code.rs`), if it cannot be installed, on the
     // failing body's path, and after the safety net.
     assert_eq!(exec.matches("Py_DECREF(classes);").count(), 4, "{exec}");
 }

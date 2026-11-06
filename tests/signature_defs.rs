@@ -1,18 +1,12 @@
-//! v0.12: an `--ext` module's published signature wrapper (#1194,
-//! `src/ext_build/signatures.rs`) whose declared defaults are constants is
-//! tabled as the wrapper function's own code object, and importing the
-//! module makes the wrapper directly, its closure bound as the factory
-//! `_pycc_make` binds it, instead of running the factory's chunk and calling
-//! the factory. Everything Python sees of the wrapper is as before, and so
-//! the source's: name, qualified name, module, defaults, keyword defaults
-//! (a dict of its own per function), the parameters `inspect` reads, the
-//! arguments bound and the `TypeError` of a call that cannot bind, and the
-//! traceback of an exception the compiled body raises. A wrapper with a
-//! default computed at run time still runs its factory, and so does one
-//! that guards a scalar parameter's type with a fallback to the source
-//! (`--non-strict`'s twin, a second closure the factory makes). (What the
-//! wrappers leave out, their annotations among it, is in
-//! `docs/DEVIATIONS.md`.)
+//! An `--ext` module's published signature wrapper (#1194,
+//! `src/ext_build/signatures.rs`): importing the module runs each wrapper's
+//! factory `_pycc_make` from the code the build compiled, and everything
+//! Python sees of the wrapper is the source's: name, qualified name, module,
+//! defaults, keyword defaults (a dict of its own per function), the
+//! parameters `inspect` reads, the arguments bound and the `TypeError` of a
+//! call that cannot bind, and the traceback of an exception the compiled
+//! body raises. (What the wrappers leave out, their annotations among it, is
+//! in `docs/DEVIATIONS.md`.)
 //!
 //! The oracle is `python3` (or `PYCC_PYTHON`) importing the source itself.
 
@@ -189,11 +183,10 @@ fn check(label: &str, module: &str, driver: &str) -> String {
 }
 
 #[test]
-fn constant_default_wrappers_are_made_without_their_factories() {
-    // Every wrapper but `computed`'s, whose default reads `LIMIT` when its
-    // factory runs, and `add`'s, whose `int` parameters fall back to the
-    // source through a twin, is made directly.
-    assert_eq!(check("signature_defs", MODULE, DRIVER), "factories run at import: 2");
+fn every_wrapper_runs_its_factory_and_behaves_as_the_source() {
+    // One factory per published wrapper: the seven functions and two
+    // methods the driver reads.
+    assert_eq!(check("signature_defs", MODULE, DRIVER), "factories run at import: 9");
 }
 
 #[test]

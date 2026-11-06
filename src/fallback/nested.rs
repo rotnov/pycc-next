@@ -425,7 +425,7 @@ impl Plan {
 
     /// The preamble text defining the helpers and every live nested
     /// statement's scaffold, or empty when there is none.
-    pub(super) fn nested_preamble(&self, chunks: &mut Vec<render::CodeChunk>) -> String {
+    pub(super) fn nested_preamble(&self) -> String {
         let live: Vec<(usize, &Nested)> = self.live_nested().collect();
         if live.is_empty() {
             return String::new();
@@ -451,32 +451,19 @@ impl Plan {
              {CELL_FN} = __pycc_fallback_types.CellType\n\
 "
         );
-        // Pre-compiled like every chunk in an `--ext` module (compiling it
-        // at import cost pydantic ~2M instructions per module).
         let mut out = format!(
             "; {}",
-            self.exec_text_as(chunks, &helpers, "<pycc fallback>", false)
+            self.exec_text_as(&helpers, "<pycc fallback>", false)
         );
         for (id, nested) in live {
             out.push_str("; ");
-            let (text, rewrite) = self.scaffold(id, nested);
-            let made = chunks.len();
-            out.push_str(&self.exec_text(chunks, &text));
-            // A pre-compiled scaffold is re-qualified at build time, so
-            // `SPEC_FN` finds its code already re-qualified and skips it.
-            if chunks.len() > made
-                && let Some(chunk) = chunks.last_mut()
-            {
-                chunk.rewrites.push(rewrite);
-            }
+            out.push_str(&self.exec_text(&self.scaffold(id, nested)));
         }
         out
     }
 
-    /// The scaffold source of nested statement `id` (see the module doc),
-    /// and the build-time re-qualification of its code that `SPEC_FN`
-    /// otherwise makes at import.
-    fn scaffold(&self, id: usize, nested: &Nested) -> (String, render::CodeRewrite) {
+    /// The scaffold source of nested statement `id` (see the module doc).
+    fn scaffold(&self, id: usize, nested: &Nested) -> String {
         let src = &self.source;
         let make = format!("__pycc_nest{id}_make");
         let mut name = if nested.outer_name.is_empty() {
@@ -545,12 +532,7 @@ impl Plan {
             py_str(&old),
             py_str(&nested.outer_qualname),
         ));
-        let rewrite = render::CodeRewrite::Requal {
-            path: vec![make, name],
-            old,
-            new: nested.outer_qualname.clone(),
-        };
-        (text, rewrite)
+        text
     }
 
     /// The edits of compiled unit `index` for its live nested statements:
