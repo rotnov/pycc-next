@@ -245,7 +245,7 @@ rejected with the reason.
   which ships beside the extension, so `inspect` and tracebacks read it. The loader
   does not have `get_code` and `get_source` yet: PR 5 replaces the chunk machinery.
 - **Patching.** After the body has run, each selected function is patched in place, with
-  the frameless forwarder mechanism v0.8 built (`src/ext/module/forward.c`):
+  the frameless forwarder mechanism v0.8 built (`src/ext/module/forward.c`; the hook is `patch.c`):
   - its `vectorcall` becomes a trampoline into the native body;
   - its version is cleared, so no call site specializes past it;
   - CPython's own binding stays the fallback for any argument shape the trampoline does

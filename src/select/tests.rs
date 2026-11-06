@@ -106,6 +106,7 @@ fn a_profile_selects_by_the_rule() {
         runs: 1,
         total_ns: 1000,
         functions: vec![entry("hot", 1, 100, 500), entry("rare", 5, 2, 400), entry("gone", 9, 100, 50)],
+        verified: false,
     };
     std::fs::write(&path, p.to_json()).unwrap();
     let sources = [function("m", "hot", 1, true), function("m", "rare", 5, true)];

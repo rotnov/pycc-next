@@ -23,7 +23,7 @@
 //! `--verify-instructions` adds each check's instruction delta under callgrind
 //! as evidence.
 
-use super::{Driver, FunctionKey, Measured, Profile, Rule};
+use super::{Driver, FunctionKey, Measured, Profile};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -49,7 +49,6 @@ pub(crate) struct Options {
 pub(super) struct Context<'a> {
     pub(super) driver: &'a Driver<'a>,
     pub(super) workload: &'a [OsString],
-    pub(super) rule: Rule,
     pub(super) scratch: &'a Path,
     pub(super) options: Options,
 }
@@ -167,13 +166,17 @@ pub(super) fn verify(
     candidates: &[FunctionKey],
     cx: &Context<'_>,
 ) -> Result<(), String> {
+    // The selection is frozen here: from now on only the candidates'
+    // measured winners are selected, never a function that would fill the
+    // slot of a rejected one.
+    profile.verified = true;
     if candidates.is_empty() {
         return Ok(());
     }
     let started = Instant::now();
     let mut builds = 0usize;
     let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
-    let whole = check(profile, &all, &all, cx, &mut builds)?;
+    let whole = check(&all, cx, &mut builds)?;
     let mut verdicts: BTreeMap<FunctionKey, Measured> = BTreeMap::new();
     let record = |verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<FunctionKey>, c: &Check| {
         for key in set {
@@ -200,7 +203,7 @@ pub(super) fn verify(
                 break;
             }
             let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
-            let c = check(profile, &set, &all, cx, &mut builds)?;
+            let c = check(&set, cx, &mut builds)?;
             record(&mut verdicts, &set, &c);
             if c.no_slower() {
                 kept.extend(set);
@@ -208,7 +211,7 @@ pub(super) fn verify(
             }
         }
         if kept_regions > 1 {
-            let c = check(profile, &kept, &all, cx, &mut builds)?;
+            let c = check(&kept, cx, &mut builds)?;
             record(&mut verdicts, &kept, &c);
         }
     }
@@ -226,25 +229,17 @@ pub(super) fn verify(
     Ok(())
 }
 
-/// Builds `set` (of the candidates `all`) into a copy of the package and times
+/// Builds exactly `set` into a copy of the package and times
 /// the workload against it and against the sources.
 fn check(
-    profile: &Profile,
     set: &BTreeSet<FunctionKey>,
-    all: &BTreeSet<FunctionKey>,
     cx: &Context<'_>,
     builds: &mut usize,
 ) -> Result<Check, String> {
     *builds += 1;
     let dir = cx.scratch.join(format!("verify{builds}"));
     let copy = copy_package(cx.driver.pkg, &dir.join("tree"))?;
-    // The other candidates are left out, so the build's rule takes only `set`.
-    let mut only = profile.clone();
-    only.functions
-        .retain(|e| set.contains(&key(e)) || !all.contains(&key(e)));
-    let profile_path = dir.join("profile.json");
-    std::fs::write(&profile_path, only.to_json()).map_err(|e| e.to_string())?;
-    build(&copy, &profile_path, cx)?;
+    build(&copy, set, cx)?;
     let compiled = Driver {
         python: cx.driver.python,
         script: cx.driver.script,
@@ -298,10 +293,6 @@ fn check(
     Ok(c)
 }
 
-fn key(e: &super::Entry) -> FunctionKey {
-    (e.module.clone(), e.qualname.clone(), e.firstlineno)
-}
-
 /// One run of the workload, its wall time; its output is kept from the
 /// terminal, and shown when it fails.
 fn time(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, String> {
@@ -327,7 +318,7 @@ fn time(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, S
 }
 
 /// The error for a timed run whose compiled copy could not patch its
-/// functions (`forward.c`, under `PYCC_REQUIRE_PATCH`): its verdicts would
+/// functions (`patch.c`, under `PYCC_REQUIRE_PATCH`): its verdicts would
 /// compare bytecode with bytecode, so none is recorded.
 fn unpatchable(stderr: &[u8]) -> Result<(), String> {
     let stderr = String::from_utf8_lossy(stderr);
@@ -369,9 +360,9 @@ fn instructions(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Resul
         .ok_or_else(|| "callgrind reported no instruction count".to_string())
 }
 
-/// `pycc build COPY --ext --non-strict --release --profile PROFILE` with the
-/// profile's own rule, by this pycc.
-fn build(copy: &Path, profile: &Path, cx: &Context<'_>) -> Result<(), String> {
+/// `pycc build COPY --ext --non-strict --release --select none --compile
+/// MODULE:QUALNAME ...` of exactly `set`, by this pycc.
+fn build(copy: &Path, set: &BTreeSet<FunctionKey>, cx: &Context<'_>) -> Result<(), String> {
     let out = if copy.is_dir() {
         copy.join("__init__")
     } else {
@@ -386,13 +377,12 @@ fn build(copy: &Path, profile: &Path, cx: &Context<'_>) -> Result<(), String> {
         .arg(copy)
         .arg("-o")
         .arg(&out)
-        .args(["--ext", "--non-strict", "--release", "--profile"])
-        .arg(profile)
-        .arg(format!("--select-share={}", cx.rule.share))
-        .arg(format!("--select-calls={}", cx.rule.calls))
-        .arg(format!("--select-max={}", cx.rule.max))
-        .arg(format!("--select-outside={}", cx.rule.outside))
-        .arg(format!("--select-handled={}", cx.rule.handled));
+        .args(["--ext", "--non-strict", "--release", "--select", "none"]);
+    // Exactly `set`: no selection rule runs again, so leaving the other
+    // candidates out changes nothing else.
+    for (module, qualname, _) in set {
+        command.arg("--compile").arg(format!("{module}:{qualname}"));
+    }
     if member {
         command.arg("--foreign-relative-imports");
     }

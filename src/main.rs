@@ -364,6 +364,7 @@ fn main() -> ExitCode {
                 max: select_max,
                 outside: select_outside,
                 handled: select_handled,
+                measured_only: false,
             };
             let done = if check {
                 profile::check_profile(&path, &out, &workload, rule)

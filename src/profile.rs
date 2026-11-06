@@ -118,6 +118,10 @@ pub(crate) struct Profile {
     pub(crate) runs: u32,
     pub(crate) total_ns: u64,
     pub(crate) functions: Vec<Entry>,
+    /// Pass 3 measured the selection's candidates: only its measured
+    /// winners are selected ([`Rule::measured_only`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) verified: bool,
 }
 
 /// One function of the package's current sources (the driver's `index`).
@@ -149,6 +153,10 @@ pub(crate) struct Rule {
     /// exception must be under this. Exceptions as control flow are slower
     /// compiled than in CPython until PR 9 (section 2.7).
     pub(crate) handled: f64,
+    /// Only functions pass 3 measured are selected: a profile whose
+    /// candidates were measured keeps exactly its winners, and a function
+    /// that would fill a slot a rejected candidate left is not one of them.
+    pub(crate) measured_only: bool,
 }
 
 impl Default for Rule {
@@ -159,6 +167,7 @@ impl Default for Rule {
             max: 64,
             outside: 0.5,
             handled: 0.5,
+            measured_only: false,
         }
     }
 }
@@ -175,6 +184,15 @@ pub(crate) struct Decision<'p> {
 
 impl Profile {
     /// The file's text: pretty JSON, entries sorted, a final newline.
+    /// `rule` as it applies to this profile: only measured winners when
+    /// pass 3 ran.
+    pub(crate) fn rule(&self, rule: Rule) -> Rule {
+        Rule {
+            measured_only: self.verified,
+            ..rule
+        }
+    }
+
     pub(crate) fn to_json(&self) -> String {
         let mut sorted = self.clone();
         sorted.functions.sort_by(|a, b| {
@@ -290,6 +308,8 @@ pub(crate) fn select<'p>(
                     entry.handled,
                     entry.calls.min(TYPE_CALLS)
                 ))
+            } else if rule.measured_only && entry.measured.is_none() {
+                Some("not measured by pass 3 (it was not among the candidates it built)".to_string())
             } else if taken >= rule.max {
                 Some(format!("not among the top {} by self time", rule.max))
             } else {
@@ -562,7 +582,7 @@ pub(crate) fn check_profile(
         eprintln!("{note}");
     }
     let decided: Vec<(&Entry, bool)> = current.iter().map(|(e, f)| (*e, f.eligible)).collect();
-    for d in select(profile.total_ns, &decided, rule) {
+    for d in select(profile.total_ns, &decided, profile.rule(rule)) {
         let e = d.entry;
         match &d.rejected {
             None => println!(
@@ -697,6 +717,7 @@ pub(crate) fn run_profile(
         runs: runs.max(1),
         total_ns,
         functions,
+        verified: false,
     };
     // Pass 2's samples can reject a candidate (and with it its callers); pass
     // 3 keeps only the measured winners.
@@ -710,7 +731,6 @@ pub(crate) fn run_profile(
         let cx = verify::Context {
             driver: &driver,
             workload: rest,
-            rule,
             scratch: &scratch,
             options,
         };
@@ -719,7 +739,7 @@ pub(crate) fn run_profile(
     std::fs::write(out, profile.to_json())
         .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
     let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
-    let selected = select(total_ns, &decided, rule)
+    let selected = select(total_ns, &decided, profile.rule(rule))
         .iter()
         .filter(|d| d.rejected.is_none())
         .count();

@@ -33,6 +33,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         runs: 5,
         total_ns: 1000,
         functions,
+        verified: false,
     }
 }
 
@@ -267,4 +268,46 @@ fn a_function_that_mostly_catches_exceptions_is_not_selected() {
     );
     let none = select(1000, &input, Rule { calls: 1, handled: 0.0, ..Rule::default() });
     assert!(none.iter().all(|d| d.rejected.is_some()));
+}
+
+/// Three functions pass the rule and two fit (`max` 2): pass 3 measures `a`
+/// and `b`, rejects `a`, and the selection is then `b` alone. `c`, which
+/// would take the slot `a` left, was never built: it is not selected.
+#[test]
+fn a_verified_profile_selects_only_its_measured_winners() {
+    let measured = |compiled| Measured {
+        compiled,
+        with: 2,
+        cpython_ns: [10, 11, 12],
+        compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
+        instructions: None,
+    };
+    let mut a = entry("m", "a", 1, "", 100, 300);
+    a.measured = Some(measured(false));
+    let mut b = entry("m", "b", 2, "", 100, 200);
+    b.measured = Some(measured(true));
+    let c = entry("m", "c", 3, "", 100, 100);
+    let mut p = profile(vec![a, b, c]);
+    let rule = Rule { max: 2, ..Rule::default() };
+    let picked = |p: &Profile| -> Vec<String> {
+        let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+        select(p.total_ns, &input, p.rule(rule))
+            .into_iter()
+            .filter(|d| d.rejected.is_none())
+            .map(|d| d.entry.qualname.clone())
+            .collect()
+    };
+    // Unverified (`--no-verify`), the rule alone decides.
+    assert_eq!(picked(&p), ["b", "c"]);
+    p.verified = true;
+    assert_eq!(picked(&p), ["b"]);
+    let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+    let c = select(p.total_ns, &input, p.rule(rule)).into_iter().find(|d| d.entry.qualname == "c").unwrap();
+    assert_eq!(c.rejected.as_deref(), Some("not measured by pass 3 (it was not among the candidates it built)"));
+    // The flag is part of the file.
+    let dir = pycc_scratch::ScratchDir::new("profile_test").unwrap();
+    let path = dir.join("p.json");
+    std::fs::write(&path, p.to_json()).unwrap();
+    assert!(Profile::read(&path).unwrap().verified);
+    assert!(!profile(Vec::new()).to_json().contains("verified"));
 }

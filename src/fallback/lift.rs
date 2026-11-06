@@ -708,7 +708,7 @@ fn forward_args(qualnames: &[&str]) -> Vec<String> {
     out
 }
 
-/// The hook [`Plan::forward_call`]'s line calls (`forward.c`).
+/// The hook [`Plan::forward_call`]'s line calls (`patch.c`).
 const FORWARD_HOOK: &str = "__pycc_forward__";
 
 #[cfg(test)]

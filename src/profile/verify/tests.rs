@@ -1,5 +1,5 @@
 use super::*;
-use crate::profile::{ArgTypes, Entry};
+use crate::profile::{ArgTypes, Entry, Rule};
 
 fn entry(qualname: &str, ns: u64, callees: &[&str]) -> Entry {
     Entry {
@@ -24,6 +24,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         runs: 1,
         total_ns: 1000,
         functions,
+        verified: false,
     }
 }
 

@@ -7,7 +7,7 @@
 //! the selected functions are compiled, each as the lift of its `def`
 //! (`lift`: every parameter and the return an object, every module global
 //! read from the namespace, `super()` given the class). Once the chunk has
-//! run, `__pycc_patch__` (`src/ext/module/forward.c`) points each function
+//! run, `__pycc_patch__` (`src/ext/module/patch.c`) points each function
 //! CPython made of a selected `def` at its compiled body; the function
 //! object, its `__code__`, defaults and decorators stay CPython's.
 //!
@@ -22,7 +22,7 @@
 use super::render::{NOWHERE, Out};
 use super::*;
 
-/// The hook the trailer calls once the module's code has run (`forward.c`).
+/// The hook the trailer calls once the module's code has run (`patch.c`).
 const PATCH_HOOK: &str = "__pycc_patch__";
 
 /// The names every module binds before its code runs.

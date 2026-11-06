@@ -3,7 +3,7 @@
 //!
 //! A module of the build stays CPython bytecode; only its selected functions
 //! are compiled, each patched into the function CPython makes when the
-//! module's code runs (`crate::fallback`'s selected rewrite, `forward.c`'s
+//! module's code runs (`crate::fallback`'s selected rewrite, `patch.c`'s
 //! `__pycc_patch__`). The selection comes from a profile (`--profile`,
 //! [`crate::profile`]) and the selection rule, or `--select all` (every
 //! eligible function), adjusted by `--compile` and `--no-compile`; with
@@ -89,7 +89,7 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
                     current.iter().map(|(e, f)| (*e, f.eligible)).collect();
                 let by_entry: BTreeMap<*const profile::Entry, &Function> =
                     current.iter().map(|(e, f)| (*e as *const _, *f)).collect();
-                for decision in profile::select(loaded.total_ns, &entries, request.rule) {
+                for decision in profile::select(loaded.total_ns, &entries, loaded.rule(request.rule)) {
                     let f = by_entry[&(decision.entry as *const _)];
                     match &decision.rejected {
                         None => {
@@ -229,6 +229,7 @@ pub(crate) fn resolve(
             max: flags.select_max.unwrap_or(defaults.max),
             outside: flags.select_outside.unwrap_or(defaults.outside),
             handled: flags.select_handled.unwrap_or(defaults.handled),
+            measured_only: false,
         },
     };
     let needs_sources = match mode {
