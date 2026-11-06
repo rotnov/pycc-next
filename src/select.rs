@@ -14,7 +14,7 @@
 use crate::profile::{self, Function, Rule};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// `--select`.
@@ -289,3 +289,32 @@ pub(crate) fn from_text(text: &str) -> Result<BTreeSet<Key>, String> {
 
 #[cfg(test)]
 mod tests;
+
+/// What `pycc build PATH -o OUT --ext` writes for a module with nothing
+/// selected: no extension, but PATH's source as OUT's module
+/// ([`crate::ext_output::python_source`]), which CPython imports as it is.
+/// An extension a previous build left at OUT is removed, as it would shadow
+/// the source. Returns the source file, which is PATH itself when OUT names
+/// it.
+pub(crate) fn ship_source(path: &Path, out: &Path, target: Option<&str>) -> Result<PathBuf, String> {
+    let platform = crate::ext_build::ExtLinkPlatform::resolve(target).suffix_platform();
+    let output = crate::ext_output::resolve(out, &platform).map_err(|e| e.message())?;
+    let dest = crate::ext_output::python_source(out, &platform).map_err(|e| e.message())?;
+    match std::fs::remove_file(&output.artifact) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("cannot remove `{}`: {e}", output.artifact.display())),
+    }
+    let same = match (std::fs::canonicalize(path), std::fs::canonicalize(&dest)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if !same {
+        if let Some(dir) = dest.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+        }
+        std::fs::copy(path, &dest)
+            .map_err(|e| format!("cannot write `{}`: {e}", dest.display()))?;
+    }
+    Ok(dest)
+}

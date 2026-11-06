@@ -54,7 +54,10 @@ fn build(scratch: &Path, flags: &[&str]) -> (std::path::PathBuf, Output) {
 fn extension(dir: &Path) -> bool {
     std::fs::read_dir(dir)
         .unwrap()
-        .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".so"))
+        .any(|e| {
+            let name = e.unwrap().file_name().to_string_lossy().into_owned();
+            name.ends_with(".so") || name.ends_with(".pyd")
+        })
 }
 
 #[test]
@@ -109,9 +112,54 @@ fn without_a_profile_nothing_is_selected_and_no_extension_is_built() {
     assert!(!extension(&dir));
     let stderr = String::from_utf8_lossy(&o.stderr);
     assert!(stderr.contains("note: no profile (`--profile`): no function is selected"), "{stderr}");
-    assert!(stderr.contains("no extension is built, so CPython imports the module as it is"), "{stderr}");
+    assert!(stderr.contains("no extension is built; `"), "{stderr}");
+    assert!(stderr.contains("` is the module, which CPython imports as it is"), "{stderr}");
     let (dir, _) = build(&scratch, &["--select", "none"]);
     assert!(!extension(&dir));
+}
+
+#[test]
+fn with_nothing_selected_the_output_is_the_module_as_source() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let src = scratch.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    let py = src.join("m.py");
+    std::fs::write(&py, FIXTURE).unwrap();
+    let dist = scratch.join("dist");
+    let out = dist.join("named");
+    std::fs::create_dir_all(&dist).unwrap();
+    let build = |select: &str| {
+        let o = pycc(&[
+            "build".as_ref(),
+            py.as_os_str(),
+            "-o".as_ref(),
+            out.as_os_str(),
+            "--ext".as_ref(),
+            "--non-strict".as_ref(),
+            "--select".as_ref(),
+            select.as_ref(),
+        ]);
+        assert!(o.status.success(), "{}", text(&o));
+    };
+    let has_extension = || extension(&dist);
+    // An extension of an earlier build is replaced by the source, which
+    // would otherwise be shadowed by it.
+    build("all");
+    assert!(has_extension());
+    build("none");
+    assert!(!has_extension());
+    assert_eq!(std::fs::read_to_string(dist.join("named.py")).unwrap(), FIXTURE);
+    let run = |dir: &Path, name: &str| {
+        let o = Command::new(python())
+            .args(["-I", "-c", &format!("import sys; sys.path.insert(0, sys.argv[1]); import {name}; {name}.main()")])
+            .arg(dir)
+            .output()
+            .unwrap();
+        (o.status.success(), String::from_utf8_lossy(&o.stdout).replace(dir.to_str().unwrap(), "DIR"))
+    };
+    let (ok, got) = run(&dist, "named");
+    assert!(ok, "{got}");
+    assert_eq!(got.replace("named", "m"), run(&src, "m").1);
 }
 
 #[test]
@@ -198,20 +246,20 @@ fn a_package_serves_only_its_modules_with_selected_functions() {
         .args([
             "-I",
             "-c",
-            "import sys; sys.path.insert(0, sys.argv[1]); import pkg, pkg.a, pkg.b\n\
-             for m in (pkg, pkg.a, pkg.b):\n    print(m.__name__, type(m.__spec__.loader).__name__, m.__file__[len(sys.argv[1].rstrip('/')):])\n\
+            "import os, sys; sys.path.insert(0, sys.argv[1]); import pkg, pkg.a, pkg.b\n\
+             for m in (pkg, pkg.a, pkg.b):\n    print(m.__name__, type(m.__spec__.loader).__name__, os.path.relpath(m.__file__, sys.argv[1]).replace(os.sep, '/'))\n\
              print(pkg.f(3), pkg.b.g(1))",
         ])
         .arg(scratch.join(""))
         .output()
         .unwrap();
     assert_eq!(
-        text(&o),
+        text(&o).replace('\r', ""),
         // The package's `__init__` is the extension that installs the finder;
         // its module runs as bytecode too.
-        "pkg ExtensionFileLoader /pkg/__init__.py\n\
-         pkg.a _PyccFinder /pkg/a.py\n\
-         pkg.b SourceFileLoader /pkg/b.py\n\
+        "pkg ExtensionFileLoader pkg/__init__.py\n\
+         pkg.a _PyccFinder pkg/a.py\n\
+         pkg.b SourceFileLoader pkg/b.py\n\
          [3, 3] 2\n"
     );
 }

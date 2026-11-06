@@ -41,7 +41,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   rule, adjusted by `--compile`/`--no-compile` (`[tool.pycc] compile`/`exclude`,
   `MODULE:QUALNAME`); `--select all` compiles every eligible function, `--select none`
   none. **With no profile nothing is selected**, and a module or package with nothing
-  selected gets no extension at all: CPython imports it unchanged. A package's finder
+  selected gets no extension at all: CPython imports it unchanged (a module built to `-o OUT`
+  gets its source as `OUT`'s `.py`). A package's finder
   serves only its modules with selected functions. `--select module` keeps the
   whole-module compilation of before, transitionally (the existing tests and CI's
   package checks use it). The selection rule also leaves out a function that catches an

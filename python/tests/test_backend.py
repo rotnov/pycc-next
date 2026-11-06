@@ -594,8 +594,8 @@ class Wheel(Project):
                                  "demo_pkg/data/table.txt", "demo_pkg/py.typed"])
         [call] = self.calls()
         args = call["args"]
-        self.assertEqual(args[args.index("--profile") + 1],
-                         str(self.root / "pycc.profile.json"))
+        self.assertEqual(pathlib.Path(args[args.index("--profile") + 1]).resolve(),
+                         (self.root / "pycc.profile.json").resolve())
         self.assertEqual(args[args.index("--compile") + 1], "demo_pkg.core:fib")
         self.assertEqual(args[args.index("--no-compile") + 1], "demo_pkg:helper")
         # A separate module build ships its source too.
@@ -692,8 +692,8 @@ class Wheel(Project):
             self.assertIn("demo_pkg/__init__.abi3.so", z.namelist())
         [call] = self.calls()
         args = call["args"]
-        self.assertEqual(args[args.index("--profile") + 1],
-                         str(self.root / "pycc.profile.json"))
+        self.assertEqual(pathlib.Path(args[args.index("--profile") + 1]).resolve(),
+                         (self.root / "pycc.profile.json").resolve())
 
 
 class Versions(unittest.TestCase):

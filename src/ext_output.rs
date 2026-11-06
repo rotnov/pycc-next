@@ -223,6 +223,21 @@ pub(crate) fn resolve(out: &Path, platform: &ExtPlatform) -> Result<ExtOutput, E
     })
 }
 
+/// The Python source file that is `OUT`'s module when no extension is built
+/// (a non-strict build with nothing selected): beside the artifact, named as
+/// the artifact is before its suffix (`m.py` for `m.abi3.so`, `__init__.py`
+/// for a package's own `__init__.abi3.so`).
+pub(crate) fn python_source(out: &Path, platform: &ExtPlatform) -> Result<PathBuf, ExtOutputError> {
+    let output = resolve(out, platform)?;
+    let name = output.artifact.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = platform
+        .recognized_suffixes()
+        .iter()
+        .find_map(|suffix| name.strip_suffix(suffix))
+        .unwrap_or(&name);
+    Ok(output.artifact.with_file_name(format!("{stem}.py")))
+}
+
 /// Whether `basename` ends with the platform's interpreter-specific tagged
 /// suffix (`m.cpython-314-x86_64-linux-gnu.so`, `m.cp314-win_amd64.pyd`).
 ///
@@ -266,6 +281,18 @@ fn is_ascii_identifier(name: &str) -> bool {
 #[cfg(test)]
 mod ext_output_tests {
     use super::*;
+
+    #[test]
+    fn the_python_source_sits_beside_the_artifact_under_its_name() {
+        let unix = ExtPlatform::Unix;
+        let source = |out: &str, platform| python_source(Path::new(out), platform).unwrap();
+        assert_eq!(source("m", &unix), PathBuf::from("m.py"));
+        assert_eq!(source("dist/m.abi3.so", &unix), Path::new("dist").join("m.py"));
+        assert_eq!(source("dist/m.so", &unix), Path::new("dist").join("m.py"));
+        assert_eq!(source("m.pyd", &ExtPlatform::Windows), PathBuf::from("m.py"));
+        assert_eq!(source("pkg/__init__", &unix), Path::new("pkg").join("__init__.py"));
+        assert!(python_source(Path::new("1m"), &unix).is_err());
+    }
 
     /// Resolves `out` for `platform`, asserting success, and returns the
     /// artifact path and module name for comparison.

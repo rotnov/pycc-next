@@ -25,7 +25,7 @@ MODES = {
     "strict": ["--release"],
     "nonstrict": ["--release", "--non-strict"],
     "ext": ["--ext"],
-    "ext-nonstrict": ["--ext", "--non-strict"],
+    "ext-nonstrict": ["--ext", "--non-strict", "--select", "all"],
 }
 
 CRASH_MARKERS = ("panicked at", "LLVM ERROR", "internal compiler error", "RUST_BACKTRACE",

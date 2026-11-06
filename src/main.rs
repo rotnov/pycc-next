@@ -208,11 +208,20 @@ fn main() -> ExitCode {
                 match selection.modules.get(&module) {
                     Some(selected) if !selected.is_empty() => select::set_module(selected.clone()),
                     _ => {
-                        eprintln!(
-                            "note: no function of `{module}` is selected: no extension is built, \
-                             so CPython imports the module as it is"
-                        );
-                        return ExitCode::SUCCESS;
+                        return match select::ship_source(&path, &out, target.as_deref()) {
+                            Ok(source) => {
+                                eprintln!(
+                                    "note: no function of `{module}` is selected: no extension is \
+                                     built; `{}` is the module, which CPython imports as it is",
+                                    source.display()
+                                );
+                                ExitCode::SUCCESS
+                            }
+                            Err(message) => {
+                                eprintln!("error: {message}");
+                                ExitCode::from(2)
+                            }
+                        };
                     }
                 }
             }

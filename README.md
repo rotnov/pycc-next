@@ -485,7 +485,8 @@ and setuptools): that is the test harness, not a change to the packages.
   calls, and keep most of their calls to Python functions among the selected ones.
   `--compile`/`--no-compile MODULE:QUALNAME` adjust it, `--select all` compiles every
   eligible function. **Without a profile nothing is selected**, and a module or package
-  with nothing selected gets no extension: CPython imports it unchanged. `--select
+  with nothing selected gets no extension: CPython imports it unchanged (`-o OUT` then gets
+  the module's source as `OUT`'s `.py`). `--select
   module` keeps compiling whole modules, as described below, for now.
 - **Per-function fallback** (non-strict only, whole modules): a construct pycc cannot compile yet (a
   call of a `lambda` expression, ...) sends only the smallest enclosing function or method to

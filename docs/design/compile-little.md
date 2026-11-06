@@ -147,6 +147,8 @@ to be hot are compiled, and each is compiled into specialized native code.
   profile: its stale entries and the selection.
 - **Default with no profile.** Nothing is selected. The build says so in one note, and a
   package with nothing selected gets no extension at all, so CPython imports it unchanged.
+  A single module built to `-o OUT` gets its source written as `OUT`'s `.py`, so the
+  output contract (an importable `OUT`) holds; an extension left there is removed.
   Compiling without evidence was measured as a loss (section 1, point 2).
 - **Overrides.** `--select all` compiles every eligible function. It exists for tests and
   for users who measure for themselves. Until PR 6 (section 8), a transitional `--select module`
