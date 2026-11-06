@@ -150,3 +150,28 @@ fn a_member_that_imports_its_sibling_is_measured() {
     assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
     assert_eq!(measured(&out, "work")["compiled"], true);
 }
+
+#[test]
+fn a_workload_that_sets_up_its_environment_before_importing_is_measured() {
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    // The module reads at import what the workload sets first: pass 3 must
+    // not import it ahead of the workload.
+    std::fs::write(pkg.join("m.py"), format!("import os\nsetting = os.environ[\"PKG_SETTING\"]\n\n\n{MODULE}")).unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(
+        &work,
+        "import os, sys\nos.environ[\"PKG_SETTING\"] = \"1\"\n\
+         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n\
+         from pkg import m\nassert m.setting == \"1\"\nfor i in range(60):\n    m.work(20000)\n",
+    )
+    .unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
+    assert_eq!(measured(&out, "work")["compiled"], true);
+}

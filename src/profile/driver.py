@@ -22,11 +22,13 @@
 #                           frame.
 #   time   PKG OUT -- ...   runs SCRIPT once, nothing hooked, and writes its wall
 #                           time in nanoseconds (pass 3, src/profile/verify.rs).
-#                           PKG may be a built copy: it is imported before
-#                           SCRIPT runs (so a SCRIPT that puts the sources on
-#                           `sys.path` itself runs the copy), and its modules
-#                           are checked to come from under it, the package's
-#                           own `__init__` as an extension too.
+#                           PKG may be a built copy: its top-level name is
+#                           found under it ahead of `sys.path` (so a SCRIPT
+#                           that puts the sources on `sys.path` itself runs
+#                           the copy, and nothing is imported before SCRIPT
+#                           runs), and its modules are checked to come from
+#                           under it, the package's own `__init__` as an
+#                           extension too.
 #
 # SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own and the
 # directory PKG is imported from (above every package holding it) first on
@@ -194,16 +196,32 @@ def check_under(pkg):
         sys.exit(f"pycc profile: the workload imported no module of {pkg}")
 
 
+class CopyFinder:
+    """Finds the top-level module `name` under `root` only (submodules follow
+    its `__path__`)."""
+
+    def __init__(self, name, root):
+        self.name = name
+        self.root = root
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != self.name:
+            return None
+        import importlib.machinery
+        return importlib.machinery.PathFinder.find_spec(fullname, [self.root])
+
+
 def timed(pkg, script, args):
-    import importlib
     import time
     started = time.perf_counter_ns()
-    # Imported first, so a workload that puts the sources on `sys.path` itself
-    # still runs this copy.
-    sys.path.insert(0, import_root(pkg))
+    # The copy's top-level name resolves under it first, so a workload that
+    # puts the sources on `sys.path` itself still runs this copy; nothing is
+    # imported before the workload, which may set up what its import reads.
+    root = import_root(pkg)
     real = os.path.realpath(pkg)
-    importlib.import_module(dotted(import_root(pkg), real if os.path.isfile(real)
-                                   else os.path.join(real, "__init__.py")))
+    top = dotted(root, real if os.path.isfile(real)
+                 else os.path.join(real, "__init__.py")).split(".")[0]
+    sys.meta_path.insert(0, CopyFinder(top, root))
     run(pkg, script, args)
     ns = time.perf_counter_ns() - started
     check_under(pkg)

@@ -578,8 +578,8 @@ def _module_name(base: pathlib.Path, path: pathlib.Path) -> str | None:
 
 
 def sdist_files(project: Project) -> list[pathlib.Path]:
-    """Every file an sdist holds: pyproject.toml, readme, license files, the sources
-    and `[tool.pycc] sdist-include` globs."""
+    """Every file an sdist holds: pyproject.toml, readme, license files, the sources,
+    the `[tool.pycc] profile` and the `[tool.pycc] sdist-include` globs."""
     files = {project.root / "pyproject.toml"}
     value = project.project.get("readme")
     if isinstance(value, str):
@@ -588,6 +588,9 @@ def sdist_files(project: Project) -> list[pathlib.Path]:
         files.add(safe_path(project.root, value["file"], "[project] readme"))
     files.update(license_files(project))
     files.update(f.src for f in sources(project))
+    if project.tool.profile is not None:
+        # The build reads it (`--profile`), so a wheel built from the sdist needs it.
+        files.add(safe_path(project.root, project.tool.profile, "[tool.pycc] profile"))
     for pattern in project.tool.sdist_include:
         if pattern.startswith("/") or ".." in pathlib.PurePosixPath(pattern).parts:
             raise ProjectError(f"[tool.pycc] sdist-include pattern {pattern!r} leaves the project")

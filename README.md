@@ -419,7 +419,7 @@ project code: metadata is read from `pyproject.toml`, sources are only copied an
 compiled, symbolic links in the sources are refused, and everything is written under
 the directory pip hands the backend. `pip install -e .` (PEP 660) installs the sources
 uncompiled, for development; `python -m build --sdist` (or pip) makes an sdist of the
-sources, `pyproject.toml`, readme and license files (`sdist-include` adds more globs).
+sources, `pyproject.toml`, readme, license files and the `profile` file (`sdist-include` adds more globs).
 
 In strict mode a compiled module publishes its functions, classes and evidently native
 constants, but not what it imports (`docs/DEVIATIONS.md`): a package `__init__.py` that

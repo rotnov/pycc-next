@@ -675,6 +675,27 @@ class Wheel(Project):
         self.assertEqual(pth, str((self.root / "src").resolve()) + "\n")
 
 
+    def test_a_wheel_builds_from_the_sdist_with_its_profile(self):
+        self.project('strict = false\nprofile = "pycc.profile.json"\n'
+                     'pure-python = ["demo_pkg.cli"]')
+        write(self.root, {"pycc.profile.json": "{}"})
+        with chdir(self.root):
+            name = build.build_sdist(str(self.out))
+        with tarfile.open(self.out / name) as t:
+            self.assertIn("demo_pkg-1.2.0/pycc.profile.json", t.getnames())
+            t.extractall(self.tmp / "unpacked", filter="data")
+        self.root = self.tmp / "unpacked" / "demo_pkg-1.2.0"
+        shutil.rmtree(self.out)
+        self.out.mkdir()
+        exe = self.fake_pycc()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            self.assertIn("demo_pkg/__init__.abi3.so", z.namelist())
+        [call] = self.calls()
+        args = call["args"]
+        self.assertEqual(args[args.index("--profile") + 1],
+                         str(self.root / "pycc.profile.json"))
+
+
 class Versions(unittest.TestCase):
     def test_backend_version_matches_the_compiler_release(self):
         cargo = (PYTHON_DIR.parent / "Cargo.toml").read_text()
