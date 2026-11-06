@@ -248,6 +248,44 @@ pub enum Command {
         #[command(flatten)]
         mode: ModeFlags,
     },
+    /// `pycc profile PKG -o OUT -- PYTHON SCRIPT [ARGS]`: runs SCRIPT with
+    /// PYTHON against PKG's sources, nothing compiled, and writes the profile
+    /// a non-strict `--ext` build selects the functions it compiles from
+    /// (docs/design/compile-little.md, section 2.2).
+    Profile {
+        /// The package directory (or single module) whose functions are
+        /// profiled.
+        path: PathBuf,
+        #[arg(short = 'o')]
+        out: PathBuf,
+        /// Profiled runs of the workload, each a fresh process; calls and
+        /// self times are their medians.
+        #[arg(long, default_value_t = 5)]
+        runs: u32,
+        /// The selection rule's least share of the run's self time, whose
+        /// functions pass 2 records argument types for.
+        #[arg(long, default_value_t = 0.005)]
+        select_share: f64,
+        /// The selection rule's fewest calls.
+        #[arg(long, default_value_t = 50)]
+        select_calls: u64,
+        /// The selection rule's most functions.
+        #[arg(long, default_value_t = 64)]
+        select_max: usize,
+        /// The selection rule's largest share of a function's calls to Python
+        /// functions that may leave the selection (each one a crossing between
+        /// compiled and interpreted code).
+        #[arg(long, default_value_t = 0.5)]
+        select_outside: f64,
+        /// Run no workload: read the profile `-o` names against PKG's current
+        /// sources and print its stale entries and what the selection rule
+        /// takes from it (`-- PYTHON` indexes the sources).
+        #[arg(long)]
+        check: bool,
+        /// PYTHON SCRIPT [ARGS], after `--` (only PYTHON with `--check`).
+        #[arg(last = true, required = true)]
+        workload: Vec<OsString>,
+    },
     Test,
     Explain {
         code: String,

@@ -224,6 +224,16 @@ each other (a circular import sees the partially initialized module, as in CPyth
 module used as a value, the entry module imported back by its own imports and a project
 import inside an `if`/`try` block are compile errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
+`pycc profile pkg -o pycc.profile.json -- python3 workload.py ARGS` runs a workload
+against a package's sources, nothing compiled, and records per function its calls, its
+self time (the median of `--runs` fresh runs under `cProfile`, default 5) and, for the
+functions the selection rule would compile, the exact types of their arguments in their
+first 1,000 calls (`sys.monitoring`). `pycc profile pkg -o pycc.profile.json --check --
+python3` reads a profile against the current sources: which entries are stale (their
+function's source changed) and what the rule selects. The plan that uses it is
+[`docs/design/compile-little.md`](docs/design/compile-little.md); builds do not read
+profiles yet.
+
 ### Real packages, unchanged
 
 `python3 bench/package_check.py` (CI-gated) downloads five pinned, permissively licensed
