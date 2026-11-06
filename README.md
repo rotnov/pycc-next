@@ -426,9 +426,12 @@ constants, but not what it imports (`docs/DEVIATIONS.md`): a package `__init__.p
 re-exports names (`from .core import f`) should build `--non-strict`, as in the
 override above, or stay Python.
 
-CI builds the three packages above this way (`python3 bench/wheel_check.py`): `pip
-wheel` with the archive's backend and compiler, a fresh venv, a check that each module
-is an extension module, and each package's own test suite against the installed wheel.
+CI builds the packages above this way (`python3 bench/wheel_check.py`): `pip wheel`
+with the archive's backend and compiler, a fresh venv, a check of what the wheel holds,
+and each package's own test suite against the installed wheel. With no profile a
+non-strict build selects no function, so those wheels are pure (`py3-none-any`); one
+harness, `diff-match-patch-selected`, forces a function in with `[tool.pycc] compile`
+and checks the `cp313-abi3` wheel's extension serves its module.
 Their `pyproject.toml` is replaced by one selecting `pycc.build` (they use flit_core
 and setuptools): that is the test harness, not a change to the packages.
 

@@ -278,20 +278,34 @@ def calls(pkg, script, args):
 def types(pkg, candidates, script, args):
     files = package_files(pkg)
     wanted = {(m, q, int(f)) for m, q, f in candidates}
+    # Per candidate: [calls sampled, argument types, sampled calls that caught
+    # an exception, active calls (innermost last, each [sampled, counted]),
+    # sampling done].
     seen = {}
+    by_code = {}
     mon = sys.monitoring
     tool = mon.PROFILER_ID
 
     def start(code, offset):
-        name = files.get(identity(code.co_filename))
-        key = (name, code.co_qualname, code.co_firstlineno)
-        if key not in wanted:
+        rec = by_code.get(code)
+        if rec is None:
+            name = files.get(identity(code.co_filename))
+            key = (name, code.co_qualname, code.co_firstlineno)
+            if key not in wanted:
+                return mon.DISABLE
+            rec = seen.setdefault(key, [0, {}, 0, [], False])
+            by_code[code] = rec
+            mon.set_local_events(tool, code, mon.events.PY_RETURN)
+        if rec[4]:
             return mon.DISABLE
-        rec = seen.setdefault(key, [0, {}, 0, -1, False])
         if rec[0] >= TYPE_CALLS:
+            # Sampling ends: the calls still active are not followed further.
             rec[4] = True
+            rec[3].clear()
+            mon.set_local_events(tool, code, 0)
             return mon.DISABLE
         rec[0] += 1
+        rec[3].append([True, False])
         frame = sys._getframe(1)
         n = code.co_argcount + code.co_kwonlyargcount
         n += bool(code.co_flags & 0x04) + bool(code.co_flags & 0x08)
@@ -304,26 +318,38 @@ def types(pkg, candidates, script, args):
                 per[tn] = per.get(tn, 0) + 1
         return None
 
+    def end(code, offset, value):
+        rec = by_code.get(code)
+        if rec is not None and not rec[4] and rec[3]:
+            rec[3].pop()
+        return None
+
     def caught(code, offset, exc):
-        rec = seen.get((files.get(identity(code.co_filename)), code.co_qualname,
-                        code.co_firstlineno))
-        if rec is None:
-            return mon.DISABLE
-        # One count per sampled call: the call that started last (a call
-        # sampled before the sampling ended).
-        if not rec[4] and rec[3] != rec[0]:
-            rec[3] = rec[0]
+        # EXCEPTION_HANDLED (and PY_UNWIND) cannot be disabled before 3.15:
+        # returning `DISABLE` from them raises `ValueError`.
+        rec = by_code.get(code)
+        if rec is None or rec[4] or not rec[3]:
+            return None
+        # One count per sampled call: the innermost active one of this code,
+        # where the handler runs.
+        call = rec[3][-1]
+        if not call[1]:
+            call[1] = True
             rec[2] += 1
         return None
 
     mon.use_tool_id(tool, "pycc profile")
     mon.register_callback(tool, mon.events.PY_START, start)
+    mon.register_callback(tool, mon.events.PY_RETURN, end)
+    mon.register_callback(tool, mon.events.PY_UNWIND, end)
     mon.register_callback(tool, mon.events.EXCEPTION_HANDLED, caught)
-    mon.set_events(tool, mon.events.PY_START | mon.events.EXCEPTION_HANDLED)
+    mon.set_events(tool, mon.events.PY_START | mon.events.PY_UNWIND | mon.events.EXCEPTION_HANDLED)
     try:
         run(pkg, script, args)
     finally:
         mon.set_events(tool, 0)
+        for code in by_code:
+            mon.set_local_events(tool, code, 0)
         mon.free_tool_id(tool)
     check_loaded(pkg)
     return {"functions": [[m, q, f, rec[1], rec[2]] for (m, q, f), rec in seen.items()]}

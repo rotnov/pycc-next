@@ -131,3 +131,22 @@ fn a_measured_winner_stays_selected() {
     assert!(m["compiled_ns"][1].as_u64() <= m["cpython_ns"][2].as_u64(), "{m}");
     assert!(check(&pkg, &out).contains("selected: pkg.m:work"));
 }
+
+#[test]
+fn a_member_that_imports_its_sibling_is_measured() {
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(pkg.join("helper.py"), "value = 7\n").unwrap();
+    std::fs::write(pkg.join("m.py"), format!("from .helper import value\n\n\n{MODULE}")).unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, "from pkg import m\nassert m.value == 7\nfor i in range(60):\n    m.work(20000)\n").unwrap();
+    let out = dir.join("p.json");
+    // Only the member is profiled; its copy for pass 3 brings the package.
+    let r = profile(&pkg.join("m.py"), &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
+    assert_eq!(measured(&out, "work")["compiled"], true);
+}

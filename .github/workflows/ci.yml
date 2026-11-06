@@ -79,13 +79,15 @@ jobs:
       # is built by `pip wheel` through the archive's PEP 517 backend
       # (python/pycc_build-*.whl, installed into pip's isolated build
       # environment with no index) and its bin/pycc, installed into a fresh
-      # venv, checked to hold extension modules, and the package's own test
-      # suite runs against the installed wheel. The pyproject.toml selecting
+      # venv (pure with no profile, which selects nothing; with the extension
+      # serving its module for diff-match-patch-selected, which forces a
+      # function in), and the package's own test suite runs against the
+      # installed wheel. The pyproject.toml selecting
       # pycc.build is injected by the harness (the packages use other backends).
       - name: Real packages built into wheels by pip with pycc.build
         run: |
           name=pycc-ci-$(uname -m)-linux
-          python3 bench/wheel_check.py diff-match-patch tomli pypng mistune pystache \
+          python3 bench/wheel_check.py diff-match-patch diff-match-patch-selected tomli pypng mistune pystache \
             --pycc "dist/$name/bin/pycc" --backend "dist/$name/python"
       # Includes the hosted tests that build against and compare with the
       # CPython found as `python3` (the oracle). Skipped: the static-libpython
@@ -189,7 +191,7 @@ jobs:
       # archive's pycc.build backend, installed, and its own tests run.
       - name: Real packages built into wheels by pip with pycc.build
         run: |
-          python3 bench/wheel_check.py diff-match-patch tomli pypng mistune pystache \
+          python3 bench/wheel_check.py diff-match-patch diff-match-patch-selected tomli pypng mistune pystache \
             --pycc dist/pycc-ci-aarch64-macos/bin/pycc --backend dist/pycc-ci-aarch64-macos/python
       # Same skips and failure reporting as the Linux job.
       - name: Tests
@@ -259,7 +261,7 @@ jobs:
       - name: Real packages built into wheels by pip with pycc.build
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          python3 bench/wheel_check.py diff-match-patch tomli pypng mistune pystache \
+          python3 bench/wheel_check.py diff-match-patch diff-match-patch-selected tomli pypng mistune pystache \
             --pycc dist/pycc-ci-x86_64-windows/bin/pycc.exe --backend dist/pycc-ci-x86_64-windows/python
       - name: Real packages (diff-match-patch, tomli, pypng, mistune) against their own tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}

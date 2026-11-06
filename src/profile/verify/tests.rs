@@ -120,11 +120,17 @@ fn a_member_is_copied_with_the_packages_above_it() {
     let copy = copy_package(&src.join("top/pkg"), &dir.join("out")).unwrap();
     assert_eq!(copy, dir.join("out/top/pkg"));
     assert!(dir.join("out/top/__init__.py").is_file());
-    assert!(!dir.join("out/top/other.py").exists());
+    // The whole top-level package, for the member's sibling imports.
+    assert!(dir.join("out/top/other.py").is_file());
     assert_eq!(std::fs::read_to_string(copy.join("mod.py")).unwrap(), "y = 2\n");
     assert!(!copy.join("__pycache__").exists());
-    let single = copy_package(&src.join("top/other.py"), &dir.join("one")).unwrap();
-    assert_eq!(single, dir.join("one/top/other.py"));
+    let member = copy_package(&src.join("top/other.py"), &dir.join("one")).unwrap();
+    assert_eq!(member, dir.join("one/top/other.py"));
+    assert!(dir.join("one/top/pkg/mod.py").is_file());
+    std::fs::write(src.join("alone.py"), "z = 3\n").unwrap();
+    let single = copy_package(&src.join("alone.py"), &dir.join("two")).unwrap();
+    assert_eq!(single, dir.join("two/alone.py"));
+    assert!(!dir.join("two/top").exists());
 }
 
 #[test]

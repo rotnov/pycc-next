@@ -15,13 +15,17 @@ file of the package is changed. Then, for each package:
      isolated build environment, which installs `pycc-build` from BACKEND (the release
      archive's `python/` directory, or a wheel built from this checkout's `python/`),
      with `PYCC` naming the compiler;
-  2. the wheel is checked: its tag is `cp313-abi3-<platform>`, `Root-Is-Purelib: false`,
-     every RECORD hash and size matches;
+  2. the wheel is checked: every RECORD hash and size matches, and its tag and WHEEL
+     file say what the build is. With no profile a non-strict build selects no function
+     (docs/design/compile-little.md, section 2.2), so a real package's wheel is pure,
+     `py3-none-any` with `Root-Is-Purelib: true`; a harness that forces functions in
+     (`[tool.pycc] compile`, as `diff-match-patch-selected` does) gets
+     `cp313-abi3-<platform>`, `Root-Is-Purelib: false`;
   3. `pip install --no-index --no-deps` puts it into a fresh venv;
   4. the venv's Python (`-I`, from an empty directory) imports every module the backend
-     compiles and checks it is an extension module of the venv's site-packages (its own,
-     or a module of its package's extension, which the backend builds whole), then runs
-     the package's own tests, copied out of the archive without its sources.
+     compiles and checks it is served by an extension module of the venv's site-packages
+     (its own, or its package's finder), then runs the package's own tests, copied out of
+     the archive without its sources.
 
 Usage: python3 bench/wheel_check.py [PACKAGE ...] [--pycc PATH] [--backend DIR]
                                     [--cache DIR] [--keep DIR]
@@ -67,8 +71,10 @@ class Harness:
     tests: tuple[tuple[str, str], ...]
     # Code run by the venv's Python with the test directory as argv[1]: runs the suite.
     run: str
-    # Modules the wheel must hold as extension modules.
+    # Modules the wheel's extension must serve (none: a pure wheel).
     compiled: tuple[str, ...]
+    # The package of `bench/package_check.py` it builds (default: the harness's name).
+    package: str | None = None
 
 
 HARNESS = {
@@ -93,8 +99,7 @@ from diff_match_patch.tests import diff_match_patch_test as t
 r = unittest.main(module=t, argv=["wheel_check"], exit=False, verbosity=1).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
-        compiled=("diff_match_patch", "diff_match_patch.__version__",
-                  "diff_match_patch.diff_match_patch"),
+        compiled=(),
     ),
     "tomli": Harness(
         root="tomli-2.5.0",
@@ -117,7 +122,7 @@ r = unittest.main(module=None, exit=False, verbosity=1, argv=[
     "-t", sys.argv[1]]).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
-        compiled=("tomli", "tomli._parser", "tomli._re", "tomli._types"),
+        compiled=(),
     ),
     "pypng": Harness(
         root="pypng-0.20220715.0",
@@ -142,7 +147,7 @@ import test_png
 r = unittest.main(module=test_png, argv=["wheel_check"], exit=False, verbosity=1).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
-        compiled=("png",),
+        compiled=(),
     ),
     "mistune": Harness(
         root="mistune-3.3.4",
@@ -169,11 +174,7 @@ r = unittest.main(module=None, exit=False, verbosity=1, argv=[
     "-t", sys.argv[1]]).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
-        compiled=tuple(
-            ".".join(["mistune", *pathlib.PurePosixPath(m).with_suffix("").parts])
-            .removesuffix(".__init__")
-            for m in package_check.MISTUNE_MODULES
-        ),
+        compiled=(),
     ),
     "pystache": Harness(
         root="pystache-0.6.8",
@@ -200,13 +201,17 @@ r = unittest.main(module=None, exit=False, verbosity=1, argv=[
     "-t", os.path.dirname(os.path.dirname(start))]).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
-        compiled=tuple(
-            ".".join(["pystache", *pathlib.PurePosixPath(m).with_suffix("").parts])
-            .removesuffix(".__init__")
-            for m in package_check.PYSTACHE_MODULES
-        ),
+        compiled=(),
     ),
 }
+# diff-match-patch with one function forced in: the native wheel path.
+HARNESS["diff-match-patch-selected"] = dataclasses.replace(
+    HARNESS["diff-match-patch"],
+    pyproject=HARNESS["diff-match-patch"].pyproject + """compile = ["diff_match_patch.diff_match_patch:diff_match_patch.diff_commonPrefix"]
+""",
+    compiled=("diff_match_patch.diff_match_patch",),
+    package="diff-match-patch",
+)
 
 # Prefixed to `Harness.run`: argv[1] is the test directory (put on the path for the
 # suite's own modules), argv[2] the modules that must be extension modules installed in
@@ -215,24 +220,28 @@ CHECK_INSTALLED = """
 import importlib, pathlib, sys, sysconfig, unittest
 sys.path.insert(0, sys.argv[1])
 site = {pathlib.Path(sysconfig.get_path(k)).resolve() for k in ("purelib", "platlib")}
-for name in sys.argv[2].split(","):
+for name in filter(None, sys.argv[2].split(",")):
     m = importlib.import_module(name)
     f = pathlib.Path(m.__file__).resolve()
-    # An extension of its own, or a module of a package's one (its finder's).
+    # Served by an extension of its own, or by its package's finder; its `__file__` is
+    # its `.py` beside the extension, as CPython's would be.
     loader = type(m.__spec__.loader).__name__
-    if not f.name.endswith((".abi3.so", ".pyd")) or not any(s in f.parents for s in site) \
-            or loader not in ("ExtensionFileLoader", "_PyccFinder"):
-        sys.exit(f"{name} was imported from {f} ({loader}), not an extension module of "
-                 "the wheel")
-    print(f"  {name}: {f.name}")
+    if not any(s in f.parents for s in site) or loader not in ("ExtensionFileLoader", "_PyccFinder"):
+        sys.exit(f"{name} was imported from {f} ({loader}), not served by the wheel's "
+                 "extension")
+    print(f"  {name}: {f.name} ({loader})")
 """
 
 
-def check_wheel(path: pathlib.Path) -> str | None:
-    """Checks the wheel's tag, WHEEL file and RECORD; returns an error or None."""
+def check_wheel(path: pathlib.Path, native: bool) -> str | None:
+    """Checks the wheel's tag, WHEEL file and RECORD (a `native` wheel holds an
+    extension, else it is pure); returns an error or None."""
     tag = path.stem.split("-", 2)[2]
-    if not tag.startswith("cp313-abi3-") or tag.endswith("-any"):
+    if native and (not tag.startswith("cp313-abi3-") or tag.endswith("-any")):
         return f"{path.name}: tag {tag!r} is not cp313-abi3-<platform>"
+    if not native and tag != "py3-none-any":
+        return f"{path.name}: tag {tag!r} is not py3-none-any"
+    purelib = "false" if native else "true"
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         dist_info = {n.split("/")[0] for n in names if n.split("/")[0].endswith(".dist-info")}
@@ -240,8 +249,11 @@ def check_wheel(path: pathlib.Path) -> str | None:
             return f"{path.name}: {len(dist_info)} .dist-info directories"
         d = dist_info.pop()
         wheel = z.read(f"{d}/WHEEL").decode()
-        if "Root-Is-Purelib: false" not in wheel or f"Tag: {tag}" not in wheel:
-            return f"{path.name}: WHEEL does not say Root-Is-Purelib: false and Tag: {tag}"
+        if f"Root-Is-Purelib: {purelib}" not in wheel or f"Tag: {tag}" not in wheel:
+            return f"{path.name}: WHEEL does not say Root-Is-Purelib: {purelib} and Tag: {tag}"
+        exts = [n for n in names if n.endswith((".so", ".pyd"))]
+        if bool(exts) != native:
+            return f"{path.name}: extension modules {exts}, expected {'some' if native else 'none'}"
         rows = list(csv.reader(io.StringIO(z.read(f"{d}/RECORD").decode())))
         recorded = {r[0] for r in rows}
         if recorded != set(names):
@@ -274,7 +286,8 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
 
 
 def check(name: str, a: argparse.Namespace, backend: pathlib.Path, tmp: pathlib.Path) -> bool:
-    pkg, h = package_check.PACKAGES[name], HARNESS[name]
+    h = HARNESS[name]
+    pkg = package_check.PACKAGES[h.package or name]
     print(f"{pkg.name} {pkg.version}")
     archive = package_check.fetch(pkg, pathlib.Path(a.cache))
     try:
@@ -319,7 +332,7 @@ def check(name: str, a: argparse.Namespace, backend: pathlib.Path, tmp: pathlib.
         return False
     wheel = built[0]
     print(f"  wheel: {wheel.name} ({wheel.stat().st_size // 1024} KiB)")
-    problem = check_wheel(wheel)
+    problem = check_wheel(wheel, native=bool(h.compiled))
     if problem:
         print(f"FAIL: {problem}")
         return False

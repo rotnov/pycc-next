@@ -385,3 +385,91 @@ fn the_profile_leaves_out_the_driver_s_own_check() {
         .collect();
     assert!(!names.contains(&"spin") && !names.contains(&"Lazy.__file__"), "{p}");
 }
+
+const RECURSIVE: &str = "\
+def rec(n):
+    if n:
+        rec(n - 1)
+    try:
+        raise KeyError(n)
+    except KeyError:
+        pass
+";
+
+#[test]
+fn a_recursive_call_s_handled_exceptions_count_once_per_call() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(pkg.join("r.py"), RECURSIVE).unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, "from pkg import r\nfor i in range(100):\n    r.rec(3)\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let rec = &p["functions"][0];
+    assert_eq!(rec["qualname"], "rec");
+    assert_eq!(rec["calls"], 400);
+    // Every one of the 400 calls caught one, each after its inner calls had
+    // started (and ended).
+    assert_eq!(rec["handled"], 400, "{p}");
+}
+
+/// Pass 2 under the rule of CPython 3.13 and 3.14, where an
+/// `EXCEPTION_HANDLED` or `PY_UNWIND` callback that returns
+/// `sys.monitoring.DISABLE` raises `ValueError` ("cannot disable"): the
+/// driver run with its callbacks wrapped so, against a workload that catches
+/// exceptions outside the package, as CI's 3.15 cannot show otherwise.
+#[test]
+fn pass_2_never_disables_the_events_older_interpreters_cannot_disable() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    let work = dir.join("outside.py");
+    std::fs::write(
+        &work,
+        "import sys\nsys.path.insert(0, sys.argv[1])\nfrom pkg import hot\n\
+         for i in range(100):\n    try:\n        {}[i]\n    except KeyError:\n        pass\n    hot.hot({1: 2}, i % 3)\n",
+    )
+    .unwrap();
+    let candidates = dir.join("candidates.json");
+    std::fs::write(&candidates, r#"[["pkg.hot", "hot", 1]]"#).unwrap();
+    let out = dir.join("types.json");
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/profile/driver.py");
+    let script = "\
+import runpy, sys
+mon = sys.monitoring
+real = mon.register_callback
+def register(tool, event, fn):
+    if fn is not None and event in (mon.events.EXCEPTION_HANDLED, mon.events.PY_UNWIND):
+        def checked(*args):
+            r = fn(*args)
+            if r is mon.DISABLE:
+                raise ValueError(f'Cannot disable {event} events')
+            return r
+        return real(tool, event, checked)
+    return real(tool, event, fn)
+mon.register_callback = register
+driver = sys.argv[1]
+sys.argv = [driver, *sys.argv[2:]]
+runpy.run_path(driver, run_name='__main__')
+";
+    let r = Command::new(python())
+        .arg("-c")
+        .arg(script)
+        .arg(&driver)
+        .arg("types")
+        .arg(&pkg)
+        .arg(&out)
+        .arg(&candidates)
+        .arg("--")
+        .arg(&work)
+        .arg(&*dir)
+        .output()
+        .unwrap();
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let t = read(&out);
+    // [module, qualname, line, types, handled]: the dict calls with `i % 3 != 1`.
+    assert_eq!(t["functions"][0][4], 67, "{t}");
+}

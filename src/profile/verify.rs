@@ -351,6 +351,8 @@ fn build(copy: &Path, profile: &Path, cx: &Context<'_>) -> Result<(), String> {
     } else {
         copy.with_extension("")
     };
+    // A module of a package imports its siblings as CPython does.
+    let member = copy.is_file() && copy.parent().is_some_and(|dir| dir.join("__init__.py").is_file());
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = std::process::Command::new(exe);
     command
@@ -365,6 +367,9 @@ fn build(copy: &Path, profile: &Path, cx: &Context<'_>) -> Result<(), String> {
         .arg(format!("--select-max={}", cx.rule.max))
         .arg(format!("--select-outside={}", cx.rule.outside))
         .arg(format!("--select-handled={}", cx.rule.handled));
+    if member {
+        command.arg("--foreign-relative-imports");
+    }
     if std::env::var_os("PYCC_PYTHON").is_none() {
         command.env("PYCC_PYTHON", cx.driver.python);
     }
@@ -381,32 +386,29 @@ fn build(copy: &Path, profile: &Path, cx: &Context<'_>) -> Result<(), String> {
 }
 
 /// Copies the package (or single module) `pkg` under `root` at the same path
-/// below its import root, with the `__init__.py` of each package above it;
-/// returns the copy's path.
+/// below its import root; returns the copy's path. A module or subpackage
+/// inside a package brings its whole top-level package, so its imports of
+/// the package's other modules find them.
 pub(crate) fn copy_package(pkg: &Path, root: &Path) -> Result<PathBuf, String> {
     let mut base = pkg.parent().unwrap_or(Path::new("")).to_path_buf();
-    let mut above = Vec::new();
+    let mut top = None;
     while base.join("__init__.py").is_file() {
-        above.push(base.clone());
+        top = Some(base.clone());
         match base.parent() {
             Some(parent) => base = parent.to_path_buf(),
             None => break,
         }
     }
     let rel = pkg.strip_prefix(&base).map_err(|e| e.to_string())?;
-    for dir in above {
-        let to = root.join(dir.strip_prefix(&base).map_err(|e| e.to_string())?);
-        std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
-        std::fs::copy(dir.join("__init__.py"), to.join("__init__.py")).map_err(|e| e.to_string())?;
+    match top {
+        Some(top) => copy_dir(&top, &root.join(top.strip_prefix(&base).map_err(|e| e.to_string())?))?,
+        None if pkg.is_file() => {
+            std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+            std::fs::copy(pkg, root.join(rel)).map_err(|e| e.to_string())?;
+        }
+        None => copy_dir(pkg, &root.join(rel))?,
     }
-    let to = root.join(rel);
-    if pkg.is_file() {
-        std::fs::create_dir_all(to.parent().unwrap_or(root)).map_err(|e| e.to_string())?;
-        std::fs::copy(pkg, &to).map_err(|e| e.to_string())?;
-    } else {
-        copy_dir(pkg, &to)?;
-    }
-    Ok(to)
+    Ok(root.join(rel))
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
