@@ -1,6 +1,6 @@
 # Library compilation: compile little, compile well
 
-Status: in progress. Implemented: PR 1 (measurement, section 3). Tracking issue:
+Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted, section 7 item 12). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -348,7 +348,7 @@ file goes.
 | 9 | Published non-strict classes: templates evaluated from source (`Generic[T]`), non-strict carriers, sibling classes across modules | the non-strict paths of `src/ext/module/class_maker.c` (795), `src/package_build/sibling_classes.rs` (1004), the non-strict half of `src/ext_build/publication.rs` (689); DEVIATIONS rows 43-44's non-strict cases | compiled classes of untyped modules | classes are CPython's | **delete** the non-strict paths; the strict publication, carriers and `class_maker.c`'s template path **stay** |
 | 10 | Classes made once at their statement (v0.12 lever 8) | `src/ext/module/class_once.c` (206), `src/ext_build/deferred_classes.rs` (121), part of `module_init.c`; `tests/v012_class_once.rs` (155) | pystache's import (-0.83M) | non-strict classes are gone (item 9); only strict `--ext` classes would use it. Decided by: import of the strict `--ext` corpus with and without it | **delete** unless the strict corpus import is at least 2% faster with it |
 | 11 | `class_body_attrs.rs` (247) | `__firstlineno__`, `__doc__`, `__static_attributes__` of a published class | exactness of strict published classes | correctness, not speed | **keep** |
-| 12 | Cold calls through CPython's hot text (v0.12) | `src/ext/module/hot_api.c` (170), `src/ext_build_tests/hot_api.rs` (41) | fewer cold windows of a BOLT-built interpreter at import | measured -0.41M against 0.3M noise: no measured win in either model | **delete** first (PR 2) |
+| 12 | Cold calls through CPython's hot text (v0.12) | `src/ext/module/hot_api.c` (170), `src/ext_build_tests/hot_api.rs` (41) | fewer cold windows of a BOLT-built interpreter at import | measured -0.41M against 0.3M noise: no measured win in either model | **deleted** (PR 2); the inline reference counts it had taken from `bridge.c` are back there |
 | 13 | Shared attribute inline caches in `.bss`, dense fill (v0.8, v0.12 lever 7) | `src/ext/module/attr_cache.c` (890) | attribute reads and method calls on CPython objects; dense fill cut import page faults | a few hundred compiled sites at most; the per-site record (`src/ext/module/call_site.c`, 137, #75) needs no shared table. Decided by: schema wall and I1 misses, and minor faults, with per-site records | **replace** with per-site records (PR 8) |
 | 14 | Keyword-name tuple caches per call site | `src/ext_build/keywords.rs` (370), the `kwnames` caches in `forward.c` | keyword calls without building the tuple each time | cheap and per site | **keep** |
 | 15 | Layout probes | `frames.c` (863), `forward.c`'s function and code offsets, the tuple/list item offsets (#77) | non-stable-ABI fields read on 3.13 and 3.15 | the forwarder patch (section 2.4) and the inline paths (section 2.5) depend on them | **keep**; extend when the oracle moves |
