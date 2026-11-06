@@ -68,7 +68,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn native(name: &str) {
     let dir = ScratchDir::new(&format!("{name}_native")).expect("scratch");
     let source = fixture(name, &dir, "m.py");
-    build(&source, &dir.join("app"), &["--non-strict"]);
+    build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
     let ours = Command::new(dir.join("app")).output().expect("run the build");
     let oracle = python().arg(&source).output().expect("python should spawn");
     assert_matches(&ours, &oracle);
@@ -79,7 +79,7 @@ fn native(name: &str) {
 fn ext(name: &str) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    build(&source, &compiled.join("m"), &["--ext", "--non-strict"]);
+    build(&source, &compiled.join("m"), &["--ext", "--non-strict", "--select", "module"]);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new(&format!("{name}_ext_src")).expect("scratch");
     fixture(name, &plain, "m.py");
@@ -200,7 +200,7 @@ fn local_import_strict_and_leak_free() {
 /// non-strict mode; a missing sibling raises CPython's `ImportError`.
 #[test]
 fn relative_local_import_resolves_against_the_package() {
-    for flags in [&["--ext"][..], &["--ext", "--non-strict"][..]] {
+    for flags in [&["--ext"][..], &["--ext", "--non-strict", "--select", "module"][..]] {
         let dir = ScratchDir::new("v08_relative_local_import").expect("scratch");
         let pkg = dir.join("pkg");
         std::fs::create_dir(&pkg).unwrap();
@@ -258,7 +258,7 @@ fn nested_def_ext() {
 fn nested_def_bodies_are_compiled() {
     let dir = ScratchDir::new("v08_nested_def_report").expect("scratch");
     let source = fixture("v08_nested_def", &dir, "m.py");
-    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict"]);
+    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict", "--select", "module"]);
     assert_lifted(
         &report,
         &[
@@ -310,7 +310,7 @@ fn lambda_ext() {
 fn lambda_bodies_are_compiled() {
     let dir = ScratchDir::new("v08_lambda_report").expect("scratch");
     let source = fixture("v08_lambda", &dir, "m.py");
-    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict"]);
+    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict", "--select", "module"]);
     assert_lifted(
         &report,
         &[
@@ -342,7 +342,7 @@ fn closures_and_cells_do_not_leak() {
          total += f(1)[0]\n    return total\n",
     )
     .unwrap();
-    build(&source, &dir.join("lk"), &["--ext", "--non-strict"]);
+    build(&source, &dir.join("lk"), &["--ext", "--non-strict", "--select", "module"]);
     let run = python()
         .args([
             "-c",
@@ -386,7 +386,7 @@ fn rebinding_nested_def_cells_do_not_leak() {
          total += make(tag)(i)[1] + make(tag, lambda v: (tag, v))(1)[1]\n    return total\n",
     )
     .unwrap();
-    build(&source, &dir.join("rb"), &["--ext", "--non-strict"]);
+    build(&source, &dir.join("rb"), &["--ext", "--non-strict", "--select", "module"]);
     let run = python()
         .args([
             "-c",

@@ -13,9 +13,11 @@ fn python() -> std::ffi::OsString {
     std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into())
 }
 
+/// Passes 1 and 2 only: pass 3 (`tests/profile_verify.rs`) builds and times.
 fn profile(pkg: &Path, out: &Path, extra: &[&str], workload: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_pycc"))
         .arg("profile")
+        .arg("--no-verify")
         .arg(pkg)
         .arg("-o")
         .arg(out)
@@ -116,6 +118,11 @@ fn a_profile_records_calls_self_time_callees_and_argument_types() {
     assert_eq!(hot["arg_types"]["d"]["dict"], 400 + 600 - 400);
     assert_eq!(hot["arg_types"]["d"]["list"], 400);
     assert_eq!(hot["arg_types"]["k"]["int"], 1000);
+    // Of those 1,000 calls, the ones that caught `KeyError`: the dict calls
+    // with `i % 3 != 1` (267 of the first loop's 400), then 9 of each
+    // `Box.total`'s 10 (20 of them before the sampling ends).
+    assert_eq!(hot["handled"], 267 + 9 * 20);
+    assert_eq!(get("Box.size")["handled"], 0);
     assert_eq!(get("Box.total")["arg_types"]["self"]["pkg.hot.Box"], 60);
     assert_eq!(get("Box.size")["calls"], 60);
     // Calls to Python functions, by callee: `hot` calls none; `Box.total`
@@ -138,14 +145,17 @@ fn check_drops_stale_entries_and_prints_the_selection() {
     let pkg = package(&dir);
     let out = dir.join("p.json");
     let work = dir.join("work.py");
-    let r = profile(&pkg, &out, &["--runs", "1"], &[work.as_os_str(), dir.as_os_str()]);
+    // Profiled under the rule `--check` applies: a function pass 2 did not
+    // sample is never selected.
+    let rule = ["--select-share", "0", "--select-calls", "1"];
+    let r = profile(&pkg, &out, &["--runs", "1", rule[0], rule[1], rule[2], rule[3]], &[work.as_os_str(), dir.as_os_str()]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     // `hot` changes; `Box.size` moves down a line but keeps its text.
     let changed = HOT
         .replace("return None", "return 0")
         .replace("    @property", "\n    @property");
     std::fs::write(pkg.join("hot.py"), changed).unwrap();
-    let r = profile(&pkg, &out, &["--check", "--select-share", "0", "--select-calls", "1"], &[]);
+    let r = profile(&pkg, &out, &["--check", rule[0], rule[1], rule[2], rule[3]], &[]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     let stderr = String::from_utf8_lossy(&r.stderr);
     let stdout = String::from_utf8_lossy(&r.stdout);
@@ -377,4 +387,192 @@ fn the_profile_leaves_out_the_driver_s_own_check() {
         .map(|f| f["qualname"].as_str().unwrap())
         .collect();
     assert!(!names.contains(&"spin") && !names.contains(&"Lazy.__file__"), "{p}");
+}
+
+const RECURSIVE: &str = "\
+def rec(n):
+    if n:
+        rec(n - 1)
+    try:
+        raise KeyError(n)
+    except KeyError:
+        pass
+";
+
+#[test]
+fn a_recursive_call_s_handled_exceptions_count_once_per_call() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(pkg.join("r.py"), RECURSIVE).unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, "from pkg import r\nfor i in range(100):\n    r.rec(3)\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let rec = &p["functions"][0];
+    assert_eq!(rec["qualname"], "rec");
+    assert_eq!(rec["calls"], 400);
+    // Every one of the 400 calls caught one, each after its inner calls had
+    // started (and ended).
+    assert_eq!(rec["handled"], 400, "{p}");
+}
+
+#[test]
+fn calls_active_at_the_sampling_limit_count_their_handled_exceptions() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    // 1,101 nested calls: the first 1,000 are sampled, and each catches
+    // only after the deeper ones, the unsampled among them, have run.
+    std::fs::write(pkg.join("r.py"), RECURSIVE).unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, "import sys\nsys.setrecursionlimit(10000)\nfrom pkg import r\nr.rec(1100)\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0", "--select-calls", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let rec = &p["functions"][0];
+    assert_eq!(rec["qualname"], "rec");
+    assert_eq!(rec["handled"], 1000, "{p}");
+}
+
+#[test]
+fn handled_exceptions_count_per_call_on_every_thread() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    // Three threads are inside `f` at once when each catches: every call's
+    // handler runs while the other two calls are active. (`f` calls mostly
+    // outside the package, `Barrier.wait`, hence `--select-outside 1`.)
+    std::fs::write(
+        pkg.join("t.py"),
+        "def f(barrier):\n    barrier.wait()\n    try:\n        {}[0]\n    except KeyError:\n        pass\n    barrier.wait()\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(
+        &work,
+        "import threading\nfrom pkg import t\nbarrier = threading.Barrier(3)\n\
+         def run():\n    for i in range(30):\n        t.f(barrier)\n\
+         threads = [threading.Thread(target=run) for _ in range(3)]\n\
+         for th in threads:\n    th.start()\nfor th in threads:\n    th.join()\n",
+    )
+    .unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0", "--select-outside", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let rec = &p["functions"][0];
+    assert_eq!(rec["qualname"], "f");
+    assert_eq!(rec["calls"], 90);
+    assert_eq!(rec["handled"], 90, "{p}");
+}
+
+/// Pass 2 under the rule of CPython 3.13 and 3.14, where an
+/// `EXCEPTION_HANDLED` or `PY_UNWIND` callback that returns
+/// `sys.monitoring.DISABLE` raises `ValueError` ("cannot disable"): the
+/// driver run with its callbacks wrapped so, against a workload that catches
+/// exceptions outside the package, as CI's 3.15 cannot show otherwise.
+#[test]
+fn pass_2_never_disables_the_events_older_interpreters_cannot_disable() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    let work = dir.join("outside.py");
+    std::fs::write(
+        &work,
+        "import sys\nsys.path.insert(0, sys.argv[1])\nfrom pkg import hot\n\
+         for i in range(100):\n    try:\n        {}[i]\n    except KeyError:\n        pass\n    hot.hot({1: 2}, i % 3)\n",
+    )
+    .unwrap();
+    let candidates = dir.join("candidates.json");
+    std::fs::write(&candidates, r#"[["pkg.hot", "hot", 1]]"#).unwrap();
+    let out = dir.join("types.json");
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/profile/driver.py");
+    let script = "\
+import runpy, sys
+mon = sys.monitoring
+real = mon.register_callback
+def register(tool, event, fn):
+    if fn is not None and event in (mon.events.EXCEPTION_HANDLED, mon.events.PY_UNWIND):
+        def checked(*args):
+            r = fn(*args)
+            if r is mon.DISABLE:
+                raise ValueError(f'Cannot disable {event} events')
+            return r
+        return real(tool, event, checked)
+    return real(tool, event, fn)
+mon.register_callback = register
+driver = sys.argv[1]
+sys.argv = [driver, *sys.argv[2:]]
+runpy.run_path(driver, run_name='__main__')
+";
+    let r = Command::new(python())
+        .arg("-c")
+        .arg(script)
+        .arg(&driver)
+        .arg("types")
+        .arg(&pkg)
+        .arg(&out)
+        .arg(&candidates)
+        .arg("--")
+        .arg(&work)
+        .arg(&*dir)
+        .output()
+        .unwrap();
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let t = read(&out);
+    // [module, qualname, line, types, handled]: the dict calls with `i % 3 != 1`.
+    assert_eq!(t["functions"][0][4], 67, "{t}");
+}
+
+/// Two functions that catch an exception in every call, `--select-max 1`:
+/// pass 2 samples only `a`, the one candidate, and rejects it. The slot it
+/// frees admits no one: `b`, which pass 2 never sampled, has no `handled`
+/// count to pass the threshold with.
+#[test]
+fn a_function_pass_2_did_not_sample_never_takes_a_rejected_one_s_slot() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(
+        pkg.join("m.py"),
+        "def a(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 1\n\n\n\
+         def b(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 2\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    // `a` takes more self time than `b`.
+    std::fs::write(&work, "from pkg import m\nfor i in range(3000):\n    m.a({})\n    m.a({})\n    m.b({})\n").unwrap();
+    let out = dir.join("p.json");
+    let rule = ["--runs", "1", "--select-share", "0", "--select-max", "1"];
+    let r = profile(&pkg, &out, &rule, &[work.as_os_str()]);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("; 0 pass the selection rule"), "{stderr}");
+    let p = read(&out);
+    let get = |q: &str| p["functions"].as_array().unwrap().iter().find(|f| f["qualname"] == q).unwrap().clone();
+    assert_eq!(get("a")["sampled"], true, "{p}");
+    assert_eq!(get("a")["handled"], 1000, "{p}");
+    assert_eq!(get("b")["sampled"], serde_json::Value::Null, "{p}");
+    let check = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("profile")
+        .arg(&pkg)
+        .arg("-o")
+        .arg(&out)
+        .args(&rule[2..])
+        .args(["--check", "--"])
+        .arg(python())
+        .output()
+        .unwrap();
+    let shown = String::from_utf8_lossy(&check.stdout);
+    assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
+    assert!(shown.contains("rejected: pkg.m:a: it catches an exception in 1000 of its first 1000 calls"), "{shown}");
+    assert!(shown.contains("rejected: pkg.m:b: not sampled by pass 2"), "{shown}");
+    assert!(!shown.contains("selected: pkg.m:b"), "{shown}");
 }

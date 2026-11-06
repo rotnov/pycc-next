@@ -55,7 +55,7 @@ fn possibly_unbound_reads_raise_like_cpython() {
     let dir = ScratchDir::new("maybe_unbound_fixture").expect("scratch");
     let expected = Command::new(oracle()).arg(fixture()).output().expect("python3");
     assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
-    for flags in [&[][..], &["--non-strict"][..]] {
+    for flags in [&[][..], &["--non-strict", "--select", "module"][..]] {
         let run = build_and_run(&dir, &fixture(), flags);
         assert!(run.status.success(), "{flags:?}: {}", text(&pycc_scratch::lf(&run.stderr)));
         assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&expected.stdout)), "{flags:?}");

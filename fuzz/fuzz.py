@@ -4,7 +4,8 @@
 Each case is a program `gen.generate(seed, index)` produces. It runs under
 CPython (the oracle) and is built by pycc in each mode (`harness.MODES`): native
 strict, native `--non-strict`, `--ext` (imported by a CPython driver) and, for a
-share of the cases, `--ext --non-strict`. A mode compares stdout, the uncaught
+share of the cases, `--ext --non-strict --select all` (every eligible function
+compiled, the module as bytecode). A mode compares stdout, the uncaught
 exception (type and message) and the exit status with CPython's.
 
 A diagnostic is not a mismatch: the block the diagnostic points at is dropped

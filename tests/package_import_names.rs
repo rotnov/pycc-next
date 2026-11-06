@@ -133,7 +133,7 @@ fn every_member_decides_its_fallback_code_and_its_native_calls_as_cpython_does()
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);

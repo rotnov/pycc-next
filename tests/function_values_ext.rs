@@ -60,7 +60,7 @@ fn compare(module: &str, driver: &str, flags: &[&str]) {
 
 #[test]
 fn function_values_crossing_into_cpython_are_the_published_functions() {
-    compare("fvals", "driver.py", &["--non-strict"]);
+    compare("fvals", "driver.py", &["--non-strict", "--select", "module"]);
 }
 
 #[test]

@@ -1,7 +1,8 @@
 # Library compilation: compile little, compile well
 
 Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted,
-section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`). Tracking issue:
+section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`), PR 4 (the switch,
+sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -108,22 +109,31 @@ to be hot are compiled, and each is compiled into specialized native code.
 
 - **Gathering.** `pycc profile -o pycc.profile.json -- PYTHON SCRIPT [ARGS]` runs the
   workload under the target interpreter against the package's sources, with nothing
-  compiled. It makes two passes:
+  compiled in its first two passes. It makes three:
   1. `cProfile` (deterministic). For each code object of the package it records calls
      and self time (`tottime`), and its calls to Python functions by callee (a function
      of the package, or any other), each a median over `--runs` repetitions (default 5).
      The calls a generator expression or lambda makes count as its enclosing
      function's, since compiled they are part of its body.
   2. `sys.monitoring` `PY_START`, only for functions that pass 1 would select. It
-     records the exact types of the arguments in the first 1,000 calls of each.
-     Section 2.4 uses them.
+     records the exact types of the arguments in the first 1,000 calls of each, and in
+     how many of those calls the function caught an exception in its own frame
+     (`EXCEPTION_HANDLED`). Sections 2.3 and 2.5 use them.
+  3. Verification: the candidates are built and the workload timed against them
+     (section 2.3), so only measured winners are selected.
 - **Storage.** One JSON file, committed with the project that builds the package. The
   file holds:
   - `{"version": 1, "python": "3.15.2", "workload": "<command line>"}`;
-  - one entry per function: `module`, `qualname`, `firstlineno`, the SHA-256 of the
+  - one entry per function: `module` (its import name: the dotted path below the
+    directory above every package that holds it, so `outer/inner/m.py` is
+    `outer.inner.m` even when `outer/inner` is the target; `select::import_name`, the
+    one name `--compile`, a package build's members and the build's report use too),
+    `qualname`, `firstlineno`, the SHA-256 of the
     function's source text, `calls`, `self_ns`, `callees` (`module:qualname:firstlineno`
     of a package function, or `*` for any other Python function, to its count), and
-    `arg_types` (exact type name to count, per parameter).
+    `arg_types` (exact type name to count, per parameter), and `handled` (of those
+    sampled calls, the ones that caught an exception), and for a function pass 3
+    measured, `measured` (section 2.3).
 
   Entries are sorted by `module`, then `qualname`, so a re-profile diffs cleanly. The
   header also records `runs` and `total_ns`, the run's total self time (the median over
@@ -141,6 +151,9 @@ to be hot are compiled, and each is compiled into specialized native code.
   profile: its stale entries and the selection.
 - **Default with no profile.** Nothing is selected. The build says so in one note, and a
   package with nothing selected gets no extension at all, so CPython imports it unchanged.
+  A single module built to `-o OUT` gets its source written as `OUT`'s `.py`, so the
+  output contract (an importable `OUT`) holds. Either way an extension an earlier build left
+  at `OUT` is removed, as CPython would import it ahead of the source.
   Compiling without evidence was measured as a loss (section 1, point 2).
 - **Overrides.** `--select all` compiles every eligible function. It exists for tests and
   for users who measure for themselves. Until PR 6 (section 8), a transitional `--select module`
@@ -166,6 +179,10 @@ when it is eligible, its profile entry is current, and:
 - its self time is at least 0.5% of the run's total;
 - it was called at least 50 times;
 - it ranks in the top 64 functions by self time;
+- it catches an exception in less than half of its sampled calls (`handled`).
+  Exceptions as control flow run slower compiled than in CPython until PR 9 (section
+  2.7): PR 4 measured `ConfigWrapper.__getattr__`, which catches a `KeyError` in 989 of
+  its first 1,000 calls, at +0.2 ms of schema;
 - most of its calls to Python functions stay inside the region: less than half leave it. Calls to itself, to
   its own nested functions and to the other selected functions stay inside. Rejecting a
   function can push its callers out, so this condition is applied until no function
@@ -176,8 +193,52 @@ stays bytecode unless the functions it calls are selected with it. Inside a regi
 calls become native direct calls in PR 7 (section 2.8). The rule uses only the
 profile's numbers, never a function's name.
 
+The rule's picks are candidates, not the selection: only measured winners are
+selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidates into
+a copy of the package and times the training workload with them compiled against the
+unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
+(`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
+verdict is on wall time: the compiled median must not exceed CPython's third quartile.
+If all the candidates together are slower, each region (the candidates connected by
+calls among them, most self time first) is checked alone, then the regions that were no
+slower alone are checked together once more; at most 6 builds. Every candidate gets its
+last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
+`compiled_ns` as first quartile, median and third quartile, and with
+`--verify-instructions` the instruction delta under callgrind, as evidence only). A
+function measured slower is rejected ("slower when compiled") by builds and `--check`
+alike, and a later `pycc profile` keeps the rejection while the function's source hash
+is unchanged, so builds do not flap (deleting the profile measures every function
+again, as a new pycc whose code got faster should); `--no-verify` skips the pass.
+Each check's build compiles exactly its set (`--select none --compile MODULE:QUALNAME`)
+and reports what it compiled (`--report-fallbacks`); a candidate the build leaves
+bytecode is never timed: it is rejected with the build's reason ("not compiled: ...",
+`measured.refused`, not carried to the next profile, whose pycc may compile it) and the
+check is built again without it. The timed runs keep the original module's import root
+on `sys.path` after the copy's, so a standalone module's siblings are found. A
+function is selected only with evidence from every pass that ran: once pass 2 has run
+the profile is `sampled` and only the functions it sampled (`sampled` on the entry)
+are selectable ("not sampled by pass 2"), and once pass 3 has run it is `verified` and
+only its measured winners are. A rejection frees a slot under `--select-max` but
+admits no function a pass did not examine.
+
+Pass 3 exists because of what PR 4 measured on mistune. Its 11 candidates (escape,
+`HTMLRenderer.text`, `InlineState.append_token`, the emphasis parser and its helpers)
+made mistune's benchmark 0.966x (91.86 ms against 88.70 ms, the IQRs apart) and 2.6%
+more instructions; built one at a time and eleven times leaving one out, under
+callgrind, not one was a winner: most were neutral (within 0.03M instructions a pass),
+`append_token` cost 0.30M and `escape` 0.10M. An untyped lift does not beat 3.15's
+specializing interpreter at its boundary: a call into a patched function, or out of
+one, is a vectorcall where CPython had an inlined frame, and the body itself, still
+generic object code, saves little. Only whole regions with direct calls inside them
+(PR 7) and type-specialized bodies (PR 8) can pay; pydantic's recursive functions, whose
+calls stay inside their region, already save 5% of schema's instructions, but that is
+0.25% of the training workload, under its noise, so pass 3 does not keep them either:
+after PR 4 none of the three packages selects a function. If PR 7 does
+not make mistune's emphasis region a measured winner, that is the point to stop and
+report.
+
 The defaults are build options (`--select-share`, `--select-calls`, `--select-max`,
-`--select-outside`). They stay until the measurements in section 8 justify other
+`--select-outside`, `--select-handled`). They stay until the measurements in section 8 justify other
 values. The report lists every selected function with its share, and every function it
 rejected with the reason.
 
@@ -193,8 +254,13 @@ rejected with the reason.
   magic number and `-O`. When that check fails, the module runs `compile()` of its
   embedded source. The module's `__file__` and `__spec__.origin` name its `.py` file, as
   CPython's own would. Its loader has `get_code` and `get_source`.
+
+  As of PR 4, the whole source is one precompiled chunk of the existing chunk machinery,
+  run in the module's namespace. `__file__` and `__spec__.origin` name the `.py` file,
+  which ships beside the extension, so `inspect` and tracebacks read it. The loader
+  does not have `get_code` and `get_source` yet: PR 5 replaces the chunk machinery.
 - **Patching.** After the body has run, each selected function is patched in place, with
-  the frameless forwarder mechanism v0.8 built (`src/ext/module/forward.c`):
+  the frameless forwarder mechanism v0.8 built (`src/ext/module/forward.c`; the hook is `patch.c`):
   - its `vectorcall` becomes a trampoline into the native body;
   - its version is cleared, so no call site specializes past it;
   - CPython's own binding stays the fallback for any argument shape the trampoline does
@@ -203,6 +269,15 @@ rejected with the reason.
   The function object, its `__code__`, `__defaults__`, `__wrapped__` chains and its
   identity stay CPython's. A decorator that wrapped the function keeps calling the
   patched object. A function whose `__code__` is later replaced runs as bytecode.
+- **Where patching is unavailable.** The trampoline writes CPython 3.13's and 3.15's
+  function layouts. On another CPython (3.14) the selected functions run as bytecode, and
+  the import says so with a `RuntimeWarning`; under `PYCC_REQUIRE_PATCH` the import fails
+  instead, which is how pass 3 refuses to time bytecode against bytecode
+  (`PYCC_NO_PATCH` simulates such an interpreter). The same holds for any selected
+  function the patch does not find where its class statement stored it (private names
+  are looked up mangled, as CPython stores them): it is counted and named in the warning,
+  and under `PYCC_REQUIRE_PATCH` it fails the import, so a function is never reported
+  compiled while it runs as bytecode.
 - **Before the patch.** A function called while the module body runs (before the patch)
   runs as bytecode. That is correct, only slower.
 

@@ -15,6 +15,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// The file in a member's output directory naming its selected functions.
+const SELECTED_NAME: &str = "selected.txt";
+
 /// How a package build compiles its members: the flags of the `pycc build`
 /// it was given that every member build takes too.
 pub(crate) struct PackageBuild<'a> {
@@ -25,6 +28,9 @@ pub(crate) struct PackageBuild<'a> {
     pub(crate) excludes: &'a [String],
     /// `--non-strict`, `--strict`, `--report-fallbacks` as given.
     pub(crate) mode_args: Vec<OsString>,
+    /// The functions a non-strict build compiles (`crate::select`), when
+    /// it selects them: only the modules holding one are built.
+    pub(crate) selection: Option<&'a crate::select::Selection>,
 }
 
 /// Writes a member's interface (`crate::package_build::Interface`): its C
@@ -127,7 +133,35 @@ pub(crate) fn build_package(
         eprintln!("error: {message}");
         ExitCode::from(2)
     };
-    let modules = package_build::discover(build.path, build.excludes).map_err(fail)?;
+    let mut modules = package_build::discover(build.path, build.excludes).map_err(fail)?;
+    // The selection names a module by its import name, which for a
+    // subpackage (`outer/inner`) is not the name below the target
+    // (`inner.m` is `outer.inner.m`).
+    let selected = |module: &PackageModule| {
+        build
+            .selection
+            .and_then(|selection| selection.modules.get(&crate::select::import_name(&module.path)))
+            .filter(|functions| !functions.is_empty())
+    };
+    if build.selection.is_some() {
+        // The package's own module stays: its extension is the package's
+        // entry, holding the finder.
+        let root = modules[0].dotted.clone();
+        modules.retain(|module| module.dotted == root || selected(module).is_some());
+        if modules.len() == 1 && selected(&modules[0]).is_none() {
+            // An extension an earlier build left would be imported ahead of
+            // the package's `__init__.py`.
+            let platform = ext_build::ExtLinkPlatform::resolve(build.target);
+            let output = ext_output::resolve(build.out, &platform.suffix_platform())
+                .map_err(|e| fail(e.message()))?;
+            crate::select::remove_stale(&output.artifact).map_err(fail)?;
+            eprintln!(
+                "note: no function of `{root}` is selected: no extension is built, so CPython \
+                 imports the package as it is"
+            );
+            return Ok(());
+        }
+    }
     let package = &modules[0].dotted;
     let platform = ext_build::ExtLinkPlatform::resolve(build.target);
     // Whether the link packs relocations is probed while the members build.
@@ -162,7 +196,7 @@ pub(crate) fn build_package(
     write_ext_source(&finder, package_build::FINDER_C)?;
     write_ext_source(
         &scratch.join(package_build::MEMBERS_HEADER_NAME),
-        &package_build::members_header(package, &modules),
+        &package_build::members_header(package, &modules, build.selection.is_some()),
     )?;
     let mut compile_args = ext_build::ext_compile_args(platform, &probe.include, &runtime);
     compile_args.push(finder.into_os_string());
@@ -186,10 +220,20 @@ pub(crate) fn build_package(
     // Which members' interfaces each member reads (cross-module native
     // calls): it starts once they are written.
     // `PYCC_NO_NATIVE_SIBLINGS=1` builds without them, to measure them.
+    // A build of selected functions makes no native calls between members:
+    // their modules are bytecode.
     let producers = match std::env::var_os("PYCC_NO_NATIVE_SIBLINGS") {
         Some(_) => vec![Vec::new(); modules.len()],
+        None if build.selection.is_some() => vec![Vec::new(); modules.len()],
         None => package_build::producers(&modules, &sources),
     };
+    // Each member's share of the selection, for its build.
+    for (module, dir) in modules.iter().zip(&dirs) {
+        if build.selection.is_some() {
+            let functions = selected(module).cloned().unwrap_or_default();
+            write_ext_source(&dir.join(SELECTED_NAME), &crate::select::to_text(&functions))?;
+        }
+    }
     let jobs = std::env::var("PYCC_JOBS")
         .ok()
         .and_then(|jobs| jobs.parse().ok())
@@ -199,6 +243,9 @@ pub(crate) fn build_package(
     let threads = crate::threads::member_share(cores, jobs);
     let command = |member: usize, available: &[usize]| {
         let mut cmd = member_command(&exe, build, &modules[member], bases[member], &dirs[member]);
+        if build.selection.is_some() {
+            cmd.arg("--select-functions").arg(dirs[member].join(SELECTED_NAME));
+        }
         cmd.arg("--member-threads").arg(threads.to_string());
         cmd.arg("--ext-probe").arg(&probe_file);
         for &producer in available {

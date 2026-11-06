@@ -35,7 +35,7 @@ fn frozenset_constants_take_the_native_specialization() {
     std::fs::copy(&fixture, src.join("m.py")).expect("source");
     let ll = dir.join("m.ll");
     let out = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--release", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "module", "--release", "--report-fallbacks"])
         .arg(dir.join("m.py"))
         .arg("-o")
         .arg(ext.join("m"))

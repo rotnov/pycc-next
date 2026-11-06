@@ -66,7 +66,7 @@ fn boxed_tuple_returns_build_natively_next_to_fallback_code() {
     let dir = ScratchDir::new("non_strict_boxed_tuple_native").expect("scratch");
     let source = dir.join("m.py");
     std::fs::copy(fixture(), &source).expect("copy the fixture");
-    let build = pycc(&["--non-strict", "--report-fallbacks"], &source, &dir.join("app"));
+    let build = pycc(&["--non-strict", "--select", "module", "--report-fallbacks"], &source, &dir.join("app"));
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     // Only the `eval` statement runs in CPython: every function compiles.
@@ -87,7 +87,7 @@ fn boxed_tuple_returns_build_as_an_ext_module() {
     std::fs::create_dir_all(&src_dir).expect("src dir");
     let source = src_dir.join("m.py");
     std::fs::copy(fixture(), &source).expect("copy the fixture");
-    let build = pycc(&["--non-strict", "--ext"], &source, &ext_dir.join("m"));
+    let build = pycc(&["--non-strict", "--select", "module", "--ext"], &source, &ext_dir.join("m"));
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let import = |dir: &Path| {
         Command::new(python())

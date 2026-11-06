@@ -55,7 +55,7 @@ fn format_specs_and_printf_match_cpython() {
     let dir = ScratchDir::new("format_spec").expect("scratch");
     let expected = cpython(&fixture());
     assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
-    for flags in [&[][..], &["--non-strict", "--report-fallbacks"][..]] {
+    for flags in [&[][..], &["--non-strict", "--select", "module", "--report-fallbacks"][..]] {
         let run = build_and_run(&dir, &fixture(), flags);
         assert!(run.status.success(), "{flags:?}: {}", text(&pycc_scratch::lf(&run.stderr)));
         assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&expected.stdout)), "{flags:?}");
@@ -78,7 +78,7 @@ fn a_printf_conversion_of_the_wrong_type_is_refused_in_strict_mode() {
     assert!(!check.status.success());
     let rendered = format!("{}{}", text(&pycc_scratch::lf(&check.stdout)), text(&pycc_scratch::lf(&check.stderr)));
     assert!(rendered.contains("error[T0021]"), "{rendered}");
-    let run = build_and_run(&dir, &source, &["--non-strict"]);
+    let run = build_and_run(&dir, &source, &["--non-strict", "--select", "module"]);
     assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&cpython(&source).stdout));
 }
 
@@ -93,6 +93,6 @@ fn a_nested_spec_field_is_refused_in_strict_mode() {
     assert!(!check.status.success());
     let rendered = format!("{}{}", text(&pycc_scratch::lf(&check.stdout)), text(&pycc_scratch::lf(&check.stderr)));
     assert!(rendered.contains("error[C0001]") && rendered.contains("nested field"), "{rendered}");
-    let run = build_and_run(&dir, &source, &["--non-strict"]);
+    let run = build_and_run(&dir, &source, &["--non-strict", "--select", "module"]);
     assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "[   2.5]\n");
 }

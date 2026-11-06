@@ -24,6 +24,14 @@ pub(crate) fn with_fallback<T, E>(
     attempt: impl Fn() -> Result<T, E>,
     split: impl Fn(&E) -> Option<Vec<Failure>>,
 ) -> Result<T, E> {
+    // A non-strict `--ext` module that selects functions stays bytecode
+    // but for them (`selected`).
+    if let Some(selected) = crate::select::module()
+        && publishes.variables
+        && mode_allows(path)
+    {
+        return super::selected::with_selection(path, display, publishes, selected, attempt, split);
+    }
     set_override(None);
     // A non-strict `--ext` module: its container slots that code holding an
     // instance as a CPython object may use -- its own fallback code, and
@@ -315,7 +323,7 @@ fn converge<T, E>(
 }
 
 /// The entry file's decoded source.
-fn read_entry(path: &Path) -> Option<String> {
+pub(super) fn read_entry(path: &Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
     crate::source::decode_python_source(&bytes).ok()
 }

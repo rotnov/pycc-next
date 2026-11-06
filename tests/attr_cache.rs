@@ -46,7 +46,7 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, 
     let module = format!("{fixture}_ext");
     std::fs::copy(&source, dir.join(format!("{module}.py"))).expect("copy the fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict"])
+        .args(["build", "--ext", "--non-strict", "--select", "module"])
         .arg(dir.join(format!("{module}.py")))
         .arg("-o")
         .arg(dir.join(&module))

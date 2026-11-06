@@ -118,26 +118,26 @@ fn ext_matches_cpython(name: &str, extra: &[&str]) {
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn compiled_callers_see_every_rebinding_of_a_function_name() {
-    native_matches_cpython("rebound_function", &["--non-strict"]);
+    native_matches_cpython("rebound_function", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn compiled_callers_see_every_rebinding_of_a_function_name_in_an_extension() {
-    ext_matches_cpython("rebound_function", &["--non-strict"]);
+    ext_matches_cpython("rebound_function", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_redefined_function_used_as_a_value_is_the_definition_of_that_moment() {
     native_matches_cpython("rebound_function_values", &[]);
-    native_matches_cpython("rebound_function_values", &["--non-strict"]);
+    native_matches_cpython("rebound_function_values", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_redefined_function_used_as_a_value_is_the_definition_of_that_moment_in_an_extension() {
-    ext_matches_cpython("rebound_function_values", &["--non-strict"]);
+    ext_matches_cpython("rebound_function_values", &["--non-strict", "--select", "module"]);
 }
 
 #[test]

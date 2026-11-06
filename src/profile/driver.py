@@ -17,7 +17,18 @@
 #                           the functions CANDIDATES (a JSON file of `[module,
 #                           qualname, firstlineno]`) names; writes, per function,
 #                           the exact types of its arguments in its first 1,000
-#                           calls (type name to count, per parameter).
+#                           calls (type name to count, per parameter), and in
+#                           how many of those it caught an exception in its own
+#                           frame.
+#   time   PKG OUT -- ...   runs SCRIPT once, nothing hooked, and writes its wall
+#                           time in nanoseconds (pass 3, src/profile/verify.rs).
+#                           PKG may be a built copy: its top-level name is
+#                           found under it ahead of `sys.path` (so a SCRIPT
+#                           that puts the sources on `sys.path` itself runs
+#                           the copy, and nothing is imported before SCRIPT
+#                           runs), and its modules are checked to come from
+#                           under it, the package's own `__init__` as an
+#                           extension too.
 #
 # SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own and the
 # directory PKG is imported from (above every package holding it) first on
@@ -33,7 +44,7 @@ import re
 import sys
 import tokenize
 
-TYPE_CALLS = 1000
+TYPE_CALLS = 1000  # src/profile.rs's TYPE_CALLS
 
 
 def import_root(pkg):
@@ -135,6 +146,11 @@ def run(pkg, script, args):
     sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
     # PKG's sources, not a copy installed or beside the script.
     sys.path.insert(0, import_root(pkg))
+    # Pass 3's copy of a package: the modules beside the original (a
+    # standalone module's siblings) are found where they are.
+    origin = os.environ.pop("PYCC_PROFILE_ORIGIN", None)
+    if origin is not None:
+        sys.path.insert(1, import_root(origin))
     try:
         runpy.run_path(script, run_name="__main__")
     except SystemExit as e:
@@ -156,6 +172,65 @@ def check_loaded(pkg):
         loaded += 1
     if not loaded:
         sys.exit(f"pycc profile: the workload imported no module of {pkg}")
+
+
+def check_under(pkg):
+    """Fails unless the workload imported a module of PKG, every one from a file
+    under it: the built copy's package root is an extension, not its
+    `__init__.py`."""
+    real = os.path.realpath(pkg)
+    loaded = 0
+    for name, path in modules(pkg):
+        m = sys.modules.get(name)
+        if m is None:
+            continue
+        found = getattr(m, "__file__", None)
+        if found is None:
+            sys.exit(f"pycc profile: the workload imported {name} from no file, not from {pkg}")
+        found = os.path.realpath(found)
+        if os.path.isfile(real):
+            stem = os.path.splitext(os.path.basename(real))[0]
+            ok = (os.path.dirname(found) == os.path.dirname(real)
+                  and os.path.basename(found).split(".")[0] == stem)
+        else:
+            ok = found.startswith(real + os.sep)
+        if not ok:
+            sys.exit(f"pycc profile: the workload imported {name} from {found}, not from {pkg}")
+        loaded += 1
+    if not loaded:
+        sys.exit(f"pycc profile: the workload imported no module of {pkg}")
+
+
+class CopyFinder:
+    """Finds the top-level module `name` under `root` only (submodules follow
+    its `__path__`)."""
+
+    def __init__(self, name, root):
+        self.name = name
+        self.root = root
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != self.name:
+            return None
+        import importlib.machinery
+        return importlib.machinery.PathFinder.find_spec(fullname, [self.root])
+
+
+def timed(pkg, script, args):
+    import time
+    started = time.perf_counter_ns()
+    # The copy's top-level name resolves under it first, so a workload that
+    # puts the sources on `sys.path` itself still runs this copy; nothing is
+    # imported before the workload, which may set up what its import reads.
+    root = import_root(pkg)
+    real = os.path.realpath(pkg)
+    top = dotted(root, real if os.path.isfile(real)
+                 else os.path.join(real, "__init__.py")).split(".")[0]
+    sys.meta_path.insert(0, CopyFinder(top, root))
+    run(pkg, script, args)
+    ns = time.perf_counter_ns() - started
+    check_under(pkg)
+    return {"ns": ns}
 
 
 _IDENTITY = {}
@@ -224,21 +299,43 @@ def calls(pkg, script, args):
 
 
 def types(pkg, candidates, script, args):
+    from _thread import get_ident
     files = package_files(pkg)
     wanted = {(m, q, int(f)) for m, q, f in candidates}
+    # Per candidate: [calls sampled, argument types, sampled calls that caught
+    # an exception, active calls by thread (each thread's innermost last, each
+    # [sampled, counted]), sampling done, sampled calls still active].
     seen = {}
+    by_code = {}
     mon = sys.monitoring
     tool = mon.PROFILER_ID
 
     def start(code, offset):
-        name = files.get(identity(code.co_filename))
-        key = (name, code.co_qualname, code.co_firstlineno)
-        if key not in wanted:
+        rec = by_code.get(code)
+        if rec is None:
+            name = files.get(identity(code.co_filename))
+            key = (name, code.co_qualname, code.co_firstlineno)
+            if key not in wanted:
+                return mon.DISABLE
+            rec = seen.setdefault(key, [0, {}, 0, {}, False, 0])
+            by_code[code] = rec
+            mon.set_local_events(tool, code, mon.events.PY_RETURN)
+        if rec[4]:
             return mon.DISABLE
-        rec = seen.setdefault(key, [0, {}])
         if rec[0] >= TYPE_CALLS:
+            # No new call is sampled; the sampled ones still active are
+            # followed until they end (an exception they handle counts), the
+            # calls made meanwhile only kept in step, unsampled.
+            if rec[5]:
+                rec[3].setdefault(get_ident(), []).append([False, False])
+                return None
+            rec[4] = True
+            rec[3].clear()
+            mon.set_local_events(tool, code, 0)
             return mon.DISABLE
         rec[0] += 1
+        rec[5] += 1
+        rec[3].setdefault(get_ident(), []).append([True, False])
         frame = sys._getframe(1)
         n = code.co_argcount + code.co_kwonlyargcount
         n += bool(code.co_flags & 0x04) + bool(code.co_flags & 0x08)
@@ -251,16 +348,46 @@ def types(pkg, candidates, script, args):
                 per[tn] = per.get(tn, 0) + 1
         return None
 
+    def end(code, offset, value):
+        rec = by_code.get(code)
+        if rec is not None and not rec[4]:
+            active = rec[3].get(get_ident())
+            if active and active.pop()[0]:
+                rec[5] -= 1
+        return None
+
+    def caught(code, offset, exc):
+        # EXCEPTION_HANDLED (and PY_UNWIND) cannot be disabled before 3.15:
+        # returning `DISABLE` from them raises `ValueError`.
+        rec = by_code.get(code)
+        if rec is None or rec[4]:
+            return None
+        active = rec[3].get(get_ident())
+        if not active:
+            return None
+        # One count per sampled call: the innermost active one of this code
+        # on this thread, where the handler runs.
+        call = active[-1]
+        if call[0] and not call[1]:
+            call[1] = True
+            rec[2] += 1
+        return None
+
     mon.use_tool_id(tool, "pycc profile")
     mon.register_callback(tool, mon.events.PY_START, start)
-    mon.set_events(tool, mon.events.PY_START)
+    mon.register_callback(tool, mon.events.PY_RETURN, end)
+    mon.register_callback(tool, mon.events.PY_UNWIND, end)
+    mon.register_callback(tool, mon.events.EXCEPTION_HANDLED, caught)
+    mon.set_events(tool, mon.events.PY_START | mon.events.PY_UNWIND | mon.events.EXCEPTION_HANDLED)
     try:
         run(pkg, script, args)
     finally:
         mon.set_events(tool, 0)
+        for code in by_code:
+            mon.set_local_events(tool, code, 0)
         mon.free_tool_id(tool)
     check_loaded(pkg)
-    return {"functions": [[m, q, f, rec[1]] for (m, q, f), rec in seen.items()]}
+    return {"functions": [[m, q, f, rec[1], rec[2]] for (m, q, f), rec in seen.items()]}
 
 
 def main():
@@ -272,6 +399,8 @@ def main():
         result = index(pkg)
     elif mode == "calls":
         result = calls(pkg, rest[0], rest[1:])
+    elif mode == "time":
+        result = timed(pkg, rest[0], rest[1:])
     else:
         with open(own[3], encoding="utf-8") as f:
             result = types(pkg, json.load(f), rest[0], rest[1:])

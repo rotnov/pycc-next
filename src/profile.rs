@@ -11,11 +11,15 @@
 //!    too.
 //! 2. One process with a `sys.monitoring` `PY_START` hook on the functions the
 //!    selection rule ([`select`]) picks from pass 1: the exact types of their
-//!    arguments in their first 1,000 calls.
+//!    arguments in their first 1,000 calls, and how many caught an exception.
+//! 3. Unless `--no-verify`: [`verify`] builds the candidates and times the
+//!    workload against them, recording `measured` on each, so only measured
+//!    winners are selected.
 //!
 //! The file holds `version`, `python`, `workload`, `runs`, `total_ns` and one
 //! entry per function (`module`, `qualname`, `firstlineno`, the SHA-256 of its
-//! source text, `calls`, `self_ns`, `arg_types`), sorted by module, qualified
+//! source text, `calls`, `self_ns`, `callees`, `arg_types`, `handled`,
+//! `measured`), sorted by module, qualified
 //! name and line, written by [`Profile::to_json`]: the same samples give the
 //! same bytes. A build reads it back with [`Profile::current`], which drops
 //! (and names) each entry whose function's source no longer hashes the same.
@@ -29,6 +33,8 @@ use std::path::Path;
 pub(crate) const VERSION: u32 = 1;
 
 const DRIVER: &str = include_str!("profile/driver.py");
+
+pub(crate) mod verify;
 
 /// Parameter name to exact type name to count.
 pub(crate) type ArgTypes = BTreeMap<String, BTreeMap<String, u64>>;
@@ -48,7 +54,77 @@ pub(crate) struct Entry {
     pub(crate) callees: BTreeMap<String, u64>,
     #[serde(default)]
     pub(crate) arg_types: ArgTypes,
+    /// Of the calls pass 2 sampled (the first [`TYPE_CALLS`]), how many caught
+    /// an exception in the function's own frame.
+    #[serde(default)]
+    pub(crate) handled: u64,
+    /// Pass 2 sampled its calls (it was among the candidates it sampled, and
+    /// the workload called it): its `handled` and `arg_types` are evidence.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) sampled: bool,
+    /// Pass 3's verdict (`profile::verify`): whether the workload ran no
+    /// slower with this function compiled. Absent when not measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) measured: Option<Measured>,
 }
+
+/// One pass-3 check's outcome, recorded on each function it compiled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Measured {
+    /// Whether the workload ran no slower compiled: the compiled median
+    /// under CPython's third quartile.
+    pub(crate) compiled: bool,
+    /// The functions the check compiled, this one among them.
+    pub(crate) with: usize,
+    /// The workload's wall time in CPython: first quartile, median, third
+    /// quartile, in nanoseconds.
+    pub(crate) cpython_ns: [u64; 3],
+    /// The same with the functions compiled.
+    pub(crate) compiled_ns: [u64; 3],
+    /// Instructions of one run compiled minus one in CPython, when
+    /// `--verify-instructions` ran it under callgrind: evidence, never the
+    /// verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) instructions: Option<i64>,
+    /// Why the check's build did not compile this function, when it did
+    /// not: it was never timed, and is rejected for this reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) refused: Option<String>,
+}
+
+impl Measured {
+    /// The verdict on a function the build of a check of `with` functions
+    /// did not compile, for `reason`: never timed.
+    pub(crate) fn refused(with: usize, reason: String) -> Measured {
+        Measured {
+            compiled: false,
+            with,
+            cpython_ns: [0; 3],
+            compiled_ns: [0; 3],
+            instructions: None,
+            refused: Some(reason),
+        }
+    }
+
+    /// Why a function this check compiled, or would have, is rejected.
+    pub(crate) fn rejection(&self) -> String {
+        if let Some(reason) = &self.refused {
+            return format!("not compiled: {reason}");
+        }
+        let ms = |ns: u64| ns as f64 / 1e6;
+        format!(
+            "slower when compiled: the workload took {:.1} ms with it and {} other functions compiled, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
+            ms(self.compiled_ns[1]),
+            self.with - 1,
+            ms(self.cpython_ns[1]),
+            ms(self.cpython_ns[0]),
+            ms(self.cpython_ns[2]),
+        )
+    }
+}
+
+/// The calls of a function pass 2 samples.
+pub(crate) const TYPE_CALLS: u64 = 1000;
 
 impl Entry {
     /// Its key among callees.
@@ -66,6 +142,14 @@ pub(crate) struct Profile {
     pub(crate) runs: u32,
     pub(crate) total_ns: u64,
     pub(crate) functions: Vec<Entry>,
+    /// Pass 2 sampled the selection's candidates: only the functions it
+    /// sampled are selected ([`Rule::sampled_only`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) sampled: bool,
+    /// Pass 3 measured the selection's candidates: only its measured
+    /// winners are selected ([`Rule::measured_only`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) verified: bool,
 }
 
 /// One function of the package's current sources (the driver's `index`).
@@ -93,6 +177,17 @@ pub(crate) struct Rule {
     /// selection must be under this (its own nested code, itself and the
     /// other selected functions are inside it): at 0.5, most stay inside.
     pub(crate) outside: f64,
+    /// The share of its sampled calls in which a function catches an
+    /// exception must be under this. Exceptions as control flow are slower
+    /// compiled than in CPython until PR 9 (section 2.7).
+    pub(crate) handled: f64,
+    /// Only functions pass 2 sampled are selected: a function that would
+    /// fill a slot a rejected candidate left has no `handled` count.
+    pub(crate) sampled_only: bool,
+    /// Only functions pass 3 measured are selected: a profile whose
+    /// candidates were measured keeps exactly its winners, and a function
+    /// that would fill a slot a rejected candidate left is not one of them.
+    pub(crate) measured_only: bool,
 }
 
 impl Default for Rule {
@@ -102,6 +197,9 @@ impl Default for Rule {
             calls: 50,
             max: 64,
             outside: 0.5,
+            handled: 0.5,
+            sampled_only: false,
+            measured_only: false,
         }
     }
 }
@@ -117,6 +215,18 @@ pub(crate) struct Decision<'p> {
 }
 
 impl Profile {
+    /// `rule` as it applies to this profile: a function is selected only
+    /// with evidence from every pass that ran (sampled when pass 2 ran,
+    /// measured a winner when pass 3 did). A rejection frees a slot but
+    /// admits no function a pass did not examine.
+    pub(crate) fn rule(&self, rule: Rule) -> Rule {
+        Rule {
+            sampled_only: self.sampled,
+            measured_only: self.verified,
+            ..rule
+        }
+    }
+
     /// The file's text: pretty JSON, entries sorted, a final newline.
     pub(crate) fn to_json(&self) -> String {
         let mut sorted = self.clone();
@@ -188,6 +298,7 @@ impl Profile {
 
 /// The selection rule (section 2.3) over `entries` (current ones): eligible,
 /// at least `rule.share` of the run's total self time, at least `rule.calls`
+/// calls, catching an exception in less than `rule.handled` of its sampled
 /// calls, and among the `rule.max` such functions with the most self time;
 /// then, of those, the ones less than `rule.outside` of whose calls to Python
 /// functions leave the selection (the region, section 2.3).
@@ -214,6 +325,8 @@ pub(crate) fn select<'p>(
             };
             let rejected = if !eligible {
                 Some("not eligible (a generator, coroutine or nested function)".to_string())
+            } else if let Some(m) = entry.measured.as_ref().filter(|m| !m.compiled) {
+                Some(m.rejection())
             } else if share < rule.share {
                 Some(format!(
                     "self time {:.2}% is under {:.2}%",
@@ -222,6 +335,18 @@ pub(crate) fn select<'p>(
                 ))
             } else if entry.calls < rule.calls {
                 Some(format!("{} calls is under {}", entry.calls, rule.calls))
+            } else if rule.sampled_only && !entry.sampled {
+                Some("not sampled by pass 2 (it was not among the candidates it sampled)".to_string())
+            } else if entry.handled > 0
+                && entry.handled as f64 >= entry.calls.min(TYPE_CALLS) as f64 * rule.handled
+            {
+                Some(format!(
+                    "it catches an exception in {} of its first {} calls",
+                    entry.handled,
+                    entry.calls.min(TYPE_CALLS)
+                ))
+            } else if rule.measured_only && entry.measured.is_none() {
+                Some("not measured by pass 3 (it was not among the candidates it built)".to_string())
             } else if taken >= rule.max {
                 Some(format!("not among the top {} by self time", rule.max))
             } else {
@@ -398,11 +523,31 @@ struct Driver<'a> {
     python: &'a OsStr,
     script: &'a Path,
     pkg: &'a Path,
+    /// The package `pkg` is pass 3's copy of: its import root stays on
+    /// `sys.path` after the copy's, so the modules beside it (a standalone
+    /// module's siblings) are still found.
+    origin: Option<&'a Path>,
 }
 
 impl Driver<'_> {
-    fn run(&self, mode: &str, out: &Path, extra: &[&OsStr], workload: &[OsString]) -> Result<(), String> {
-        let mut command = std::process::Command::new(self.python);
+    /// The driver's command for `mode`, under `wrapper` (a program and its
+    /// arguments, e.g. callgrind) when given.
+    fn command(
+        &self,
+        mode: &str,
+        out: &Path,
+        extra: &[&OsStr],
+        workload: &[OsString],
+        wrapper: &[&OsStr],
+    ) -> std::process::Command {
+        let mut command = match wrapper {
+            [program, args @ ..] => {
+                let mut command = std::process::Command::new(program);
+                command.args(args).arg(self.python);
+                command
+            }
+            [] => std::process::Command::new(self.python),
+        };
         // `-I` would also ignore `PYTHONHASHSEED`; the `PYTHON*` variables it
         // stands for are removed instead, so the seed is the only one left.
         for (name, _) in std::env::vars_os() {
@@ -422,7 +567,15 @@ impl Driver<'_> {
             command.arg("--").args(workload);
         }
         command.env("PYTHONHASHSEED", "0");
-        let status = command
+        if let Some(origin) = self.origin {
+            command.env("PYCC_PROFILE_ORIGIN", origin);
+        }
+        command
+    }
+
+    fn run(&self, mode: &str, out: &Path, extra: &[&OsStr], workload: &[OsString]) -> Result<(), String> {
+        let status = self
+            .command(mode, out, extra, workload, &[])
             .status()
             .map_err(|e| format!("cannot run {}: {e}", self.python.to_string_lossy()))?;
         if !status.success() {
@@ -446,6 +599,7 @@ pub(crate) fn index(python: &OsStr, pkg: &Path) -> Result<Vec<Function>, String>
         python,
         script: &script,
         pkg,
+        origin: None,
     };
     let out = scratch.join("index.json");
     driver.run("index", &out, &[], &[])?;
@@ -473,7 +627,7 @@ pub(crate) fn check_profile(
         eprintln!("{note}");
     }
     let decided: Vec<(&Entry, bool)> = current.iter().map(|(e, f)| (*e, f.eligible)).collect();
-    for d in select(profile.total_ns, &decided, rule) {
+    for d in select(profile.total_ns, &decided, profile.rule(rule)) {
         let e = d.entry;
         match &d.rejected {
             None => println!(
@@ -497,6 +651,7 @@ pub(crate) fn run_profile(
     workload: &[OsString],
     runs: u32,
     rule: Rule,
+    verify: Option<verify::Options>,
 ) -> Result<(), String> {
     let [python, rest @ ..] = workload else {
         return Err("pycc profile needs a workload: -- PYTHON SCRIPT [ARGS]".to_string());
@@ -517,6 +672,7 @@ pub(crate) fn run_profile(
         python,
         script: &script,
         pkg: &pkg,
+        origin: None,
     };
     let mut samples = Vec::new();
     for i in 0..runs.max(1) {
@@ -543,9 +699,22 @@ pub(crate) fn run_profile(
                 self_ns: aggregated.self_ns,
                 callees: aggregated.callees,
                 arg_types: ArgTypes::new(),
+                handled: 0,
+                sampled: false,
+                measured: None,
             })
         })
         .collect();
+    // A function an earlier profile in `out` measured slower stays rejected
+    // while its source is unchanged (pass 3).
+    if let Ok(old) = Profile::read(out) {
+        let mut carried = Profile {
+            functions: std::mem::take(&mut functions),
+            ..old.clone()
+        };
+        verify::carry_rejections(&mut carried, &old);
+        functions = carried.functions;
+    }
     let eligible = |e: &Entry| {
         by_key
             .get(&(e.module.as_str(), e.qualname.as_str(), e.firstlineno))
@@ -565,17 +734,19 @@ pub(crate) fn run_profile(
         driver.run("types", &path, &[list.as_os_str()], rest)?;
         #[derive(Deserialize)]
         struct Types {
-            functions: Vec<(String, String, u32, ArgTypes)>,
+            functions: Vec<(String, String, u32, ArgTypes, u64)>,
         }
         let types: Types = Driver::json(&path)?;
-        let mut by: BTreeMap<(String, String, u32), ArgTypes> = types
+        let mut by: BTreeMap<(String, String, u32), (ArgTypes, u64)> = types
             .functions
             .into_iter()
-            .map(|(m, q, l, t)| ((m, q, l), t))
+            .map(|(m, q, l, t, h)| ((m, q, l), (t, h)))
             .collect();
         for e in &mut functions {
-            if let Some(t) = by.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
+            if let Some((t, h)) = by.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
                 e.arg_types = t;
+                e.handled = h;
+                e.sampled = true;
             }
         }
     }
@@ -583,7 +754,7 @@ pub(crate) fn run_profile(
         .args(["-I", "-c", "import platform; print(platform.python_version())"])
         .output()
         .map_err(|e| e.to_string())?;
-    let profile = Profile {
+    let mut profile = Profile {
         version: VERSION,
         python: String::from_utf8_lossy(&version.stdout).trim().to_string(),
         workload: rest
@@ -594,10 +765,34 @@ pub(crate) fn run_profile(
         runs: runs.max(1),
         total_ns,
         functions,
+        sampled: !candidates.is_empty(),
+        verified: false,
     };
+    // Pass 2's samples can reject a candidate (and with it its callers),
+    // never admit one it did not sample; pass 3 keeps only the measured
+    // winners.
+    if let Some(options) = verify {
+        let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
+        let candidates: Vec<FunctionKey> = select(total_ns, &decided, profile.rule(rule))
+            .into_iter()
+            .filter(|d| d.rejected.is_none())
+            .map(|d| (d.entry.module.clone(), d.entry.qualname.clone(), d.entry.firstlineno))
+            .collect();
+        let cx = verify::Context {
+            driver: &driver,
+            workload: rest,
+            scratch: &scratch,
+            options,
+        };
+        verify::verify(&mut profile, &candidates, &cx)?;
+    }
     std::fs::write(out, profile.to_json())
         .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
-    let selected = candidates.len();
+    let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
+    let selected = select(total_ns, &decided, profile.rule(rule))
+        .iter()
+        .filter(|d| d.rejected.is_none())
+        .count();
     eprintln!(
         "pycc profile: {} functions of {} profiled over {} runs; {selected} pass the selection rule",
         profile.functions.len(),

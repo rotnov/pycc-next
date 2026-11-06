@@ -82,6 +82,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/class_once.c"),
     include_str!("ext/module/instances.c"),
     include_str!("ext/module/forward.c"),
+    include_str!("ext/module/patch.c"),
     include_str!("ext/module/buffers.c"),
     include_str!("ext/module/module_ctx_head.c"),
     include_str!("ext/module/module_ctx.c"),
@@ -166,6 +167,11 @@ pub(crate) const DEFAULT_PYTHON: &str = if cfg!(windows) {
 };
 
 impl ExtToolchain {
+    /// The interpreter the build targets (`PYCC_PYTHON`).
+    pub(crate) fn interpreter(&self) -> &std::ffi::OsStr {
+        &self.interpreter
+    }
+
     /// The production constructor. `PYCC_PYTHON` names the interpreter to
     /// probe (default `python3`, `python.exe` on Windows, as for an embedded
     /// build); `PYCC_PYTHON_INCLUDE`, when set, supplies
@@ -862,15 +868,6 @@ pub(crate) fn ext_compile_args(
     }
     args.push(shim.as_os_str().to_os_string());
     args
-}
-
-/// Borrowed view used only to keep [`ExtToolchain::interpreter`] observable
-/// from a test without making the field public.
-#[cfg(test)]
-impl ExtToolchain {
-    pub(crate) fn interpreter(&self) -> &OsStr {
-        &self.interpreter
-    }
 }
 
 #[cfg(test)]

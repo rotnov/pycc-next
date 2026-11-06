@@ -120,21 +120,21 @@ fn ext_matches_cpython(name: &str, extra: &[&str]) {
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_call_before_def_raises_a_catchable_name_error() {
     native_matches_cpython("call_before_def", &[]);
-    native_matches_cpython("call_before_def", &["--non-strict"]);
+    native_matches_cpython("call_before_def", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_call_before_def_from_methods_closures_and_values_raises_name_error() {
     native_matches_cpython("call_before_def_callers", &[]);
-    native_matches_cpython("call_before_def_callers", &["--non-strict"]);
+    native_matches_cpython("call_before_def_callers", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn an_uncaught_call_before_def_ends_the_program_as_cpython_does() {
     native_matches_cpython("call_before_def_uncaught", &[]);
-    native_matches_cpython("call_before_def_uncaught", &["--non-strict"]);
+    native_matches_cpython("call_before_def_uncaught", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -146,6 +146,6 @@ fn a_call_before_def_raises_a_catchable_name_error_in_an_extension() {
         "call_before_def_uncaught",
     ] {
         ext_matches_cpython(name, &[]);
-        ext_matches_cpython(name, &["--non-strict"]);
+        ext_matches_cpython(name, &["--non-strict", "--select", "module"]);
     }
 }

@@ -130,7 +130,7 @@ fn check(label: &str, source: &str) -> (String, String) {
     let path = compiled.join("m.py");
     std::fs::write(&path, source).expect("write the module");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(&path)
         .arg("-o")
         .arg(compiled.join("m"))

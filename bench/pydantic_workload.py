@@ -31,6 +31,7 @@ import decimal
 import enum
 import json
 import os
+import pathlib
 import sys
 import time
 import typing
@@ -73,7 +74,9 @@ def imports():
 t0 = time.perf_counter()
 phase("import", imports)
 times = {"import": time.perf_counter() - t0}
-assert pydantic.__file__.startswith(sys.argv[1]), pydantic.__file__
+# The tree given, not an installed pydantic. (`pycc profile`'s pass 3 imports its
+# built copy of the tree first, so the module can come from elsewhere than argv[1].)
+assert "site-packages" not in pathlib.Path(pydantic.__file__).parts, pydantic.__file__
 
 T = typing.TypeVar("T")
 

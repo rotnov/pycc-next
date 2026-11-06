@@ -75,7 +75,7 @@ fn native(name: &str, flags: &[&str]) {
 fn ext(name: &str, flags: &[&str]) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    let mut all = vec!["--ext", "--non-strict"];
+    let mut all = vec!["--ext", "--non-strict", "--select", "module"];
     all.extend_from_slice(flags);
     build(&source, &compiled.join("m"), &all);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
@@ -98,7 +98,7 @@ fn closure_values_strict() {
 
 #[test]
 fn closure_values_non_strict() {
-    native("v10_closure_values", &["--non-strict"]);
+    native("v10_closure_values", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn closure_values_ext() {
 
 #[test]
 fn closure_rebound_after_def_non_strict() {
-    native("v10_closure_late", &["--non-strict"]);
+    native("v10_closure_late", &["--non-strict", "--select", "module"]);
     ext("v10_closure_late", &[]);
 }
 
@@ -133,7 +133,7 @@ fn output_matches(name: &str) {
     let dir = ScratchDir::new(name).expect("scratch");
     let source = fixture(name, &dir, "m.py");
     let build = pycc()
-        .args(["build", "--non-strict"])
+        .args(["build", "--non-strict", "--select", "module"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -150,7 +150,7 @@ fn output_matches(name: &str) {
 #[test]
 fn sorted_keys_a_copy_of_its_input() {
     native("v10_closure_key_snapshot", &[]);
-    native("v10_closure_key_snapshot", &["--non-strict"]);
+    native("v10_closure_key_snapshot", &["--non-strict", "--select", "module"]);
     ext("v10_closure_key_snapshot", &[]);
 }
 
@@ -169,7 +169,7 @@ fn min_max_keys_run_in_cpythons_order() {
 fn sorted_keys_a_copy_made_before_any_key_call() {
     output_matches("v10_closure_key_property");
     output_matches("v10_closure_key_input_raises");
-    native("v10_closure_key_input_raises", &["--non-strict"]);
+    native("v10_closure_key_input_raises", &["--non-strict", "--select", "module"]);
     ext("v10_closure_key_input_raises", &[]);
 }
 
@@ -185,7 +185,7 @@ fn a_lazy_map_reads_state_when_consumed() {
 #[test]
 fn map_and_filter_of_a_closure_are_cpythons() {
     output_matches("v10_closure_map");
-    native("v10_closure_map", &["--non-strict"]);
+    native("v10_closure_map", &["--non-strict", "--select", "module"]);
     ext("v10_closure_map", &[]);
 }
 
@@ -195,7 +195,7 @@ fn map_and_filter_of_a_closure_are_cpythons() {
 #[test]
 fn min_max_instance_keys_compare_as_computed() {
     native("v10_minmax_instance_keys", &[]);
-    native("v10_minmax_instance_keys", &["--non-strict"]);
+    native("v10_minmax_instance_keys", &["--non-strict", "--select", "module"]);
     ext("v10_minmax_instance_keys", &[]);
 }
 
@@ -205,7 +205,7 @@ fn min_max_instance_keys_compare_as_computed() {
 #[test]
 fn a_key_stop_iteration_propagates_as_it_is() {
     native("v10_minmax_stop", &[]);
-    native("v10_minmax_stop", &["--non-strict"]);
+    native("v10_minmax_stop", &["--non-strict", "--select", "module"]);
     ext("v10_minmax_stop", &[]);
 }
 
@@ -214,6 +214,6 @@ fn a_key_stop_iteration_propagates_as_it_is() {
 #[test]
 fn a_min_max_key_reads_a_later_rebound_local_during_the_call() {
     native("v10_minmax_rebound_capture", &[]);
-    native("v10_minmax_rebound_capture", &["--non-strict"]);
+    native("v10_minmax_rebound_capture", &["--non-strict", "--select", "module"]);
     ext("v10_minmax_rebound_capture", &[]);
 }

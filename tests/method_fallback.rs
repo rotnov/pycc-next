@@ -73,7 +73,7 @@ fn assert_report(report: &str, ext: bool) {
 
 fn build(source: &Path, out: &Path, ext: bool) -> String {
     let mut command = pycc();
-    command.args(["build", "--non-strict", "--report-fallbacks"]);
+    command.args(["build", "--non-strict", "--select", "module", "--report-fallbacks"]);
     if ext {
         command.arg("--ext");
     }
@@ -177,7 +177,7 @@ fn lifted_methods_run_in_constant_memory() {
              a = Acc()\nfor i in range({n}):\n    a.add(i)\nprint(a.total, a.keyed())\n"
         );
         let name = format!("acc_{n}");
-        let bin = memory_support::build_with(&dir, &name, &source, &["--non-strict"]);
+        let bin = memory_support::build_with(&dir, &name, &source, &["--non-strict", "--select", "module"]);
         let (out, peak) = memory_support::run_measured(&bin);
         assert_eq!(
             text(&out),

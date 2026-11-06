@@ -22,7 +22,7 @@ fn literals_handed_to_cpython_match_its_constants() {
     let compiled = ScratchDir::new("py_literal_ext").expect("scratch");
     std::fs::copy(&fixture, compiled.join("m.py")).expect("copy the fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict"])
+        .args(["build", "--ext", "--non-strict", "--select", "module"])
         .arg(compiled.join("m.py"))
         .arg("-o")
         .arg(compiled.join("m"))

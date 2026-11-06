@@ -112,7 +112,7 @@ fn inference_strict() {
 fn inference_non_strict_without_fallback() {
     let report = matches_cpython(
         "corpus_v03_inference.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -122,7 +122,7 @@ fn inference_non_strict_without_fallback() {
 #[test]
 #[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
 fn exit_is_sys_exit() {
-    for flags in [&[][..], &["--non-strict"][..]] {
+    for flags in [&[][..], &["--non-strict", "--select", "module"][..]] {
         matches_cpython("corpus_v03_exit.py", flags);
         matches_cpython("corpus_v03_exit_from_sys.py", flags);
     }
@@ -133,7 +133,7 @@ fn a_stream_alias_is_the_stream() {
     matches_cpython("corpus_v03_stream_alias.py", &[]);
     let report = matches_cpython(
         "corpus_v03_stream_alias.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -150,7 +150,7 @@ fn template_idioms_compile_natively() {
         "corpus_v03_item_producers.py",
     ] {
         matches_cpython(fixture, &[]);
-        let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
+        let report = matches_cpython(fixture, &["--non-strict", "--select", "module", "--report-fallbacks"]);
         assert!(!report.contains("fallback:"), "{fixture}: {report}");
     }
 }
@@ -164,10 +164,10 @@ fn template_idioms_compile_natively() {
 fn generator_expressions_over_globals_and_objects() {
     let report = matches_cpython(
         "corpus_v03_genexpr_global.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
-    for flags in [&[][..], &["--non-strict"][..]] {
+    for flags in [&[][..], &["--non-strict", "--select", "module"][..]] {
         matches_cpython("corpus_v03_genexpr_unbound.py", flags);
     }
 }
@@ -179,7 +179,7 @@ fn generator_expressions_over_globals_and_objects() {
 fn item_dunders_rebinding_and_generator_updates() {
     for fixture in ["corpus_v03_item_dunders.py", "corpus_v03_rebinding.py"] {
         matches_cpython(fixture, &[]);
-        let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
+        let report = matches_cpython(fixture, &["--non-strict", "--select", "module", "--report-fallbacks"]);
         assert!(!report.contains("fallback:"), "{fixture}: {report}");
     }
 }
@@ -190,7 +190,7 @@ fn item_dunders_rebinding_and_generator_updates() {
 fn a_generator_crosses_into_a_cpython_method() {
     let report = matches_cpython(
         "corpus_v03_object_generator_arg.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -202,7 +202,7 @@ fn a_generator_crosses_into_a_cpython_method() {
 fn homogeneous_tuples_index_and_iterate() {
     for fixture in ["corpus_v03_tuple_index.py", "corpus_v03_tuple_iter.py"] {
         matches_cpython(fixture, &[]);
-        let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
+        let report = matches_cpython(fixture, &["--non-strict", "--select", "module", "--report-fallbacks"]);
         assert!(!report.contains("fallback:"), "{fixture}: {report}");
     }
 }

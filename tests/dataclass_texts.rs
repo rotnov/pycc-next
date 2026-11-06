@@ -51,7 +51,7 @@ fn built(label: &str, extra: &[&str]) -> ScratchDir {
         let path = dir.join(format!("{module}.py"));
         std::fs::write(&path, source(&format!("{module}.py"))).expect("write the module");
         let build = pycc()
-            .args(["build", "--ext", "--non-strict"])
+            .args(["build", "--ext", "--non-strict", "--select", "module"])
             .args(extra)
             .arg(&path)
             .arg("-o")

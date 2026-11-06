@@ -136,7 +136,7 @@ fn strict_infers_unannotated_public_functions_and_methods() {
 
 #[test]
 fn non_strict_runs_the_same_program() {
-    matches_cpython("strict_public_inference.py", &["--non-strict"]);
+    matches_cpython("strict_public_inference.py", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn an_ext_module_keeps_t0001_for_an_unannotated_public_function() {
 fn non_strict_does_not_compile_dead_unannotated_definitions() {
     let report = matches_cpython(
         "non_strict_dead_defs.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -228,7 +228,7 @@ fn non_strict_does_not_compile_dead_unannotated_definitions() {
 #[test]
 #[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
 fn an_embedded_instance_keeps_its_attributes_in_cpython_code() {
-    matches_cpython("embedded_instance_attrs.py", &["--non-strict"]);
+    matches_cpython("embedded_instance_attrs.py", &["--non-strict", "--select", "module"]);
 }
 
 /// A definition fallback code reads by name is not dead: the fallback
@@ -244,7 +244,7 @@ fn a_definition_only_fallback_code_reads_is_kept() {
     .expect("write");
     let out = dir.join("m");
     let build = pycc()
-        .args(["build", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
         .arg(&path)
         .arg("-o")
         .arg(&out)
@@ -264,7 +264,7 @@ fn a_definition_only_fallback_code_reads_is_kept() {
 
 #[test]
 fn non_strict_copies_fresh_lists_into_cpython_code() {
-    matches_cpython("non_strict_fresh_lists.py", &["--non-strict"]);
+    matches_cpython("non_strict_fresh_lists.py", &["--non-strict", "--select", "module"]);
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn a_numbers_only_stdin_buffer_alias_reads_natively() {
 /// stream read through the `sys` module (it used to read as `str`).
 #[test]
 fn stdin_buffer_reads_bytes() {
-    matches_cpython("stdin_buffer_bytes.py", &["--non-strict"]);
+    matches_cpython("stdin_buffer_bytes.py", &["--non-strict", "--select", "module"]);
     matches_cpython("stdin_buffer_strict.py", &[]);
 }
 
@@ -289,7 +289,7 @@ fn corpus_idioms_compile_natively() {
 fn non_strict_lists_of_two_types_are_cpython_lists() {
     let report = matches_cpython(
         "non_strict_mixed_lists.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -298,7 +298,7 @@ fn non_strict_lists_of_two_types_are_cpython_lists() {
 fn non_strict_object_indexes_read_through_index() {
     let report = matches_cpython(
         "non_strict_object_index.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -307,7 +307,7 @@ fn non_strict_object_indexes_read_through_index() {
 fn non_strict_none_displays_are_cpython_containers() {
     let report = matches_cpython(
         "non_strict_none_lists.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -316,7 +316,7 @@ fn non_strict_none_displays_are_cpython_containers() {
 fn non_strict_object_comprehensions_are_cpython_containers() {
     let report = matches_cpython(
         "non_strict_object_comprehensions.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -325,7 +325,7 @@ fn non_strict_object_comprehensions_are_cpython_containers() {
 fn non_strict_nested_item_stores_widen_the_outer_list() {
     let report = matches_cpython(
         "non_strict_nested_stores.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -334,7 +334,7 @@ fn non_strict_nested_item_stores_widen_the_outer_list() {
 fn non_strict_percent_formatting_is_cpythons() {
     let report = matches_cpython(
         "non_strict_percent_format.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -349,7 +349,7 @@ fn a_negative_literal_exponent_is_a_float() {
 fn non_strict_mixed_dicts_are_cpython_dicts() {
     let report = matches_cpython(
         "non_strict_dict_widening.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -358,7 +358,7 @@ fn non_strict_mixed_dicts_are_cpython_dicts() {
 fn non_strict_keyed_sorting_and_heaps_over_objects_are_cpythons() {
     let report = matches_cpython(
         "non_strict_object_stdlib.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     // `min`/`max` with a key of CPython objects compare each key as CPython
     // computes it, so those statements run in CPython; nothing else does.
@@ -374,7 +374,7 @@ fn non_strict_keyed_sorting_and_heaps_over_objects_are_cpythons() {
 fn non_strict_maybe_bound_reads_are_checked_at_run_time() {
     let report = matches_cpython(
         "non_strict_maybe_bound.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }
@@ -391,7 +391,7 @@ fn open_zero_reads_standard_input() {
 fn non_strict_identity_with_bool_and_none_literals() {
     let report = matches_cpython(
         "non_strict_identity_literals.py",
-        &["--non-strict", "--report-fallbacks"],
+        &["--non-strict", "--select", "module", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
 }

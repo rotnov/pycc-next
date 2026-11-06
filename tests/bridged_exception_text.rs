@@ -95,7 +95,7 @@ fn a_caught_cpython_exception_shows_its_text_when_it_is_read() {
     // Written after the build: `helper` is a CPython module, not a
     // project module compiled into the artifact.
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict"])
+        .args(["build", "--ext", "--non-strict", "--select", "module"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("m"))

@@ -18,7 +18,7 @@ fn attribute_dict_producers_match_cpython() {
     let expected = Command::new(oracle).arg(&fixture).output().expect("python3 should spawn");
     assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
     let dir = ScratchDir::new("attribute_dict_producer").expect("scratch");
-    for (n, flags) in [&[][..], &["--non-strict", "--report-fallbacks"][..]].iter().enumerate() {
+    for (n, flags) in [&[][..], &["--non-strict", "--select", "module", "--report-fallbacks"][..]].iter().enumerate() {
         let binary = dir.join(format!("app{n}"));
         let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
             .arg("build")

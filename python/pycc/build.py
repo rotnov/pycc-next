@@ -193,6 +193,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None) 
                   f"{project.name} {project.version} with {pycc}", file=sys.stderr)
             whole, fell_back = _build_packages(project, pycc, src, files, compile_list, env)
             in_package = {m for p in whole for m in p.members}
+            # Modules whose bytecode runs (their selected functions compiled): their
+            # `.py` ships beside the extension.
+            keep_source = {m for p in whole if p.selected for m in p.members}
             separate = [c for c in compile_list
                         if c[0] not in in_package and c[0] not in fell_back]
             outcomes = {o.module: o for o in compile_modules(
@@ -204,6 +207,8 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None) 
                 compiled.append(p.artifact)
             for f in files:
                 if f.module in in_package:
+                    if f.module in keep_source:
+                        writer.add(f.rel, f.src.read_bytes())
                     continue
                 o = outcomes.get(f.module) if f.module is not None else None
                 if o is not None and o.artifact is not None:
@@ -211,6 +216,8 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None) 
                     suffix = o.artifact.name[len(pathlib.PurePosixPath(stem).name):]
                     writer.add(stem + suffix, o.artifact.read_bytes(), executable=True)
                     compiled.append(o.artifact)
+                    if o.selected:
+                        writer.add(f.rel, f.src.read_bytes())
                 else:
                     writer.add(f.rel, f.src.read_bytes())
             if not compiled:
@@ -228,7 +235,8 @@ def _build_packages(project: Project, pycc, src: pathlib.Path, files, compile_li
     """Builds every package of `_plan_packages` whole. A member pycc refuses that may
     fall back to Python is excluded and the package built again; a package whose
     `__init__` itself falls back is built module by module. Returns the packages built
-    and the modules that fell back to Python."""
+    and the modules that ship as Python (they fell back, or a package had no function
+    selected)."""
     options = {module: opts for module, _, opts in compile_list}
     done = []
     fell_back: set[str] = set()
@@ -236,6 +244,11 @@ def _build_packages(project: Project, pycc, src: pathlib.Path, files, compile_li
         while True:
             o = compile_package(pycc, src, package, members, options[package + ".__init__"],
                                 excludes, project.tool.release, env, source_dir(project))
+            if o.artifact is None and o.selected and not o.failed:
+                print(f"pycc.build: {package}: no function selected; it ships as Python"
+                      + (f":\n  {o.log}" if o.log else ""), file=sys.stderr)
+                fell_back.update(members)
+                break
             if o.artifact is not None:
                 print(f"pycc.build: {package}: {len(members)} module(s) compiled into "
                       f"{o.artifact.name} in {o.seconds:.2f}s", file=sys.stderr)

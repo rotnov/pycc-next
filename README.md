@@ -228,11 +228,15 @@ import inside an `if`/`try` block are compile errors; the details are in [`docs/
 against a package's sources, nothing compiled, and records per function its calls, its
 self time (the median of `--runs` fresh runs under `cProfile`, default 5) and, for the
 functions the selection rule would compile, the exact types of their arguments in their
-first 1,000 calls (`sys.monitoring`). `pycc profile pkg -o pycc.profile.json --check --
-python3` reads a profile against the current sources: which entries are stale (their
-function's source changed) and what the rule selects. The plan that uses it is
-[`docs/design/compile-little.md`](docs/design/compile-little.md); builds do not read
-profiles yet.
+first 1,000 calls (`sys.monitoring`). Then it builds those candidates into a copy of the
+package and times the workload with them compiled against the sources, interleaved in
+fresh processes (`--verify-rounds`, default 7): only measured winners stay selected, and
+a function measured slower stays rejected while its source is unchanged (`--no-verify`
+skips this; `--verify-instructions` adds callgrind instruction counts as evidence).
+`pycc profile pkg -o pycc.profile.json --check -- python3` reads a profile against the
+current sources: which entries are stale (their function's source changed) and what the
+rule selects. A non-strict `--ext` build reads it with `--profile`; the plan is
+[`docs/design/compile-little.md`](docs/design/compile-little.md).
 
 ### Real packages, unchanged
 
@@ -264,7 +268,7 @@ For diff-match-patch:
 
 ```console
 $ pycc build diff_match_patch -o diff_match_patch/__init__ \
-      --ext --non-strict --exclude tests                       # the whole package
+      --ext --non-strict --select module --exclude tests       # the whole package
 $ python3 -m unittest diff_match_patch.tests                    # 28 tests, OK
 ```
 
@@ -381,6 +385,11 @@ pure-python = ["geo.cli"]          # modules (a package name covers its subpacka
 fallback-to-python = false         # true, or a list of modules: ship as .py if pycc refuses them
 extra-args = []                    # more `pycc build` flags for every module
 whole-package = true               # default; false builds each module as its own extension
+# non-strict modules compile only selected functions (see Modes):
+# select = "profile"               # default; or "all", "none", "module" (whole modules)
+# profile = "pycc.profile.json"    # `pycc profile`'s output, relative to the project
+# compile = ["geo.loose:scale"]    # MODULE:QUALNAME added to the selection
+# exclude = ["geo.loose:helper"]   # and removed from it
 # packages = ["geo"], py-modules = ["m"], source-dir = "src": what ships, when the
 # default discovery does not find it (a src/ layout, else the package or module named
 # after the project, else the flat layout's packages and modules but tests, docs, ...).
@@ -410,16 +419,19 @@ project code: metadata is read from `pyproject.toml`, sources are only copied an
 compiled, symbolic links in the sources are refused, and everything is written under
 the directory pip hands the backend. `pip install -e .` (PEP 660) installs the sources
 uncompiled, for development; `python -m build --sdist` (or pip) makes an sdist of the
-sources, `pyproject.toml`, readme and license files (`sdist-include` adds more globs).
+sources, `pyproject.toml`, readme, license files and the `profile` file (`sdist-include` adds more globs).
 
 In strict mode a compiled module publishes its functions, classes and evidently native
 constants, but not what it imports (`docs/DEVIATIONS.md`): a package `__init__.py` that
 re-exports names (`from .core import f`) should build `--non-strict`, as in the
 override above, or stay Python.
 
-CI builds the three packages above this way (`python3 bench/wheel_check.py`): `pip
-wheel` with the archive's backend and compiler, a fresh venv, a check that each module
-is an extension module, and each package's own test suite against the installed wheel.
+CI builds the packages above this way (`python3 bench/wheel_check.py`): `pip wheel`
+with the archive's backend and compiler, a fresh venv, a check of what the wheel holds,
+and each package's own test suite against the installed wheel. With no profile a
+non-strict build selects no function, so those wheels are pure (`py3-none-any`); one
+harness, `diff-match-patch-selected`, forces a function in with `[tool.pycc] compile`
+and checks the `cp313-abi3` wheel's extension serves its module.
 Their `pyproject.toml` is replaced by one selecting `pycc.build` (they use flit_core
 and setuptools): that is the test harness, not a change to the packages.
 
@@ -464,7 +476,19 @@ and setuptools): that is the test harness, not a change to the packages.
   A `str`-keyed dict display holding CPython objects is a CPython `dict`, read through
   the dict API; one a function only reads, stores into, tests, measures and iterates
   (it never escapes) is a native dict instead.
-- **Per-function fallback** (non-strict only): a construct pycc cannot compile yet (a
+- **Library builds compile little** (non-strict `--ext`, `docs/design/compile-little.md`):
+  the module runs its source as CPython bytecode, and only its *selected* functions are
+  compiled, each patched into the function CPython made. The selection comes from a
+  profile of a workload (`pycc profile PKG -o pycc.profile.json -- python3 work.py`, then
+  `pycc build PKG ... --ext --non-strict --profile pycc.profile.json`): the functions with
+  the most self time that are called often, catch an exception in less than half their
+  calls, and keep most of their calls to Python functions among the selected ones.
+  `--compile`/`--no-compile MODULE:QUALNAME` adjust it, `--select all` compiles every
+  eligible function. **Without a profile nothing is selected**, and a module or package
+  with nothing selected gets no extension: CPython imports it unchanged (`-o OUT` then gets
+  the module's source as `OUT`'s `.py`). `--select
+  module` keeps compiling whole modules, as described below, for now.
+- **Per-function fallback** (non-strict only, whole modules): a construct pycc cannot compile yet (a
   call of a `lambda` expression, ...) sends only the smallest enclosing function or method to
   CPython, kept as Python source and run by CPython's own `exec` in the module's
   namespace, at its place in the module. A nested `def` or `lambda` used as a value

@@ -65,7 +65,7 @@ fn build_whole(dir: &Path, args: &[&str]) -> String {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
         .args(args)
         .output()
         .expect("pycc should spawn");

@@ -70,7 +70,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn native(name: &str, flags: &[&str]) {
     let dir = ScratchDir::new(&format!("{name}_native")).expect("scratch");
     let source = fixture(name, &dir, "m.py");
-    let mut all = vec!["--non-strict"];
+    let mut all = vec!["--non-strict", "--select", "module"];
     all.extend_from_slice(flags);
     build(&source, &dir.join("app"), &all);
     let ours = Command::new(dir.join("app")).output().expect("run the build");
@@ -81,7 +81,7 @@ fn native(name: &str, flags: &[&str]) {
 fn ext(name: &str, flags: &[&str]) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    let mut all = vec!["--ext", "--non-strict"];
+    let mut all = vec!["--ext", "--non-strict", "--select", "module"];
     all.extend_from_slice(flags);
     build(&source, &compiled.join("m"), &all);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
@@ -167,7 +167,7 @@ fn inline_object_counts_balance_and_free() {
          h.swap(keep)\n    return total + h.seen\n",
     )
     .unwrap();
-    build(&source, &dir.join("rc"), &["--ext", "--non-strict", "--release"]);
+    build(&source, &dir.join("rc"), &["--ext", "--non-strict", "--select", "module", "--release"]);
     let probe = "import rc, sys, weakref\n\
                  class T:\n    pass\n\
                  freed = [0]\n\
@@ -214,7 +214,7 @@ fn optional_results_cross_the_boundary() {
          def half(n: int) -> Union[int, None]:\n    if n % 2:\n        return None\n    return n // 2\n",
     )
     .unwrap();
-    let report = build(&source, &dir.join("opt"), &["--ext", "--non-strict", "--release"]);
+    let report = build(&source, &dir.join("opt"), &["--ext", "--non-strict", "--select", "module", "--release"]);
     assert!(!report.contains("runs in CPython"), "{report}");
     let probe = "import opt\n\
                  c = opt.Cursor('a-b-c')\n\
@@ -286,7 +286,7 @@ fn container_attributes_another_module_uses_are_shared() {
         build(
             &source,
             &pkg.join(module),
-            &["--ext", "--non-strict", "--release", "--foreign-relative-imports"],
+            &["--ext", "--non-strict", "--select", "module", "--release", "--foreign-relative-imports"],
         );
     }
     for module in ["a", "b"] {

@@ -48,7 +48,7 @@ fn assert_matches(ours: &Output, oracle: &Output) {
 
 fn build(source: &Path, out: &Path, ext: bool) -> String {
     let mut command = pycc();
-    command.args(["build", "--non-strict", "--report-fallbacks"]);
+    command.args(["build", "--non-strict", "--select", "module", "--report-fallbacks"]);
     if ext {
         command.arg("--ext");
     }
@@ -202,7 +202,7 @@ fn with_statements_and_library_subclasses_run_in_constant_memory() {
              t = Tally()\ns = 0\nfor i in range({n}):\n    s += step(t, i)\nprint(s, sorted(t.items()))\n"
         );
         let name = format!("lib_{n}");
-        let bin = memory_support::build_with(&dir, &name, &source, &["--non-strict"]);
+        let bin = memory_support::build_with(&dir, &name, &source, &["--non-strict", "--select", "module"]);
         let (out, peak) = memory_support::run_measured(&bin);
         assert_eq!(
             text(&out),

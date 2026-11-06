@@ -10,6 +10,9 @@ fn entry(module: &str, qualname: &str, line: u32, sha: &str, calls: u64, ns: u64
         self_ns: ns,
         callees: BTreeMap::new(),
         arg_types: ArgTypes::new(),
+        handled: 0,
+        sampled: true,
+        measured: None,
     }
 }
 
@@ -31,6 +34,8 @@ fn profile(functions: Vec<Entry>) -> Profile {
         runs: 5,
         total_ns: 1000,
         functions,
+        sampled: true,
+        verified: false,
     }
 }
 
@@ -240,4 +245,72 @@ fn a_generator_expression_s_calls_count_as_its_function_s() {
     assert_eq!(total.calls, 60);
     assert_eq!(total.callees, BTreeMap::from([("*".to_string(), 3), ("m:hot:1".to_string(), 600)]));
     assert_eq!(folded[&key("C.total.<locals>.inner", 6)].callees["*"], 12);
+}
+
+#[test]
+fn a_function_that_mostly_catches_exceptions_is_not_selected() {
+    let mut often = entry("m", "often", 1, "", 3000, 300);
+    often.handled = 500;
+    let mut rare = entry("m", "rare", 2, "", 40, 200);
+    rare.handled = 19;
+    let mut some = entry("m", "some", 3, "", 100, 100);
+    some.handled = 49;
+    let es = [often, rare, some];
+    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, true)).collect();
+    let decided = select(1000, &input, Rule { calls: 1, ..Rule::default() });
+    let got: Vec<Option<&str>> = decided.iter().map(|d| d.rejected.as_deref()).collect();
+    assert_eq!(
+        got,
+        [
+            // Out of its first 1,000 calls, the ones pass 2 sampled.
+            Some("it catches an exception in 500 of its first 1000 calls"),
+            None,
+            None,
+        ]
+    );
+    let none = select(1000, &input, Rule { calls: 1, handled: 0.0, ..Rule::default() });
+    assert!(none.iter().all(|d| d.rejected.is_some()));
+}
+
+/// Three functions pass the rule and two fit (`max` 2): pass 3 measures `a`
+/// and `b`, rejects `a`, and the selection is then `b` alone. `c`, which
+/// would take the slot `a` left, was never built: it is not selected.
+#[test]
+fn a_verified_profile_selects_only_its_measured_winners() {
+    let measured = |compiled| Measured {
+        compiled,
+        with: 2,
+        cpython_ns: [10, 11, 12],
+        compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
+        instructions: None,
+        refused: None,
+    };
+    let mut a = entry("m", "a", 1, "", 100, 300);
+    a.measured = Some(measured(false));
+    let mut b = entry("m", "b", 2, "", 100, 200);
+    b.measured = Some(measured(true));
+    let c = entry("m", "c", 3, "", 100, 100);
+    let mut p = profile(vec![a, b, c]);
+    let rule = Rule { max: 2, ..Rule::default() };
+    let picked = |p: &Profile| -> Vec<String> {
+        let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+        select(p.total_ns, &input, p.rule(rule))
+            .into_iter()
+            .filter(|d| d.rejected.is_none())
+            .map(|d| d.entry.qualname.clone())
+            .collect()
+    };
+    // Unverified (`--no-verify`), the rule alone decides.
+    assert_eq!(picked(&p), ["b", "c"]);
+    p.verified = true;
+    assert_eq!(picked(&p), ["b"]);
+    let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+    let c = select(p.total_ns, &input, p.rule(rule)).into_iter().find(|d| d.entry.qualname == "c").unwrap();
+    assert_eq!(c.rejected.as_deref(), Some("not measured by pass 3 (it was not among the candidates it built)"));
+    // The flag is part of the file.
+    let dir = pycc_scratch::ScratchDir::new("profile_test").unwrap();
+    let path = dir.join("p.json");
+    std::fs::write(&path, p.to_json()).unwrap();
+    assert!(Profile::read(&path).unwrap().verified);
+    assert!(!profile(Vec::new()).to_json().contains("verified"));
 }

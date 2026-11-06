@@ -32,6 +32,30 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- **Non-strict `--ext` builds compile little** (`docs/design/compile-little.md`,
+  sections 2.1-2.4): a module runs its source as CPython bytecode, and only its
+  *selected* functions are compiled, each patched into the function object CPython
+  made (`__pycc_patch__`), so the module's objects, `__file__` (its `.py`, which now
+  ships beside the extension) and spec are CPython's. The selection comes from a
+  profile (`--profile pycc.profile.json`, or `[tool.pycc] profile`) and the selection
+  rule, adjusted by `--compile`/`--no-compile` (`[tool.pycc] compile`/`exclude`,
+  `MODULE:QUALNAME`); `--select all` compiles every eligible function, `--select none`
+  none. **With no profile nothing is selected**, and a module or package with nothing
+  selected gets no extension at all: CPython imports it unchanged (a module built to `-o OUT`
+  gets its source as `OUT`'s `.py`). A package's finder
+  serves only its modules with selected functions. `--select module` keeps the
+  whole-module compilation of before, transitionally (the existing tests and CI's
+  package checks use it). The selection rule also leaves out a function that catches an
+  exception in half of its calls or more (`--select-handled`; `pycc profile` records
+  `handled`). **Only measured winners are selected**: `pycc profile` now builds the
+  rule's candidates and times the workload with them compiled against the sources
+  (pass 3; `--verify-rounds`, `--no-verify`, `--verify-instructions`), records the
+  verdict on each (`measured`), and rejects a function measured slower ("slower when
+  compiled") until its source changes; mistune's emphasis functions, for one, are
+  rejected so. `pycc.build` accepts `[tool.pycc] select`, `profile`, `compile` and
+  `exclude`, and ships a selected module's `.py` with its extension.
+  `bench/pydantic_check.py` builds with the training profile by default, and
+  `bench/package_check.py --select profile` profiles each package's own test suite.
 - Three of an `--ext` module's object operations do less work for exact built-in types.
   An `int` index into an exact `tuple` or `list` reads the size and the item where CPython
   3.13 and 3.15 keep them (a 3.15 tuple's items after its cached hash; probed once),

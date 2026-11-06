@@ -106,14 +106,14 @@ fn ext_strict_raises_cpython_argument_and_attribute_errors() {
 
 #[test]
 fn ext_non_strict_raises_cpython_argument_and_attribute_errors() {
-    ext(&["--ext", "--non-strict"], "ext_ns");
+    ext(&["--ext", "--non-strict", "--select", "module"], "ext_ns");
 }
 
 #[test]
 fn native_non_strict_fallback_code_sees_cpython_errors() {
     let dir = ScratchDir::new("issue_10_native").expect("scratch");
     let source = fixture("issue_10_native", &dir, "m.py");
-    let report = build(&source, &dir.join("app"), &["--non-strict"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
     // The classes stay native: fallback code calls their published members
     // (a missing attribute is read through `getattr`, since code reading an
     // attribute a class does not declare keeps that class in CPython).

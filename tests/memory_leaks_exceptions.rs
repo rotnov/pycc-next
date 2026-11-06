@@ -192,7 +192,7 @@ fn program(imports: &str, body: &str, n: u64) -> String {
 
 fn assert_constant_memory(name: &str, imports: &str, body: &str) {
     assert_constant_memory_in(name, imports, body, "strict", &[]);
-    assert_constant_memory_in(name, imports, body, "nonstrict", &["--non-strict"]);
+    assert_constant_memory_in(name, imports, body, "nonstrict", &["--non-strict", "--select", "module"]);
 }
 
 fn assert_constant_memory_in(name: &str, imports: &str, body: &str, mode: &str, flags: &[&str]) {
@@ -319,7 +319,7 @@ fn the_lifetime_fixture_matches_cpython_in_non_strict_mode() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/exception_lifetime.py");
     let source = std::fs::read_to_string(&src).expect("read the fixture");
-    let bin = build_with(&dir, "exception_lifetime", &source, &["--non-strict"]);
+    let bin = build_with(&dir, "exception_lifetime", &source, &["--non-strict", "--select", "module"]);
     let (out, _) = run_measured(&bin);
     assert_eq!(
         String::from_utf8_lossy(&out),
