@@ -12,6 +12,9 @@ default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable
   tests fail only when running as root; everything else must pass.
 - Design wrong -> rewrite the module; design right but incomplete -> extend. Split files
   over ~1000 lines you touch. Delete dead code.
+- A target not met after the direct fixes means the approach is wrong: stop iterating on it,
+  measure where the time goes, and rethink the concept before the next PR. Never ship a
+  stream of small wins that leave the target unmet.
 - One writer per working tree. Every change goes through a pull request from its own
   branch: never push to `main`. Open the PR early, keep it small, and merge it (merge commit)
   only when the required checks — `test (ubuntu-24.04)`, `test (ubuntu-24.04-arm)`,
