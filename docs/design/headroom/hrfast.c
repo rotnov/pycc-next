@@ -2,7 +2,10 @@
  *   pydantic.json_schema._make_json_hashable
  *   pydantic.json_schema._deduplicate_schemas
  *   pydantic._internal._config.ConfigWrapper.__getattr__
- * Same results and exceptions as the Python source for the inputs that occur. */
+ * Same results and exceptions as the Python source for the inputs that occur.
+ * Written against pydantic 2.14.2 (the version bench/pydantic_check.py pins), whose
+ * `__getattr__` reads `self.effective_config`; on versions without that slot (2.13.x)
+ * setup() uses `config_dict`, which those versions' `__getattr__` reads. */
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <structmember.h>
@@ -10,6 +13,8 @@
 static PyObject *config_module_dict;   /* _config.__dict__, for the `config_defaults` global */
 static PyObject *str_config_defaults;  /* interned "config_defaults" */
 static PyObject *str_effective_config; /* interned "effective_config" */
+static PyObject *str_config_dict;      /* interned "config_dict" */
+static PyObject *str_config_slot;      /* the one of the two __getattr__ reads (setup) */
 static PyObject *str_items;
 static PyTypeObject *config_wrapper_type;
 static Py_ssize_t effective_config_offset = -1;
@@ -188,7 +193,7 @@ static PyObject *deduplicate_schemas(PyObject *m, PyObject *schemas)
 }
 
 /* ConfigWrapper.__getattr__(self, name):
- *   try: return self.effective_config[name]
+ *   try: return self.effective_config[name]   (self.config_dict before pydantic 2.14)
  *   except KeyError:
  *       try: return config_defaults[name]
  *       except KeyError: raise AttributeError(f'Config has no attribute {name!r}') from None */
@@ -213,10 +218,10 @@ static PyObject *config_getattr(PyObject *m, PyObject *const *args, Py_ssize_t n
     PyObject *self = args[0], *name = args[1], *ec;
     if (effective_config_offset >= 0 && PyObject_TypeCheck(self, config_wrapper_type)) {
         ec = *(PyObject **)((char *)self + effective_config_offset);
-        if (!ec) return PyObject_GetAttr(self, str_effective_config); /* unset slot: original semantics */
+        if (!ec) return PyObject_GetAttr(self, str_config_slot); /* unset slot: original semantics */
         Py_INCREF(ec);
     } else {
-        ec = PyObject_GetAttr(self, str_effective_config);
+        ec = PyObject_GetAttr(self, str_config_slot);
         if (!ec) return NULL;
     }
     int missing;
@@ -264,7 +269,14 @@ static PyObject *setup(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_XSETREF(config_module_dict, Py_NewRef(d));
     if (!PyType_Check(args[1])) { PyErr_SetString(PyExc_TypeError, "ConfigWrapper must be a type"); return NULL; }
     Py_XSETREF(config_wrapper_type, (PyTypeObject *)Py_NewRef(args[1]));
+    effective_config_offset = -1;
+    str_config_slot = str_effective_config;
     PyObject *descr = PyObject_GetAttr(args[1], str_effective_config);
+    if (!descr && PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        PyErr_Clear();                 /* pydantic < 2.14: the wrapper has only config_dict */
+        str_config_slot = str_config_dict;
+        descr = PyObject_GetAttr(args[1], str_config_dict);
+    }
     if (!descr) return NULL;
     if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
         PyMemberDef *md = ((PyMemberDescrObject *)descr)->d_member;
@@ -288,7 +300,8 @@ PyMODINIT_FUNC PyInit_hrfast(void)
 {
     str_config_defaults = PyUnicode_InternFromString("config_defaults");
     str_effective_config = PyUnicode_InternFromString("effective_config");
+    str_config_dict = PyUnicode_InternFromString("config_dict");
     str_items = PyUnicode_InternFromString("items");
-    if (!str_config_defaults || !str_effective_config || !str_items) return NULL;
+    if (!str_config_defaults || !str_effective_config || !str_config_dict || !str_items) return NULL;
     return PyModule_Create(&D);
 }
