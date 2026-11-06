@@ -90,6 +90,11 @@ pub(crate) struct Measured {
     /// not: it was never timed, and is rejected for this reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) refused: Option<String>,
+    /// The workload's times (as `compiled_ns`) with only the hot functions of
+    /// its region compiled, when that was faster than with this function
+    /// too: it is rejected, the region winning without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) without: Option<[u64; 3]>,
 }
 
 impl Measured {
@@ -103,6 +108,7 @@ impl Measured {
             compiled_ns: [0; 3],
             instructions: None,
             refused: Some(reason),
+            without: None,
         }
     }
 
@@ -112,6 +118,14 @@ impl Measured {
             return format!("not compiled: {reason}");
         }
         let ms = |ns: u64| ns as f64 / 1e6;
+        if let Some(without) = self.without {
+            return format!(
+                "faster without it: the workload took {:.1} ms with only its region's hot functions compiled, against {:.1} ms with it and {} other functions",
+                ms(without[1]),
+                ms(self.compiled_ns[1]),
+                self.with - 1,
+            );
+        }
         format!(
             "not faster when compiled: the workload took {:.1} ms with it and {} other functions compiled, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
             ms(self.compiled_ns[1]),
@@ -159,10 +173,32 @@ pub(crate) struct Function {
     pub(crate) qualname: String,
     pub(crate) firstlineno: u32,
     pub(crate) sha256: String,
+    /// Its source's length in lines, decorators included.
+    #[serde(default)]
+    pub(crate) lines: u32,
     /// Module-level functions and methods of module-level classes that are
     /// not generators or coroutines (section 2.1).
     pub(crate) eligible: bool,
 }
+
+impl Function {
+    /// `entry` (this function's profile entry) as [`select`] decides it.
+    pub(crate) fn candidate<'p>(&self, entry: &'p Entry) -> Candidate<'p> {
+        Candidate {
+            entry,
+            eligible: self.eligible,
+            lines: self.lines,
+        }
+    }
+}
+
+/// What a call from a compiled function to an interpreted one costs beyond
+/// the interpreter calling it itself, in nanoseconds: measured on CPython
+/// 3.15.2 (x86-64), a compiled loop calling an identity function took 47.7 ns
+/// a call where the interpreter's own loop took 34.1 ns with the call and
+/// 22.4 ns without it, so the compiled call costs 47.7 - 11.7 = 36 ns more
+/// (the compiled loop alone is under 1 ns).
+pub(crate) const CROSSING_NS: u64 = 36;
 
 /// The selection rule's thresholds (section 2.3).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -173,10 +209,13 @@ pub(crate) struct Rule {
     pub(crate) calls: u64,
     /// The most functions selected, by self time.
     pub(crate) max: usize,
-    /// The share of a function's calls to Python functions that leave the
-    /// selection must be under this (its own nested code, itself and the
-    /// other selected functions are inside it): at 0.5, most stay inside.
-    pub(crate) outside: f64,
+    /// The most source lines selected, by self time: the cap on how far
+    /// regions grow (each selected line is compiled code in the `.so`).
+    pub(crate) lines: u64,
+    /// What one call from a compiled function to a Python function outside
+    /// the selection costs beyond the interpreter's own call, in nanoseconds
+    /// ([`CROSSING_NS`]).
+    pub(crate) crossing_ns: u64,
     /// The share of its sampled calls in which a function catches an
     /// exception must be under this. Exceptions as control flow are slower
     /// compiled than in CPython until PR 9 (section 2.7).
@@ -196,7 +235,8 @@ impl Default for Rule {
             share: 0.005,
             calls: 50,
             max: 64,
-            outside: 0.5,
+            lines: 4000,
+            crossing_ns: CROSSING_NS,
             handled: 0.5,
             sampled_only: false,
             measured_only: false,
@@ -296,45 +336,54 @@ impl Profile {
     }
 }
 
-/// The selection rule (section 2.3) over `entries` (current ones): eligible,
-/// at least `rule.share` of the run's total self time, at least `rule.calls`
-/// calls, catching an exception in less than `rule.handled` of its sampled
-/// calls, and among the `rule.max` such functions with the most self time;
-/// then, of those, the ones less than `rule.outside` of whose calls to Python
-/// functions leave the selection (the region, section 2.3).
-/// Every entry is decided, in order of self time (most first; then by name).
-pub(crate) fn select<'p>(
-    total_ns: u64,
-    entries: &[(&'p Entry, bool)],
-    rule: Rule,
-) -> Vec<Decision<'p>> {
-    let mut order: Vec<&(&Entry, bool)> = entries.iter().collect();
-    order.sort_by(|(a, _), (b, _)| {
+/// One function [`select`] decides: its current profile entry, whether it is
+/// eligible (section 2.1), and its source's length in lines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Candidate<'p> {
+    pub(crate) entry: &'p Entry,
+    pub(crate) eligible: bool,
+    pub(crate) lines: u32,
+}
+
+/// The selection rule (section 2.3) over `entries` (current ones). Every
+/// entry is decided, in order of self time (most first; then by name), and a
+/// rejection names the first step it failed:
+///
+/// 1. the function itself: eligible, not measured slower by pass 3, sampled
+///    by pass 2 once it ran (`rule.sampled_only`), catching an exception in
+///    less than `rule.handled` of its sampled calls;
+/// 2. its region, the functions that pass step 1 connected by calls among
+///    them, whatever their own heat: together at least `rule.share` of the
+///    run's total self time, and one of them called at least `rule.calls`
+///    times;
+/// 3. its crossings: its calls to Python functions outside the selection
+///    (itself and its own nested code are inside), each costing about
+///    `rule.crossing_ns` more than the interpreter's own call, must cost less
+///    than its self time;
+/// 4. the size of the selection: at most `rule.max` functions and
+///    `rule.lines` source lines, taken by self time;
+/// 5. once pass 3 has run (`rule.measured_only`), measured by it.
+///
+/// Steps 2 to 4 repeat until no function changes: a rejection can shrink a
+/// region below its threshold or turn its callers' calls into crossings.
+pub(crate) fn select<'p>(total_ns: u64, entries: &[Candidate<'p>], rule: Rule) -> Vec<Decision<'p>> {
+    let mut order: Vec<&Candidate<'p>> = entries.iter().collect();
+    order.sort_by(|a, b| {
+        let (a, b) = (a.entry, b.entry);
         b.self_ns
             .cmp(&a.self_ns)
             .then_with(|| (&a.module, &a.qualname, a.firstlineno).cmp(&(&b.module, &b.qualname, b.firstlineno)))
     });
-    let mut taken = 0usize;
-    let mut decided = order
-        .into_iter()
-        .map(|&(entry, eligible)| {
-            let share = if total_ns == 0 {
-                0.0
-            } else {
-                entry.self_ns as f64 / total_ns as f64
-            };
-            let rejected = if !eligible {
+    let share = |ns: u64| if total_ns == 0 { 0.0 } else { ns as f64 / total_ns as f64 };
+    let percent = |x: f64| format!("{:.2}%", x * 100.0);
+    let mut decided: Vec<Decision<'p>> = order
+        .iter()
+        .map(|c| {
+            let entry = c.entry;
+            let rejected = if !c.eligible {
                 Some("not eligible (a generator, coroutine or nested function)".to_string())
             } else if let Some(m) = entry.measured.as_ref().filter(|m| !m.compiled) {
                 Some(m.rejection())
-            } else if share < rule.share {
-                Some(format!(
-                    "self time {:.2}% is under {:.2}%",
-                    share * 100.0,
-                    rule.share * 100.0
-                ))
-            } else if entry.calls < rule.calls {
-                Some(format!("{} calls is under {}", entry.calls, rule.calls))
             } else if rule.sampled_only && !entry.sampled {
                 Some("not sampled by pass 2 (it was not among the candidates it sampled)".to_string())
             } else if entry.handled > 0
@@ -345,52 +394,154 @@ pub(crate) fn select<'p>(
                     entry.handled,
                     entry.calls.min(TYPE_CALLS)
                 ))
-            } else if rule.measured_only && entry.measured.is_none() {
-                Some("not measured by pass 3 (it was not among the candidates it built)".to_string())
-            } else if taken >= rule.max {
-                Some(format!("not among the top {} by self time", rule.max))
             } else {
-                taken += 1;
                 None
             };
             Decision {
                 entry,
-                share,
+                share: share(entry.self_ns),
                 rejected,
             }
         })
-        .collect::<Vec<_>>();
-    // The region: a selected function whose calls mostly leave the selection
-    // would cross between compiled and interpreted code on each of them, so
-    // it is not selected, and its callers are decided again without it.
+        .collect();
+    let lines: Vec<u32> = order.iter().map(|c| c.lines).collect();
     loop {
-        let inside: BTreeSet<String> = decided
-            .iter()
-            .filter(|d| d.rejected.is_none())
-            .map(|d| d.entry.callee_key())
-            .collect();
+        let live: Vec<usize> = (0..decided.len()).filter(|&i| decided[i].rejected.is_none()).collect();
         let mut changed = false;
-        for d in decided.iter_mut().filter(|d| d.rejected.is_none()) {
-            let nested = format!("{}:{}.<locals>.", d.entry.module, d.entry.qualname);
-            let total: u64 = d.entry.callees.values().sum();
-            let out: u64 = d
-                .entry
+        // Step 2: the regions.
+        for region in regions_of(&decided, &live) {
+            let ns: u64 = region.iter().map(|&i| decided[i].entry.self_ns).sum();
+            let calls = region.iter().map(|&i| decided[i].entry.calls).max().unwrap_or(0);
+            let why = if share(ns) < rule.share {
+                Some(if region.len() == 1 {
+                    format!("self time {} is under {}", percent(share(ns)), percent(rule.share))
+                } else {
+                    format!(
+                        "its region's self time {} ({} functions) is under {}",
+                        percent(share(ns)),
+                        region.len(),
+                        percent(rule.share)
+                    )
+                })
+            } else if calls < rule.calls {
+                Some(if region.len() == 1 {
+                    format!("{calls} calls is under {}", rule.calls)
+                } else {
+                    format!(
+                        "its region's most called function has {calls} calls, under {}",
+                        rule.calls
+                    )
+                })
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                for &i in &region {
+                    decided[i].rejected = Some(why.clone());
+                }
+                changed = true;
+            }
+        }
+        if changed {
+            continue;
+        }
+        // Step 3: the crossings.
+        let inside: BTreeSet<String> = live.iter().map(|&i| decided[i].entry.callee_key()).collect();
+        for &i in &live {
+            let e = decided[i].entry;
+            let nested = format!("{}:{}.<locals>.", e.module, e.qualname);
+            let out: u64 = e
                 .callees
                 .iter()
                 .filter(|(callee, _)| !inside.contains(*callee) && !callee.starts_with(&nested))
                 .map(|(_, n)| n)
                 .sum();
-            if out > 0 && out as f64 >= total as f64 * rule.outside {
-                d.rejected = Some(format!(
-                    "{out} of its {total} calls to Python functions leave the selection"
+            let cost = out.saturating_mul(rule.crossing_ns);
+            if out > 0 && cost >= e.self_ns {
+                decided[i].rejected = Some(format!(
+                    "its {out} calls out of the selection would cost about {} ({} ns each), against {} of self time",
+                    duration(cost),
+                    rule.crossing_ns,
+                    duration(e.self_ns)
                 ));
                 changed = true;
             }
         }
+        if changed {
+            continue;
+        }
+        // Step 4: the size.
+        let (mut taken, mut taken_lines) = (0usize, 0u64);
+        for &i in &live {
+            if taken >= rule.max {
+                decided[i].rejected = Some(format!("not among the top {} by self time", rule.max));
+                changed = true;
+            } else if taken_lines + u64::from(lines[i]) > rule.lines {
+                decided[i].rejected = Some(format!(
+                    "its {} lines would take the selection past {} lines",
+                    lines[i], rule.lines
+                ));
+                changed = true;
+            } else {
+                taken += 1;
+                taken_lines += u64::from(lines[i]);
+            }
+        }
         if !changed {
-            break decided;
+            break;
         }
     }
+    // Step 5: pass 3's evidence.
+    if rule.measured_only {
+        for d in decided.iter_mut().filter(|d| d.rejected.is_none()) {
+            if d.entry.measured.is_none() {
+                d.rejected = Some("not measured by pass 3 (it was not among the candidates it built)".to_string());
+            }
+        }
+    }
+    decided
+}
+
+/// `ns` for a person: in microseconds under a millisecond, else milliseconds.
+fn duration(ns: u64) -> String {
+    if ns < 1_000_000 {
+        format!("{:.1} us", ns as f64 / 1e3)
+    } else {
+        format!("{:.1} ms", ns as f64 / 1e6)
+    }
+}
+
+/// The functions `live` (indexes into `decided`) connected by calls among
+/// them, each region in `live`'s order.
+fn regions_of(decided: &[Decision<'_>], live: &[usize]) -> Vec<Vec<usize>> {
+    let at: BTreeMap<String, usize> = live
+        .iter()
+        .enumerate()
+        .map(|(k, &i)| (decided[i].entry.callee_key(), k))
+        .collect();
+    let mut parent: Vec<usize> = (0..live.len()).collect();
+    fn find(parent: &mut [usize], i: usize) -> usize {
+        let mut i = i;
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for (k, &i) in live.iter().enumerate() {
+        for callee in decided[i].entry.callees.keys() {
+            if let Some(&j) = at.get(callee) {
+                let (a, b) = (find(&mut parent, k), find(&mut parent, j));
+                parent[a.max(b)] = a.min(b);
+            }
+        }
+    }
+    let mut by_root: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (k, &i) in live.iter().enumerate() {
+        let root = find(&mut parent, k);
+        by_root.entry(root).or_default().push(i);
+    }
+    by_root.into_values().collect()
 }
 
 /// One pass-1 run: the total self time and, per function key (`module`,
@@ -626,7 +777,7 @@ pub(crate) fn check_profile(
     for note in &notes {
         eprintln!("{note}");
     }
-    let decided: Vec<(&Entry, bool)> = current.iter().map(|(e, f)| (*e, f.eligible)).collect();
+    let decided: Vec<Candidate> = current.iter().map(|(e, f)| f.candidate(e)).collect();
     for d in select(profile.total_ns, &decided, profile.rule(rule)) {
         let e = d.entry;
         match &d.rejected {
@@ -715,12 +866,11 @@ pub(crate) fn run_profile(
         verify::carry_verdicts(&mut carried, &old);
         functions = carried.functions;
     }
-    let eligible = |e: &Entry| {
-        by_key
-            .get(&(e.module.as_str(), e.qualname.as_str(), e.firstlineno))
-            .is_some_and(|f| f.eligible)
-    };
-    let decided: Vec<(&Entry, bool)> = functions.iter().map(|e| (e, eligible(e))).collect();
+    // Every entry has its function: `functions` holds only those `by_key` has.
+    fn candidate<'p>(by_key: &BTreeMap<(&str, &str, u32), &Function>, e: &'p Entry) -> Candidate<'p> {
+        by_key[&(e.module.as_str(), e.qualname.as_str(), e.firstlineno)].candidate(e)
+    }
+    let decided: Vec<Candidate> = functions.iter().map(|e| candidate(&by_key, e)).collect();
     let candidates: Vec<(String, String, u32)> = select(total_ns, &decided, rule)
         .into_iter()
         .filter(|d| d.rejected.is_none())
@@ -772,11 +922,22 @@ pub(crate) fn run_profile(
     // never admit one it did not sample; pass 3 keeps only the measured
     // winners.
     if let Some(options) = verify {
-        let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
+        let decided: Vec<Candidate> = profile.functions.iter().map(|e| candidate(&by_key, e)).collect();
         let candidates: Vec<FunctionKey> = select(total_ns, &decided, profile.rule(rule))
             .into_iter()
             .filter(|d| d.rejected.is_none())
             .map(|d| (d.entry.module.clone(), d.entry.qualname.clone(), d.entry.firstlineno))
+            .collect();
+        // The hot ones on their own: pass 3 checks them alone against their
+        // regions.
+        let core: BTreeSet<FunctionKey> = profile
+            .functions
+            .iter()
+            .filter(|e| {
+                let share = if total_ns == 0 { 0.0 } else { e.self_ns as f64 / total_ns as f64 };
+                share >= rule.share && e.calls >= rule.calls
+            })
+            .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno))
             .collect();
         let cx = verify::Context {
             driver: &driver,
@@ -784,11 +945,11 @@ pub(crate) fn run_profile(
             scratch: &scratch,
             options,
         };
-        verify::verify(&mut profile, &candidates, &cx)?;
+        verify::verify(&mut profile, &candidates, &core, &cx)?;
     }
     std::fs::write(out, profile.to_json())
         .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
-    let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
+    let decided: Vec<Candidate> = profile.functions.iter().map(|e| candidate(&by_key, e)).collect();
     let selected = select(total_ns, &decided, profile.rule(rule))
         .iter()
         .filter(|d| d.rejected.is_none())

@@ -9,11 +9,13 @@
 //! processes each after one discarded warm-up run of each (a check stops after [`EARLY_ROUNDS`] once the two
 //! interquartile ranges are apart):
 //!
-//! 1. all the candidates together; if the workload is faster (the compiled
-//!    median under CPython's first quartile), every one is kept;
+//! 1. all the candidates together, and the hot ones among them (each at
+//!    least the rule's share and calls on its own) alone: the faster of the
+//!    two (the compiled median under CPython's first quartile, and the lower
+//!    one) is kept, so a region pulls a cold function in only when that pays;
 //! 2. else each region (the candidates connected by calls among them), most
-//!    self time first, alone;
-//! 3. then the regions that were faster alone, together, once more.
+//!    self time first, alone and its hot functions alone, the same way;
+//! 3. then the regions kept alone, together, once more.
 //!
 //! A win inside CPython's interquartile range is noise, and a function that wins
 //! only by noise adds size and risk for no gain, so it is not kept. At most
@@ -38,7 +40,7 @@ pub(crate) const MAX_ROUNDS: u32 = 15;
 /// Rounds after which a check whose interquartile ranges are apart stops.
 pub(crate) const EARLY_ROUNDS: u32 = 5;
 /// The most builds pass 3 makes.
-pub(crate) const MAX_BUILDS: usize = 6;
+pub(crate) const MAX_BUILDS: usize = 8;
 
 /// Pass 3's settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,10 +169,13 @@ impl Check {
 }
 
 /// Pass 3 over `candidates` (the selection rule's picks from `profile`):
-/// records a [`Measured`] on each.
+/// records a [`Measured`] on each. `core` holds the candidates hot on their
+/// own (at least the rule's share and calls): a region pulls its colder
+/// functions in only when that beats compiling its hot ones alone.
 pub(super) fn verify(
     profile: &mut Profile,
     candidates: &[FunctionKey],
+    core: &BTreeSet<FunctionKey>,
     cx: &Context<'_>,
 ) -> Result<(), String> {
     // The selection is frozen here: from now on only the candidates'
@@ -195,48 +200,33 @@ pub(super) fn verify(
     let started = Instant::now();
     let mut builds = 0usize;
     let mut verdicts: BTreeMap<FunctionKey, Measured> = BTreeMap::new();
-    let record = |verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<FunctionKey>, c: &Check| {
-        for key in set {
-            verdicts.insert(
-                key.clone(),
-                Measured {
-                    compiled: c.faster(),
-                    with: set.len(),
-                    cpython_ns: c.cpython,
-                    compiled_ns: c.compiled,
-                    instructions: c.instructions,
-                    refused: None,
-                },
-            );
-        }
+    let mut pass = Pass {
+        cx,
+        builds: &mut builds,
+        verdicts: &mut verdicts,
     };
     let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
-    if let Some((all, whole)) = measure(all, cx, &mut builds, &mut verdicts)? {
-        record(&mut verdicts, &all, &whole);
-        let compiled: Vec<FunctionKey> = all.iter().cloned().collect();
-        let regions = regions(profile, &compiled);
-        if !whole.faster() && regions.len() > 1 {
+    if !pass.best_of(&all, core)? {
+        let regions = regions(profile, &candidates);
+        if regions.len() > 1 {
             let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
             let mut kept_regions = 0;
             for region in &regions {
                 // One build stays for the kept regions together.
-                if builds >= MAX_BUILDS - 1 {
+                if *pass.builds >= MAX_BUILDS - 1 {
                     break;
                 }
                 let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
-                let Some((set, c)) = measure(set, cx, &mut builds, &mut verdicts)? else {
-                    continue;
-                };
-                record(&mut verdicts, &set, &c);
-                if c.faster() {
-                    kept.extend(set);
+                if pass.best_of(&set, core)? {
+                    kept.extend(set.into_iter().filter(|k| pass.verdicts.get(k).is_some_and(|m| m.compiled)));
                     kept_regions += 1;
                 }
             }
             if kept_regions > 1
-                && let Some((kept, c)) = measure(kept, cx, &mut builds, &mut verdicts)?
+                && *pass.builds < MAX_BUILDS
+                && let Some((kept, c)) = measure(kept, cx, pass.builds, pass.verdicts)?
             {
-                record(&mut verdicts, &kept, &c);
+                record(pass.verdicts, &kept, &c);
             }
         }
     }
@@ -252,6 +242,63 @@ pub(super) fn verify(
         started.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+/// Records `c`'s outcome on each function of `set`.
+fn record(verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<FunctionKey>, c: &Check) {
+    for key in set {
+        verdicts.insert(
+            key.clone(),
+            Measured {
+                compiled: c.faster(),
+                with: set.len(),
+                cpython_ns: c.cpython,
+                compiled_ns: c.compiled,
+                instructions: c.instructions,
+                refused: None,
+                without: None,
+            },
+        );
+    }
+}
+
+/// Pass 3's builds and verdicts so far.
+struct Pass<'a, 'c> {
+    cx: &'a Context<'c>,
+    builds: &'a mut usize,
+    verdicts: &'a mut BTreeMap<FunctionKey, Measured>,
+}
+
+impl Pass<'_, '_> {
+    /// Checks `set` and, when its hot functions (`set` and `core`) are not
+    /// all of it, those alone; keeps whichever is faster than CPython with
+    /// the lower median, the hot ones on a tie. A function the hot ones won
+    /// without is recorded as not faster, with their times (`without`).
+    /// Whether one of the two was faster.
+    fn best_of(&mut self, set: &BTreeSet<FunctionKey>, core: &BTreeSet<FunctionKey>) -> Result<bool, String> {
+        let Some((set, whole)) = measure(set.clone(), self.cx, self.builds, self.verdicts)? else {
+            return Ok(false);
+        };
+        record(self.verdicts, &set, &whole);
+        let hot: BTreeSet<FunctionKey> = set.intersection(core).cloned().collect();
+        if hot.is_empty() || hot.len() == set.len() || *self.builds >= MAX_BUILDS {
+            return Ok(whole.faster());
+        }
+        let Some((hot, alone)) = measure(hot, self.cx, self.builds, self.verdicts)? else {
+            return Ok(whole.faster());
+        };
+        if alone.faster() && (!whole.faster() || alone.compiled[1] <= whole.compiled[1]) {
+            record(self.verdicts, &hot, &alone);
+            for key in set.difference(&hot) {
+                if let Some(m) = self.verdicts.get_mut(key).filter(|m| m.refused.is_none()) {
+                    m.compiled = false;
+                    m.without = Some(alone.compiled);
+                }
+            }
+            return Ok(true);
+        }
+        Ok(whole.faster())
+    }
 }
 
 /// Checks `set`, leaving out every function a build refuses (recorded in

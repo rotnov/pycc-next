@@ -42,6 +42,7 @@ fn slower() -> Measured {
         compiled_ns: [115, 120, 125],
         instructions: None,
         refused: None,
+        without: None,
     }
 }
 
@@ -107,10 +108,25 @@ fn the_rule_rejects_a_function_measured_slower() {
     let mut a = entry("a", 500, &[]);
     a.measured = Some(slower());
     let b = entry("b", 400, &[]);
-    let decided = crate::profile::select(1000, &[(&a, true), (&b, true)], Rule::default());
+    fn candidate(e: &Entry) -> crate::profile::Candidate<'_> {
+        crate::profile::Candidate {
+            entry: e,
+            eligible: true,
+            lines: 10,
+        }
+    }
+    let decided = crate::profile::select(1000, &[candidate(&a), candidate(&b)], Rule::default());
     let why = decided[0].rejected.as_deref().unwrap();
     assert!(why.starts_with("not faster when compiled: the workload took 0.0 ms with it and 1 other functions compiled"), "{why}");
     assert_eq!(decided[1].rejected, None);
+    // Rejected because its region's hot functions won without it.
+    a.measured = Some(Measured {
+        without: Some([70, 80, 90]),
+        ..slower()
+    });
+    let decided = crate::profile::select(1000, &[candidate(&a), candidate(&b)], Rule::default());
+    let why = decided[0].rejected.as_deref().unwrap();
+    assert!(why.starts_with("faster without it: the workload took 0.0 ms with only its region's hot functions compiled"), "{why}");
 }
 
 #[test]

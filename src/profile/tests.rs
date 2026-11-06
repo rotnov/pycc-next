@@ -22,7 +22,17 @@ fn function(module: &str, qualname: &str, line: u32, sha: &str) -> Function {
         qualname: qualname.into(),
         firstlineno: line,
         sha256: sha.into(),
+        lines: 10,
         eligible: true,
+    }
+}
+
+/// `e` as [`select`] decides it: ten lines long.
+fn candidate(e: &Entry, eligible: bool) -> Candidate<'_> {
+    Candidate {
+        entry: e,
+        eligible,
+        lines: 10,
     }
 }
 
@@ -117,7 +127,7 @@ fn the_rule_takes_eligible_hot_and_often_called_functions_by_self_time() {
         entry("m", "cool", 5, "", 50, 5),
         entry("m", "cold", 6, "", 1000, 4),
     ];
-    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, e.qualname != "gen")).collect();
+    let input: Vec<Candidate> = es.iter().map(|e| candidate(e, e.qualname != "gen")).collect();
     let decided = select(1000, &input, Rule::default());
     let got: Vec<(&str, Option<&str>)> = decided
         .iter()
@@ -174,28 +184,31 @@ fn runs_aggregate_to_medians_and_a_missing_call_counts_zero() {
 }
 
 #[test]
-fn the_region_keeps_functions_whose_calls_stay_inside_the_selection() {
-    let with = |q: &str, ns: u64, out: &[(&str, u64)]| {
-        let mut e = entry("m", q, 1, "", 1000, ns);
+fn a_region_is_judged_together_and_a_crossing_by_its_cost() {
+    let with = |q: &str, calls: u64, ns: u64, out: &[(&str, u64)]| {
+        let mut e = entry("m", q, 1, "", calls, ns);
         e.callees = out.iter().map(|(k, n)| (k.to_string(), *n)).collect();
         e
     };
     let es = [
         // Calls only selected functions, itself and its own nested code.
-        with("hub", 500, &[("m:leaf:1", 10), ("m:hub:1", 5), ("m:hub.<locals>.inner:1", 5)]),
+        with("hub", 1000, 500, &[("m:leaf:1", 10), ("m:hub:1", 5), ("m:hub.<locals>.inner:1", 5)]),
         // No calls to Python functions at all.
-        with("leaf", 400, &[]),
-        // Half of its calls leave: not most inside, rejected.
-        with("even", 300, &[("m:leaf:1", 1), ("*", 1)]),
-        // A third leave: kept.
-        with("most", 250, &[("m:leaf:1", 2), ("*", 1)]),
-        // Mostly glue: rejected.
-        with("glue", 200, &[("*", 3), ("m:leaf:1", 1)]),
-        // Only selected through `glue`: rejected once `glue` is.
-        with("caller", 100, &[("m:glue:1", 1)]),
+        with("leaf", 1000, 400, &[]),
+        // Hot, calling a cold function: the region pulls it in.
+        with("bisect", 1000, 300, &[("m:split:1", 900)]),
+        // One call out per call costs 36 ns against 100 ns of self time: kept.
+        with("caller", 1000, 100, &[("m:glue:1", 1)]),
+        // Three calls out cost 108 ns against 30 ns of self time.
+        with("glue", 1000, 30, &[("*", 3), ("m:leaf:1", 1)]),
+        // A region of cold functions: 0.40% together.
+        with("a", 100, 2, &[("m:b:1", 1)]),
+        with("b", 100, 2, &[]),
+        // Cold and rarely called, but in `bisect`'s region.
+        with("split", 10, 1, &[]),
     ];
-    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, true)).collect();
-    let decided = select(1000, &input, Rule { share: 0.0, ..Rule::default() });
+    let input: Vec<Candidate> = es.iter().map(|e| candidate(e, true)).collect();
+    let decided = select(1000, &input, Rule::default());
     let got: Vec<(&str, Option<&str>)> = decided
         .iter()
         .map(|d| (d.entry.qualname.as_str(), d.rejected.as_deref()))
@@ -205,18 +218,40 @@ fn the_region_keeps_functions_whose_calls_stay_inside_the_selection() {
         [
             ("hub", None),
             ("leaf", None),
-            ("even", Some("1 of its 2 calls to Python functions leave the selection")),
-            ("most", None),
-            ("glue", Some("3 of its 4 calls to Python functions leave the selection")),
-            ("caller", Some("1 of its 1 calls to Python functions leave the selection")),
+            ("bisect", None),
+            ("caller", None),
+            (
+                "glue",
+                Some("its 3 calls out of the selection would cost about 0.1 us (36 ns each), against 0.0 us of self time")
+            ),
+            ("a", Some("its region's self time 0.40% (2 functions) is under 0.50%")),
+            ("b", Some("its region's self time 0.40% (2 functions) is under 0.50%")),
+            ("split", None),
         ]
     );
-    // At 0 no call may leave; at 1 only a function all of whose calls leave
-    // is rejected.
-    let strict = select(1000, &input, Rule { share: 0.0, outside: 0.0, ..Rule::default() });
-    assert!(strict[3].rejected.is_some() && strict[0].rejected.is_none() && strict[1].rejected.is_none());
-    let loose = select(1000, &input, Rule { share: 0.0, outside: 1.0, ..Rule::default() });
-    assert!(loose[2].rejected.is_none() && loose[4].rejected.is_none());
+    // A cheaper crossing keeps `glue`; a dearer one drops `caller` too.
+    let cheap = select(1000, &input, Rule { crossing_ns: 9, ..Rule::default() });
+    assert!(cheap[4].rejected.is_none());
+    let dear = select(1000, &input, Rule { crossing_ns: 100, ..Rule::default() });
+    assert!(dear[3].rejected.is_some() && dear[0].rejected.is_none());
+    // The size cap: 15 lines take `hub` (10 lines) alone, and `hub`'s calls
+    // to `leaf` then cross, cheaply enough.
+    let small = select(1000, &input, Rule { lines: 15, ..Rule::default() });
+    assert_eq!(small[0].rejected, None);
+    assert_eq!(small[1].rejected.as_deref(), Some("its 10 lines would take the selection past 15 lines"));
+}
+
+/// A rejection by a later pass never hides the step a function failed
+/// first: a function its region rejects says so in a verified profile too.
+#[test]
+fn a_rejection_names_the_first_step_the_function_failed() {
+    let mut glue = entry("m", "glue", 1, "", 1000, 30);
+    glue.callees = BTreeMap::from([("*".to_string(), 3)]);
+    let mut p = profile(vec![glue]);
+    p.verified = true;
+    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    let d = &select(p.total_ns, &input, p.rule(Rule::default()))[0];
+    assert!(d.rejected.as_deref().unwrap().starts_with("its 3 calls out of the selection"), "{d:?}");
 }
 
 #[test]
@@ -256,7 +291,7 @@ fn a_function_that_mostly_catches_exceptions_is_not_selected() {
     let mut some = entry("m", "some", 3, "", 100, 100);
     some.handled = 49;
     let es = [often, rare, some];
-    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, true)).collect();
+    let input: Vec<Candidate> = es.iter().map(|e| candidate(e, true)).collect();
     let decided = select(1000, &input, Rule { calls: 1, ..Rule::default() });
     let got: Vec<Option<&str>> = decided.iter().map(|d| d.rejected.as_deref()).collect();
     assert_eq!(
@@ -284,6 +319,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
         compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
         instructions: None,
         refused: None,
+        without: None,
     };
     let mut a = entry("m", "a", 1, "", 100, 300);
     a.measured = Some(measured(false));
@@ -293,7 +329,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     let mut p = profile(vec![a, b, c]);
     let rule = Rule { max: 2, ..Rule::default() };
     let picked = |p: &Profile| -> Vec<String> {
-        let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+        let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
         select(p.total_ns, &input, p.rule(rule))
             .into_iter()
             .filter(|d| d.rejected.is_none())
@@ -304,7 +340,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     assert_eq!(picked(&p), ["b", "c"]);
     p.verified = true;
     assert_eq!(picked(&p), ["b"]);
-    let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
     let c = select(p.total_ns, &input, p.rule(rule)).into_iter().find(|d| d.entry.qualname == "c").unwrap();
     assert_eq!(c.rejected.as_deref(), Some("not measured by pass 3 (it was not among the candidates it built)"));
     // The flag is part of the file.

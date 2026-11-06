@@ -6,6 +6,7 @@ fn function(module: &str, qualname: &str, line: u32, eligible: bool) -> Function
         qualname: qualname.into(),
         firstlineno: line,
         sha256: format!("{module}:{qualname}"),
+        lines: 10,
         eligible,
     }
 }

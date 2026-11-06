@@ -48,8 +48,9 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            docs/design/compile-little.md) and remove the `.py` files.
   --select profile
            compile only the functions a profile selects: `pycc profile` runs
-           the package's own test suite (the training input) against the
-           unchanged sources first, the build passes it as `--profile`, and the
+           the package's own test suite and then each of its timed workloads
+           once (the training input, `training`) against the unchanged sources
+           first, the build passes it as `--profile`, and the
            `.py` files stay, since the modules' bytecode runs. The suite then
            checks that each module with a compiled function is imported
            through the extension.
@@ -725,6 +726,38 @@ def competitor_trees(pkg: Package, a: argparse.Namespace, plain: pathlib.Path,
     return out
 
 
+def training(pkg: Package) -> str:
+    """The training workload `--select profile` profiles: the package's own test suite,
+    then each of its timed workloads (`speed`, `more_speed`, but an import, which the
+    suite ran) run once, with the tree as argv[1] (and 1 as argv[2]), in one process.
+    The tree is the one `pycc profile` runs (`PYCC_PROFILE_ROOT`, the driver's): in
+    pass 3 a built copy, under which a suite that discovers its tests by path finds
+    them. One profile of all of them, so that a function hot only
+    in the timed paths (diff-match-patch's `diff_bisect`) is measured there too; pass 3
+    times this same workload. A workload's output goes to devnull, and a failing suite
+    still fails the run, after the timed workloads."""
+    # An import workload (`import_timed`) times the first import of a fresh process:
+    # in this one the suite has imported the package already, and its import ran there.
+    timed = [pkg.speed, *(code for _, code in pkg.more_speed)]
+    parts = [pkg.tests, *(code for code in timed if code != import_timed(pkg.import_name))]
+    return (
+        "import contextlib, io, os, sys, unittest\n"
+        "TREE = os.environ.get('PYCC_PROFILE_ROOT', sys.argv[1])\n"
+        "sys.path.insert(0, TREE)\n"
+        f"PARTS = {parts!r}\n"
+        "status = 0\n"
+        "for i, code in enumerate(PARTS):\n"
+        "    sys.argv = ['train', TREE] if i == 0 else ['train', TREE, '1']\n"
+        "    try:\n"
+        "        with open(os.devnull, 'w') as null, contextlib.redirect_stdout(null):\n"
+        "            exec(compile(code, f'<training {i}>', 'exec'), {'__name__': '__main__', 'sys': sys, 'unittest': unittest})\n"
+        "    except SystemExit as e:\n"
+        "        if i == 0 and e.code not in (0, None):\n"
+        "            status = 1\n"
+        "sys.exit(status)\n"
+    )
+
+
 def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     print(f"{pkg.name} {pkg.version}")
     archive = fetch(pkg, pathlib.Path(a.cache))
@@ -755,10 +788,11 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
 
     flags = ["--ext", "--non-strict", "--release", "--report-fallbacks"]
     if a.select == "profile":
-        # The training input is the package's own test suite; `--time` runs
-        # other workloads.
+        # The training input is every workload the check runs (`training`):
+        # a profile of one workload must not decide what is compiled for
+        # another.
         train = tmp / "train.py"
-        train.write_text("import sys, unittest\nsys.path.insert(0, sys.argv[1])\n" + pkg.tests)
+        train.write_text(training(pkg))
         profile = tmp / "pycc.profile.json"
         target = plain / pkg.layout[0][0]
         r = subprocess.run([a.pycc, "profile", str(target), "-o", str(profile), "--",

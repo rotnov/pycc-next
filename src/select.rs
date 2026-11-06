@@ -85,8 +85,7 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
                 let loaded = profile::Profile::read(path)?;
                 let (current, notes) = loaded.current(sources);
                 out.notes.extend(notes);
-                let entries: Vec<(&profile::Entry, bool)> =
-                    current.iter().map(|(e, f)| (*e, f.eligible)).collect();
+                let entries: Vec<profile::Candidate> = current.iter().map(|(e, f)| f.candidate(e)).collect();
                 let by_entry: BTreeMap<*const profile::Entry, &Function> =
                     current.iter().map(|(e, f)| (*e as *const _, *f)).collect();
                 for decision in profile::select(loaded.total_ns, &entries, loaded.rule(request.rule)) {
@@ -227,7 +226,8 @@ pub(crate) fn resolve(
             share: flags.select_share.unwrap_or(defaults.share),
             calls: flags.select_calls.unwrap_or(defaults.calls),
             max: flags.select_max.unwrap_or(defaults.max),
-            outside: flags.select_outside.unwrap_or(defaults.outside),
+            lines: flags.select_lines.unwrap_or(defaults.lines),
+            crossing_ns: flags.select_crossing_ns.unwrap_or(defaults.crossing_ns),
             handled: flags.select_handled.unwrap_or(defaults.handled),
             sampled_only: false,
             measured_only: false,

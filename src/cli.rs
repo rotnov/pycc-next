@@ -89,10 +89,14 @@ pub struct SelectFlags {
     /// The selection rule: the most functions selected.
     #[arg(long, value_name = "N", requires = "ext")]
     pub select_max: Option<usize>,
-    /// The selection rule: the largest share of a function's calls to Python
-    /// functions that may leave the selected region.
-    #[arg(long, value_name = "SHARE", requires = "ext")]
-    pub select_outside: Option<f64>,
+    /// The selection rule: the most source lines selected.
+    #[arg(long, value_name = "N", requires = "ext")]
+    pub select_lines: Option<u64>,
+    /// The selection rule: what one call from a compiled function to a
+    /// Python function outside the selection costs, in nanoseconds; a
+    /// function whose such calls cost its self time is not selected.
+    #[arg(long, value_name = "NS", requires = "ext")]
+    pub select_crossing_ns: Option<u64>,
     /// The selection rule: the share of a function's sampled calls that catch
     /// an exception in its frame must be under this.
     #[arg(long, value_name = "SHARE", requires = "ext")]
@@ -315,11 +319,15 @@ pub enum Command {
         /// The selection rule's most functions.
         #[arg(long, default_value_t = 64)]
         select_max: usize,
-        /// The selection rule: the share of a function's calls to Python
-        /// functions that leave the selection (each one a crossing between
-        /// compiled and interpreted code) must be under this.
-        #[arg(long, default_value_t = 0.5)]
-        select_outside: f64,
+        /// The selection rule's most source lines.
+        #[arg(long, default_value_t = 4000)]
+        select_lines: u64,
+        /// The selection rule: what one call from a compiled function to a
+        /// Python function outside the selection (a crossing between compiled
+        /// and interpreted code) costs, in nanoseconds; a function whose
+        /// crossings cost its self time is not selected.
+        #[arg(long, default_value_t = crate::profile::CROSSING_NS)]
+        select_crossing_ns: u64,
         /// The selection rule: the share of a function's sampled calls that
         /// catch an exception in its frame must be under this.
         #[arg(long, default_value_t = 0.5)]

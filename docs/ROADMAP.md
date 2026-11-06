@@ -83,8 +83,16 @@ Accept (carried over from v0.11, not met there):
    changes. Locally, with the training profiles, no candidate of pydantic (5), mistune
    (12) or pystache (0) is a measured winner, so nothing is compiled and every phase is
    at CPython's time (pydantic: 31 interleaved rounds, every median within 1.5% of
-   CPython's and inside its interquartile range); the three suites pass. The gains wait for direct calls
-   inside the selected region (PR 7, schema >= 1.05x) and type-specialized bodies (PR 8).
+   CPython's and inside its interquartile range); the three suites pass.
+   **Status (PR 5a, the selection fix):** a function is selected with its region, the
+   connected hot functions around it, judged by their combined self time; a crossing is
+   rejected by its cost (calls times the measured call overhead against self time), and
+   the region is capped by size. Pass 3 keeps the region only when it beats its hot
+   core. The training input is every workload a package check runs. diff-match-patch's
+   `diff_main` runs 2.68x faster than CPython (54-function region, 32 compiled; module
+   mode: 6.94x); pydantic, mistune and pystache select nothing and stay at parity. The
+   rest of the gap to module mode is type-specialized bodies (PR 8, the next checkpoint:
+   >= 6x on `diff_main`, schema >= 1.05x), then direct calls (PR 7) if they measure.
 
    Every step reports wall time, instructions, I1 misses and branch mispredictions, and the
    extension's size (the design's section 3). The three suites fail no test that passes
