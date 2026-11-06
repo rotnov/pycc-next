@@ -134,10 +134,13 @@ pub(crate) fn build_package(
         ExitCode::from(2)
     };
     let mut modules = package_build::discover(build.path, build.excludes).map_err(fail)?;
+    // The selection names a module by its import name, which for a
+    // subpackage (`outer/inner`) is not the name below the target
+    // (`inner.m` is `outer.inner.m`).
     let selected = |module: &PackageModule| {
         build
             .selection
-            .and_then(|selection| selection.modules.get(&module.dotted))
+            .and_then(|selection| selection.modules.get(&crate::select::import_name(&module.path)))
             .filter(|functions| !functions.is_empty())
     };
     if build.selection.is_some() {

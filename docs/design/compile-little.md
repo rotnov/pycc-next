@@ -124,7 +124,11 @@ to be hot are compiled, and each is compiled into specialized native code.
 - **Storage.** One JSON file, committed with the project that builds the package. The
   file holds:
   - `{"version": 1, "python": "3.15.2", "workload": "<command line>"}`;
-  - one entry per function: `module`, `qualname`, `firstlineno`, the SHA-256 of the
+  - one entry per function: `module` (its import name: the dotted path below the
+    directory above every package that holds it, so `outer/inner/m.py` is
+    `outer.inner.m` even when `outer/inner` is the target; `select::import_name`, the
+    one name `--compile`, a package build's members and the build's report use too),
+    `qualname`, `firstlineno`, the SHA-256 of the
     function's source text, `calls`, `self_ns`, `callees` (`module:qualname:firstlineno`
     of a package function, or `*` for any other Python function, to its count), and
     `arg_types` (exact type name to count, per parameter), and `handled` (of those

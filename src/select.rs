@@ -265,19 +265,33 @@ pub(crate) fn module() -> Option<&'static BTreeSet<Key>> {
     MODULE.get()
 }
 
-/// The dotted name the selection indexed this build's module under (`pkg.mod`
-/// for a member of a package built alone), when it resolved one.
-static MODULE_NAME: OnceLock<String> = OnceLock::new();
-
-/// Records [`module_name`].
-pub(crate) fn set_module_name(name: String) {
-    let _ = MODULE_NAME.set(name);
-}
-
-/// The dotted name the build reports its module's functions under, as
-/// `--compile` names them.
-pub(crate) fn module_name() -> Option<&'static str> {
-    MODULE_NAME.get().map(String::as_str)
+/// The name CPython imports the module at `path` (a `.py` file, or a
+/// package directory) under: its dotted path below its import root, the
+/// directory above every package that holds it (`outer/inner/m.py` with
+/// `outer/__init__.py` and `outer/inner/__init__.py` is `outer.inner.m`; a
+/// package's `__init__.py` is the package). The one name every part of
+/// selection uses for a module: the profile's index (`import_root` and
+/// `dotted` in `src/profile/driver.py`, the same walk), `--compile`, a package
+/// build's lookup of its members' selections, and the build's report of
+/// what it compiled.
+pub(crate) fn import_name(path: &Path) -> String {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut parts: Vec<String> = Vec::new();
+    let mut dir = if path.is_dir() {
+        Some(path.as_path())
+    } else {
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        if stem != "__init__" {
+            parts.push(stem);
+        }
+        path.parent()
+    };
+    while let Some(d) = dir.filter(|d| d.join("__init__.py").is_file()) {
+        parts.push(d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        dir = d.parent();
+    }
+    parts.reverse();
+    parts.join(".")
 }
 
 /// A member's selection as the package build passes it (`--select-functions

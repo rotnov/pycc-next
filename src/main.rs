@@ -198,18 +198,11 @@ fn main() -> ExitCode {
             // A module with nothing selected stays CPython's own: no
             // extension at all.
             if let Some(selection) = &selection {
-                // The selection indexed this file alone, under its dotted
+                // The selection indexed this file alone, under its import
                 // name (`pkg.mod` for a member of a package).
-                let module = selection.modules.keys().next().cloned().unwrap_or_else(|| {
-                    path.file_stem()
-                        .map(|stem| stem.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                });
+                let module = select::import_name(&path);
                 match selection.modules.get(&module) {
-                    Some(selected) if !selected.is_empty() => {
-                        select::set_module(selected.clone());
-                        select::set_module_name(module.clone());
-                    }
+                    Some(selected) if !selected.is_empty() => select::set_module(selected.clone()),
                     _ => {
                         return match select::ship_source(&path, &out, target.as_deref()) {
                             Ok(source) => {

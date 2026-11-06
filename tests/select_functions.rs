@@ -418,3 +418,42 @@ fn a_package_serves_only_its_modules_with_selected_functions() {
         .unwrap();
     assert_eq!(text(&o), "SourceFileLoader SourceFileLoader [3, 3]\n");
 }
+
+/// A subpackage built on its own: the selection names its modules as CPython
+/// imports them (`outer.inner.a`), not by their names below the target
+/// (`inner.a`).
+#[test]
+fn a_subpackage_serves_its_selected_functions_under_their_import_names() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let outer = scratch.join("outer");
+    let inner = outer.join("inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(outer.join("__init__.py"), "").unwrap();
+    std::fs::write(inner.join("__init__.py"), "from .a import f\n").unwrap();
+    std::fs::write(inner.join("a.py"), "def f(x):\n    return [x] * 2\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&inner)
+        .arg("-o")
+        .arg(inner.join("__init__"))
+        .args(["--ext", "--non-strict", "--report-fallbacks", "--select", "none", "--compile", "outer.inner.a:f"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("compiled: outer.inner.a:f\n"), "{}", text(&o));
+    let o = Command::new(python())
+        .args([
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); import outer.inner, outer.inner.a\n\
+             for m in (outer.inner, outer.inner.a):\n    print(m.__name__, type(m.__spec__.loader).__name__)\n\
+             print(outer.inner.f(3))",
+        ])
+        .arg(scratch.join(""))
+        .output()
+        .unwrap();
+    assert_eq!(
+        text(&o),
+        "outer.inner ExtensionFileLoader\nouter.inner.a _PyccFinder\n[3, 3]\n"
+    );
+}
