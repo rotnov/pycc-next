@@ -417,6 +417,39 @@ fn a_recursive_call_s_handled_exceptions_count_once_per_call() {
     assert_eq!(rec["handled"], 400, "{p}");
 }
 
+#[test]
+fn handled_exceptions_count_per_call_on_every_thread() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    // Three threads are inside `f` at once when each catches: every call's
+    // handler runs while the other two calls are active. (`f` calls mostly
+    // outside the package, `Barrier.wait`, hence `--select-outside 1`.)
+    std::fs::write(
+        pkg.join("t.py"),
+        "def f(barrier):\n    barrier.wait()\n    try:\n        {}[0]\n    except KeyError:\n        pass\n    barrier.wait()\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(
+        &work,
+        "import threading\nfrom pkg import t\nbarrier = threading.Barrier(3)\n\
+         def run():\n    for i in range(30):\n        t.f(barrier)\n\
+         threads = [threading.Thread(target=run) for _ in range(3)]\n\
+         for th in threads:\n    th.start()\nfor th in threads:\n    th.join()\n",
+    )
+    .unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0", "--select-outside", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let rec = &p["functions"][0];
+    assert_eq!(rec["qualname"], "f");
+    assert_eq!(rec["calls"], 90);
+    assert_eq!(rec["handled"], 90, "{p}");
+}
+
 /// Pass 2 under the rule of CPython 3.13 and 3.14, where an
 /// `EXCEPTION_HANDLED` or `PY_UNWIND` callback that returns
 /// `sys.monitoring.DISABLE` raises `ValueError` ("cannot disable"): the

@@ -146,6 +146,12 @@ pub(crate) fn build_package(
         let root = modules[0].dotted.clone();
         modules.retain(|module| module.dotted == root || selected(module).is_some());
         if modules.len() == 1 && selected(&modules[0]).is_none() {
+            // An extension an earlier build left would be imported ahead of
+            // the package's `__init__.py`.
+            let platform = ext_build::ExtLinkPlatform::resolve(build.target);
+            let output = ext_output::resolve(build.out, &platform.suffix_platform())
+                .map_err(|e| fail(e.message()))?;
+            crate::select::remove_stale(&output.artifact).map_err(fail)?;
             eprintln!(
                 "note: no function of `{root}` is selected: no extension is built, so CPython \
                  imports the package as it is"

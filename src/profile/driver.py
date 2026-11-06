@@ -294,11 +294,12 @@ def calls(pkg, script, args):
 
 
 def types(pkg, candidates, script, args):
+    from _thread import get_ident
     files = package_files(pkg)
     wanted = {(m, q, int(f)) for m, q, f in candidates}
     # Per candidate: [calls sampled, argument types, sampled calls that caught
-    # an exception, active calls (innermost last, each [sampled, counted]),
-    # sampling done].
+    # an exception, active calls by thread (each thread's innermost last, each
+    # [sampled, counted]), sampling done].
     seen = {}
     by_code = {}
     mon = sys.monitoring
@@ -311,7 +312,7 @@ def types(pkg, candidates, script, args):
             key = (name, code.co_qualname, code.co_firstlineno)
             if key not in wanted:
                 return mon.DISABLE
-            rec = seen.setdefault(key, [0, {}, 0, [], False])
+            rec = seen.setdefault(key, [0, {}, 0, {}, False])
             by_code[code] = rec
             mon.set_local_events(tool, code, mon.events.PY_RETURN)
         if rec[4]:
@@ -323,7 +324,7 @@ def types(pkg, candidates, script, args):
             mon.set_local_events(tool, code, 0)
             return mon.DISABLE
         rec[0] += 1
-        rec[3].append([True, False])
+        rec[3].setdefault(get_ident(), []).append([True, False])
         frame = sys._getframe(1)
         n = code.co_argcount + code.co_kwonlyargcount
         n += bool(code.co_flags & 0x04) + bool(code.co_flags & 0x08)
@@ -338,19 +339,24 @@ def types(pkg, candidates, script, args):
 
     def end(code, offset, value):
         rec = by_code.get(code)
-        if rec is not None and not rec[4] and rec[3]:
-            rec[3].pop()
+        if rec is not None and not rec[4]:
+            active = rec[3].get(get_ident())
+            if active:
+                active.pop()
         return None
 
     def caught(code, offset, exc):
         # EXCEPTION_HANDLED (and PY_UNWIND) cannot be disabled before 3.15:
         # returning `DISABLE` from them raises `ValueError`.
         rec = by_code.get(code)
-        if rec is None or rec[4] or not rec[3]:
+        if rec is None or rec[4]:
             return None
-        # One count per sampled call: the innermost active one of this code,
-        # where the handler runs.
-        call = rec[3][-1]
+        active = rec[3].get(get_ident())
+        if not active:
+            return None
+        # One count per sampled call: the innermost active one of this code
+        # on this thread, where the handler runs.
+        call = active[-1]
         if not call[1]:
             call[1] = True
             rec[2] += 1

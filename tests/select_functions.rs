@@ -19,7 +19,8 @@ fn pycc(args: &[&std::ffi::OsStr]) -> Output {
 }
 
 fn text(o: &Output) -> String {
-    format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
+    // Line endings as on POSIX: Windows' Python writes `\r\n`.
+    format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)).replace('\r', "")
 }
 
 /// `import m; m.main()` from `dir`, with `dir` replaced by `DIR` in the output.
@@ -30,7 +31,7 @@ fn run_main(dir: &Path) -> String {
         .output()
         .unwrap();
     assert!(o.status.success(), "{}", text(&o));
-    String::from_utf8_lossy(&o.stdout).replace(dir.to_str().unwrap(), "DIR")
+    String::from_utf8_lossy(&o.stdout).replace('\r', "").replace(dir.to_str().unwrap(), "DIR")
 }
 
 /// Two copies of the fixture as `m.py`: one built with `flags`, one left alone.
@@ -155,7 +156,7 @@ fn with_nothing_selected_the_output_is_the_module_as_source() {
             .arg(dir)
             .output()
             .unwrap();
-        (o.status.success(), String::from_utf8_lossy(&o.stdout).replace(dir.to_str().unwrap(), "DIR"))
+        (o.status.success(), String::from_utf8_lossy(&o.stdout).replace('\r', "").replace(dir.to_str().unwrap(), "DIR"))
     };
     let (ok, got) = run(&dist, "named");
     assert!(ok, "{got}");
@@ -254,7 +255,7 @@ fn a_package_serves_only_its_modules_with_selected_functions() {
         .output()
         .unwrap();
     assert_eq!(
-        text(&o).replace('\r', ""),
+        text(&o),
         // The package's `__init__` is the extension that installs the finder;
         // its module runs as bytecode too.
         "pkg ExtensionFileLoader pkg/__init__.py\n\
@@ -262,4 +263,28 @@ fn a_package_serves_only_its_modules_with_selected_functions() {
          pkg.b SourceFileLoader pkg/b.py\n\
          [3, 3] 2\n"
     );
+    // Rebuilt with nothing selected, the package is its sources again: the
+    // earlier extension, which CPython would import ahead of `__init__.py`,
+    // is removed.
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&pkg)
+        .arg("-o")
+        .arg(pkg.join("__init__"))
+        .args(["--ext", "--non-strict", "--select", "none"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(!extension(&pkg));
+    let o = Command::new(python())
+        .args([
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); import pkg, pkg.a\n\
+             print(type(pkg.__spec__.loader).__name__, type(pkg.a.__spec__.loader).__name__, pkg.f(3))",
+        ])
+        .arg(scratch.join(""))
+        .output()
+        .unwrap();
+    assert_eq!(text(&o), "SourceFileLoader SourceFileLoader [3, 3]\n");
 }

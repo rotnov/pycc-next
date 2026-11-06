@@ -148,7 +148,8 @@ to be hot are compiled, and each is compiled into specialized native code.
 - **Default with no profile.** Nothing is selected. The build says so in one note, and a
   package with nothing selected gets no extension at all, so CPython imports it unchanged.
   A single module built to `-o OUT` gets its source written as `OUT`'s `.py`, so the
-  output contract (an importable `OUT`) holds; an extension left there is removed.
+  output contract (an importable `OUT`) holds. Either way an extension an earlier build left
+  at `OUT` is removed, as CPython would import it ahead of the source.
   Compiling without evidence was measured as a loss (section 1, point 2).
 - **Overrides.** `--select all` compiles every eligible function. It exists for tests and
   for users who measure for themselves. Until PR 6 (section 8), a transitional `--select module`

@@ -300,11 +300,7 @@ pub(crate) fn ship_source(path: &Path, out: &Path, target: Option<&str>) -> Resu
     let platform = crate::ext_build::ExtLinkPlatform::resolve(target).suffix_platform();
     let output = crate::ext_output::resolve(out, &platform).map_err(|e| e.message())?;
     let dest = crate::ext_output::python_source(out, &platform).map_err(|e| e.message())?;
-    match std::fs::remove_file(&output.artifact) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("cannot remove `{}`: {e}", output.artifact.display())),
-    }
+    remove_stale(&output.artifact)?;
     let same = match (std::fs::canonicalize(path), std::fs::canonicalize(&dest)) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
@@ -317,4 +313,15 @@ pub(crate) fn ship_source(path: &Path, out: &Path, target: Option<&str>) -> Resu
             .map_err(|e| format!("cannot write `{}`: {e}", dest.display()))?;
     }
     Ok(dest)
+}
+
+/// Removes the extension `artifact` an earlier build left, if any: with
+/// nothing selected, CPython must import the source, which an extension at
+/// the same name shadows.
+pub(crate) fn remove_stale(artifact: &Path) -> Result<(), String> {
+    match std::fs::remove_file(artifact) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("cannot remove `{}`: {e}", artifact.display())),
+    }
 }
