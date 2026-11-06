@@ -418,6 +418,26 @@ fn a_recursive_call_s_handled_exceptions_count_once_per_call() {
 }
 
 #[test]
+fn calls_active_at_the_sampling_limit_count_their_handled_exceptions() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    // 1,101 nested calls: the first 1,000 are sampled, and each catches
+    // only after the deeper ones, the unsampled among them, have run.
+    std::fs::write(pkg.join("r.py"), RECURSIVE).unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, "import sys\nsys.setrecursionlimit(10000)\nfrom pkg import r\nr.rec(1100)\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0", "--select-calls", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let rec = &p["functions"][0];
+    assert_eq!(rec["qualname"], "rec");
+    assert_eq!(rec["handled"], 1000, "{p}");
+}
+
+#[test]
 fn handled_exceptions_count_per_call_on_every_thread() {
     let dir = ScratchDir::new("profile_cmd").unwrap();
     let pkg = dir.join("pkg");

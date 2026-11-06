@@ -919,6 +919,38 @@ static PyObject *pycc_fwd_lookup(PyObject *dict, PyObject *key)
     return value;
 }
 
+/* `name` as the class statement of class `cls` stores it (a new reference):
+ * a private `__name` (not a dunder, no dot) becomes `_cls__name`, with the
+ * class name's leading underscores dropped, as CPython's compiler mangles
+ * it; anything else is `name` itself. NULL with an exception set on failure. */
+static PyObject *pycc_fwd_mangle(PyObject *cls, PyObject *name)
+{
+    Py_ssize_t len = PyUnicode_GetLength(name), start = 0, n;
+
+    if (len < 0 || cls == NULL) {
+        return len < 0 ? NULL : Py_NewRef(name);
+    }
+    if (len < 3 || PyUnicode_ReadChar(name, 0) != '_' || PyUnicode_ReadChar(name, 1) != '_'
+        || (PyUnicode_ReadChar(name, len - 1) == '_' && PyUnicode_ReadChar(name, len - 2) == '_')
+        || PyUnicode_FindChar(name, '.', 0, len, 1) >= 0) {
+        return Py_NewRef(name);
+    }
+    n = PyUnicode_GetLength(cls);
+    while (start < n && PyUnicode_ReadChar(cls, start) == '_') {
+        start++;
+    }
+    if (start == n) {
+        return Py_NewRef(name);
+    }
+    {
+        PyObject *stripped = PyUnicode_Substring(cls, start, n);
+        PyObject *mangled = stripped == NULL ? NULL : PyUnicode_FromFormat("_%U%U", stripped, name);
+
+        Py_XDECREF(stripped);
+        return mangled;
+    }
+}
+
 /* The dict of the class the owner path `path` (`("C",)`, `("Outer",
  * "Inner")`) names in `ns`, each class along it read from its owner's dict
  * (so no descriptor runs): a new reference, or NULL when some part is
@@ -929,8 +961,13 @@ static PyObject *pycc_fwd_owner(PyObject *ns, PyObject *path)
     Py_ssize_t i, n = PyTuple_Size(path);
 
     for (i = 0; i < n; i++) {
-        PyObject *obj = pycc_fwd_lookup(i == 0 ? ns : dict, PyTuple_GetItem(path, i));
+        /* A private nested class is stored mangled by its owner. */
+        PyObject *key = i == 0 ? Py_NewRef(PyTuple_GetItem(path, 0))
+                               : pycc_fwd_mangle(PyTuple_GetItem(path, i - 1), PyTuple_GetItem(path, i));
+        PyObject *obj = key == NULL ? NULL : pycc_fwd_lookup(i == 0 ? ns : dict, key);
 
+        Py_XDECREF(key);
+        PyErr_Clear();
         Py_XDECREF(dict);
         dict = obj != NULL && PyType_Check(obj) ? pycc_fwd_class_dict(obj) : NULL;
         Py_XDECREF(obj);
@@ -1045,7 +1082,10 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
     PyObject *ns = PyEval_GetGlobals();
     PyccExtModule *m = (PyccExtModule *)PyCapsule_GetPointer(self, PYCC_FWD_CAPSULE);
     PyObject *owner = NULL, *in, *prefix = PyUnicode_FromString("");
-    Py_ssize_t i;
+    /* The owner path's last class, which mangles a private member's name. */
+    PyObject *cls = NULL;
+    PyObject *missed = NULL;
+    Py_ssize_t i, misses = 0;
     int available;
 
     if (m == NULL || prefix == NULL) {
@@ -1070,10 +1110,12 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
         if (PyTuple_Check(args[i])) {
             Py_CLEAR(owner);
             Py_CLEAR(prefix);
+            cls = NULL;
             if (PyTuple_Size(args[i]) == 0) {
                 in = ns;
                 prefix = PyUnicode_FromString("");
             } else {
+                cls = PyTuple_GetItem(args[i], PyTuple_Size(args[i]) - 1);
                 PyObject *dot = PyUnicode_FromString(".");
 
                 owner = pycc_fwd_owner(ns, args[i]);
@@ -1089,6 +1131,7 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
             }
             if (prefix == NULL) {
                 Py_XDECREF(owner);
+                Py_XDECREF(missed);
                 return NULL;
             }
             continue;
@@ -1101,12 +1144,26 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
         want.qualname = PyUnicode_FromFormat("%U%U", prefix, args[i]);
         want.firstlineno = (int)(flags >> 1);
         want.uses_class = (int)(flags & 1);
-        if (want.qualname != NULL && want.target != NULL && available
-            && in != NULL && (obj = pycc_fwd_lookup(in, args[i])) != NULL) {
-            Py_INCREF(want.target);
-            pycc_fwd_walk(m, ns, obj, 0, &want);
-            Py_DECREF(want.target);
-            Py_DECREF(obj);
+        if (available) {
+            Py_ssize_t used = m->fwd_used;
+            PyObject *key = pycc_fwd_mangle(cls, args[i]);
+
+            obj = key == NULL || in == NULL ? NULL : pycc_fwd_lookup(in, key);
+            Py_XDECREF(key);
+            if (want.qualname != NULL && want.target != NULL && obj != NULL) {
+                Py_INCREF(want.target);
+                pycc_fwd_walk(m, ns, obj, 0, &want);
+                Py_DECREF(want.target);
+            }
+            Py_XDECREF(obj);
+            /* A selected function not patched would run as its bytecode:
+             * counted, never dropped silently. */
+            if (m->fwd_used == used) {
+                misses++;
+                if (missed == NULL && want.qualname != NULL) {
+                    missed = Py_NewRef(want.qualname);
+                }
+            }
         }
         Py_XDECREF(want.qualname);
         PyErr_Clear();
@@ -1117,6 +1174,36 @@ static PyObject *pycc_ext_patch(PyObject *self, PyObject *const *args, Py_ssize_
     }
     Py_XDECREF(owner);
     Py_XDECREF(prefix);
+    if (misses > 0) {
+        PyObject *name = PyDict_GetItemString(ns, "__name__");
+        int status;
+
+        if (name == NULL) {
+            name = Py_None;
+        }
+        if (missed == NULL) {
+            missed = PyUnicode_FromString("?");
+        }
+        if (missed == NULL) {
+            return NULL;
+        }
+        if (pycc_fwd_env_on("PYCC_REQUIRE_PATCH")) {
+            PyErr_Format(PyExc_ImportError,
+                         "pycc: %S: %zd selected functions could not be patched (%U among them): "
+                         "they would run as bytecode",
+                         name, misses, missed);
+            status = -1;
+        } else {
+            status = PyErr_WarnFormat(PyExc_RuntimeWarning, 1,
+                                      "pycc: %S: %zd selected functions could not be patched (%U "
+                                      "among them): they run as bytecode",
+                                      name, misses, missed);
+        }
+        Py_DECREF(missed);
+        if (status != 0) {
+            return NULL;
+        }
+    }
     Py_RETURN_NONE;
 }
 

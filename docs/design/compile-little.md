@@ -258,7 +258,11 @@ rejected with the reason.
   function layouts. On another CPython (3.14) the selected functions run as bytecode, and
   the import says so with a `RuntimeWarning`; under `PYCC_REQUIRE_PATCH` the import fails
   instead, which is how pass 3 refuses to time bytecode against bytecode
-  (`PYCC_NO_PATCH` simulates such an interpreter).
+  (`PYCC_NO_PATCH` simulates such an interpreter). The same holds for any selected
+  function the patch does not find where its class statement stored it (private names
+  are looked up mangled, as CPython stores them): it is counted and named in the warning,
+  and under `PYCC_REQUIRE_PATCH` it fails the import, so a function is never reported
+  compiled while it runs as bytecode.
 - **Before the patch.** A function called while the module body runs (before the patch)
   runs as bytecode. That is correct, only slower.
 

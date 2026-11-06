@@ -299,7 +299,7 @@ def types(pkg, candidates, script, args):
     wanted = {(m, q, int(f)) for m, q, f in candidates}
     # Per candidate: [calls sampled, argument types, sampled calls that caught
     # an exception, active calls by thread (each thread's innermost last, each
-    # [sampled, counted]), sampling done].
+    # [sampled, counted]), sampling done, sampled calls still active].
     seen = {}
     by_code = {}
     mon = sys.monitoring
@@ -312,18 +312,24 @@ def types(pkg, candidates, script, args):
             key = (name, code.co_qualname, code.co_firstlineno)
             if key not in wanted:
                 return mon.DISABLE
-            rec = seen.setdefault(key, [0, {}, 0, {}, False])
+            rec = seen.setdefault(key, [0, {}, 0, {}, False, 0])
             by_code[code] = rec
             mon.set_local_events(tool, code, mon.events.PY_RETURN)
         if rec[4]:
             return mon.DISABLE
         if rec[0] >= TYPE_CALLS:
-            # Sampling ends: the calls still active are not followed further.
+            # No new call is sampled; the sampled ones still active are
+            # followed until they end (an exception they handle counts), the
+            # calls made meanwhile only kept in step, unsampled.
+            if rec[5]:
+                rec[3].setdefault(get_ident(), []).append([False, False])
+                return None
             rec[4] = True
             rec[3].clear()
             mon.set_local_events(tool, code, 0)
             return mon.DISABLE
         rec[0] += 1
+        rec[5] += 1
         rec[3].setdefault(get_ident(), []).append([True, False])
         frame = sys._getframe(1)
         n = code.co_argcount + code.co_kwonlyargcount
@@ -341,8 +347,8 @@ def types(pkg, candidates, script, args):
         rec = by_code.get(code)
         if rec is not None and not rec[4]:
             active = rec[3].get(get_ident())
-            if active:
-                active.pop()
+            if active and active.pop()[0]:
+                rec[5] -= 1
         return None
 
     def caught(code, offset, exc):
@@ -357,7 +363,7 @@ def types(pkg, candidates, script, args):
         # One count per sampled call: the innermost active one of this code
         # on this thread, where the handler runs.
         call = active[-1]
-        if not call[1]:
+        if call[0] and not call[1]:
             call[1] = True
             rec[2] += 1
         return None

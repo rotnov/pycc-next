@@ -331,14 +331,21 @@ fn time(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, S
 /// compare bytecode with bytecode, so none is recorded.
 fn unpatchable(stderr: &[u8]) -> Result<(), String> {
     let stderr = String::from_utf8_lossy(stderr);
-    match stderr.lines().find(|line| line.contains("cannot be patched on this interpreter")) {
-        Some(line) => Err(format!(
-            "pass 3 cannot measure the compiled functions with this interpreter: {}
+    if let Some(line) = stderr.lines().find(|line| line.contains("cannot be patched on this interpreter")) {
+        return Err(format!(
+            "pass 3 cannot measure the compiled functions with this interpreter: {}\n\
              (profile with CPython 3.13 or 3.15, or pass --no-verify)",
             line.trim()
-        )),
-        None => Ok(()),
+        ));
     }
+    if let Some(line) = stderr.lines().find(|line| line.contains("selected functions could not be patched")) {
+        return Err(format!(
+            "pass 3 cannot measure the compiled functions: {}\n\
+             (a pycc bug: please report it; --no-verify skips the pass)",
+            line.trim()
+        ));
+    }
+    Ok(())
 }
 
 /// One run of the workload under callgrind: its instruction count.

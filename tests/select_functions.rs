@@ -145,6 +145,97 @@ fn an_interpreter_that_cannot_patch_says_so() {
     assert!(o.status.success() && !text(&o).contains("RuntimeWarning"), "{}", text(&o));
 }
 
+/// `m.py` in a new directory of `scratch`, built `--select all`, then
+/// imported with `PYCC_REQUIRE_PATCH` (an unpatched selected function fails
+/// the import) running `code`.
+fn build_and_run(scratch: &Path, name: &str, source: &str, code: &str, env: &[(&str, &str)]) -> Output {
+    let dir = scratch.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.py"), source).unwrap();
+    let py = dir.join("m.py");
+    let out = dir.join("m");
+    let o = pycc(&[
+        "build".as_ref(),
+        py.as_os_str(),
+        "-o".as_ref(),
+        out.as_os_str(),
+        "--ext".as_ref(),
+        "--non-strict".as_ref(),
+        "--report-fallbacks".as_ref(),
+        "--select".as_ref(),
+        "all".as_ref(),
+    ]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(extension(&dir), "{}", text(&o));
+    Command::new(python())
+        .args(["-I", "-c", &format!("import sys; sys.path.insert(0, sys.argv[1]); import m\n{code}")])
+        .arg(&dir)
+        .envs(env.iter().copied())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn private_methods_and_private_nested_classes_are_patched() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    // `C.__hot` is stored as `_C__hot`, `Outer.__Inner` as `_Outer__Inner`
+    // and its `__m` as `_Inner__m`, as CPython mangles them.
+    let source = "\
+class C:
+    def __hot(self, n):
+        s = 0
+        for i in range(n):
+            s += i
+        return s
+
+    def run(self, n):
+        return self.__hot(n)
+
+
+class Outer:
+    class __Inner:
+        def __m(self, n):
+            return [n] * 2
+
+        def go(self, n):
+            return self.__m(n)
+
+    def inner(self):
+        return self.__Inner()
+";
+    let o = build_and_run(
+        &scratch,
+        "private",
+        source,
+        "print(m.C().run(10), m.Outer().inner().go(3), m.C._C__hot.__qualname__)",
+        &[("PYCC_REQUIRE_PATCH", "1")],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(text(&o), "45 [3, 3] C.__hot\n");
+}
+
+#[test]
+fn a_selected_function_the_patch_cannot_find_is_never_dropped_silently() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    // `f` is selected, but by the patch its name binds nothing.
+    let source = "def f(x):\n    s = 0\n    for i in range(x):\n        s += i\n    return s\n\n\nh = f\ndel f\n";
+    let o = build_and_run(&scratch, "missing", source, "print(m.h(4))", &[]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(
+        text(&o).contains("RuntimeWarning: pycc: m: 1 selected functions could not be patched (f among them): they run as bytecode"),
+        "{}",
+        text(&o)
+    );
+    assert_eq!(String::from_utf8_lossy(&o.stdout).replace('\r', ""), "6\n");
+    let o = build_and_run(&scratch, "missing", source, "print(m.h(4))", &[("PYCC_REQUIRE_PATCH", "1")]);
+    assert!(!o.status.success());
+    assert!(
+        text(&o).contains("ImportError: pycc: m: 1 selected functions could not be patched (f among them): they would run as bytecode"),
+        "{}",
+        text(&o)
+    );
+}
+
 #[test]
 fn without_a_profile_nothing_is_selected_and_no_extension_is_built() {
     let scratch = ScratchDir::new("select_fn").unwrap();

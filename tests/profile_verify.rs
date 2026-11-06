@@ -12,6 +12,14 @@ fn python() -> std::ffi::OsString {
     std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into())
 }
 
+/// Pass 3 times the workload: the tests that run it take turns, so one's
+/// builds and runs are not another's noise.
+static TIMING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn timing() -> std::sync::MutexGuard<'static, ()> {
+    TIMING.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn pycc(args: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_pycc"))
         .args(args)
@@ -82,6 +90,7 @@ fn measured(out: &Path, qualname: &str) -> serde_json::Value {
 
 #[test]
 fn a_leaf_called_from_the_interpreter_is_rejected_as_slower_when_compiled() {
+    let _turn = timing();
     let dir = ScratchDir::new("profile_verify").unwrap();
     // Each call crosses from bytecode into the compiled body and back, which
     // costs more than CPython's own call of so small a function.
@@ -118,6 +127,7 @@ fn a_leaf_called_from_the_interpreter_is_rejected_as_slower_when_compiled() {
 
 #[test]
 fn a_measured_winner_stays_selected() {
+    let _turn = timing();
     let dir = ScratchDir::new("profile_verify").unwrap();
     // An integer loop inside one call: the compiled body runs it natively.
     let (pkg, work) = package(&dir, "from pkg import m\nfor i in range(60):\n    m.work(20000)\n");
@@ -134,6 +144,7 @@ fn a_measured_winner_stays_selected() {
 
 #[test]
 fn a_member_that_imports_its_sibling_is_measured() {
+    let _turn = timing();
     let dir = ScratchDir::new("profile_verify").unwrap();
     let pkg = dir.join("pkg");
     std::fs::create_dir_all(&pkg).unwrap();
@@ -153,6 +164,7 @@ fn a_member_that_imports_its_sibling_is_measured() {
 
 #[test]
 fn a_workload_that_sets_up_its_environment_before_importing_is_measured() {
+    let _turn = timing();
     let dir = ScratchDir::new("profile_verify").unwrap();
     let pkg = dir.join("pkg");
     std::fs::create_dir_all(&pkg).unwrap();
@@ -178,6 +190,7 @@ fn a_workload_that_sets_up_its_environment_before_importing_is_measured() {
 
 #[test]
 fn pass_3_refuses_an_interpreter_that_cannot_patch() {
+    let _turn = timing();
     let dir = ScratchDir::new("profile_verify").unwrap();
     let (pkg, work) = package(&dir, "from pkg import m\nfor i in range(60):\n    m.work(20000)\n");
     let out = dir.join("p.json");
