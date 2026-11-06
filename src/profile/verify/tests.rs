@@ -53,15 +53,17 @@ fn quartiles_are_medians_of_halves() {
 }
 
 #[test]
-fn no_slower_is_the_compiled_median_under_cpython_s_third_quartile() {
+fn faster_is_the_compiled_median_under_cpython_s_first_quartile() {
     let c = |compiled| Check {
         cpython: [90, 100, 110],
         compiled: [0, compiled, 0],
         instructions: None,
     };
-    assert!(c(110).no_slower());
-    assert!(c(95).no_slower());
-    assert!(!c(111).no_slower());
+    // A median inside CPython's interquartile range is noise, not a win.
+    assert!(c(89).faster());
+    assert!(!c(90).faster());
+    assert!(!c(95).faster());
+    assert!(!c(111).faster());
 }
 
 #[test]
@@ -78,7 +80,7 @@ fn regions_are_candidates_connected_by_calls_most_self_time_first() {
 }
 
 #[test]
-fn a_rejection_carries_over_while_the_source_hash_is_the_same() {
+fn a_verdict_carries_over_while_the_source_hash_is_the_same() {
     let mut old_a = entry("a", 1, &[]);
     old_a.measured = Some(slower());
     let mut old_b = entry("b", 1, &[]);
@@ -92,12 +94,12 @@ fn a_rejection_carries_over_while_the_source_hash_is_the_same() {
     let mut changed_b = entry("b", 1, &[]);
     changed_b.sha256 = "edited".into();
     let mut new = profile(vec![entry("a", 1, &[]), changed_b, entry("c", 1, &[])]);
-    carry_rejections(&mut new, &old);
+    carry_verdicts(&mut new, &old);
     assert_eq!(new.functions[0].measured, Some(slower()));
     // Its source changed: measured again.
     assert_eq!(new.functions[1].measured, None);
-    // A kept function is measured again too.
-    assert_eq!(new.functions[2].measured, None);
+    // A kept function keeps its win too: a re-run never flips a verdict.
+    assert_eq!(new.functions[2].measured, Some(Measured { compiled: true, ..slower() }));
 }
 
 #[test]
@@ -107,7 +109,7 @@ fn the_rule_rejects_a_function_measured_slower() {
     let b = entry("b", 400, &[]);
     let decided = crate::profile::select(1000, &[(&a, true), (&b, true)], Rule::default());
     let why = decided[0].rejected.as_deref().unwrap();
-    assert!(why.starts_with("slower when compiled: the workload took 0.0 ms with it and 1 other functions compiled"), "{why}");
+    assert!(why.starts_with("not faster when compiled: the workload took 0.0 ms with it and 1 other functions compiled"), "{why}");
     assert_eq!(decided[1].rejected, None);
 }
 

@@ -78,10 +78,12 @@ Accept (carried over from v0.11, not met there):
    and times the training workload against them). A served module runs one code object
    marshalled at build time; the chunk tables, dataclass texts, forward references,
    direct defs and `--exact-cpython` are deleted (pydantic's whole-module `.so` 1.81 MB
-   smaller). Locally, with the training profiles, mistune (12 candidates) and pystache (0)
-   have no measured winner, and pydantic's 5 candidates are kept or rejected run to run
-   within noise; every phase of the three is within CPython's interquartile range (31
-   interleaved rounds), and the three suites pass. The gains wait for direct calls
+   smaller). A winner must be faster than CPython's first quartile, so a win
+   inside the noise is not compiled, and a recorded verdict is kept until the source
+   changes. Locally, with the training profiles, no candidate of pydantic (5), mistune
+   (12) or pystache (0) is a measured winner, so nothing is compiled and every phase is
+   at CPython's time (pydantic: 31 interleaved rounds, every median within 1.5% of
+   CPython's and inside its interquartile range); the three suites pass. The gains wait for direct calls
    inside the selected region (PR 7, schema >= 1.05x) and type-specialized bodies (PR 8).
 
    Every step reports wall time, instructions, I1 misses and branch mispredictions, and the

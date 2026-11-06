@@ -89,7 +89,7 @@ fn measured(out: &Path, qualname: &str) -> serde_json::Value {
 }
 
 #[test]
-fn a_leaf_called_from_the_interpreter_is_rejected_as_slower_when_compiled() {
+fn a_leaf_called_from_the_interpreter_is_rejected_as_not_faster_when_compiled() {
     let _turn = timing();
     let dir = ScratchDir::new("profile_verify").unwrap();
     // Each call crosses from bytecode into the compiled body and back, which
@@ -104,7 +104,7 @@ fn a_leaf_called_from_the_interpreter_is_rejected_as_slower_when_compiled() {
     let r = profile(&pkg, &out, &work);
     let stderr = String::from_utf8_lossy(&r.stderr);
     assert!(r.status.success(), "{stderr}");
-    assert!(stderr.contains("pass 3: 1 functions compiled: ") && stderr.contains("): slower"), "{stderr}");
+    assert!(stderr.contains("pass 3: 1 functions compiled: ") && stderr.contains("): not faster"), "{stderr}");
     assert!(stderr.contains("pass 3 kept 0 of 1 candidates, measured in 1 builds in "), "{stderr}");
     let m = measured(&out, "leaf");
     assert_eq!(m["compiled"], false, "{m}");
@@ -112,7 +112,7 @@ fn a_leaf_called_from_the_interpreter_is_rejected_as_slower_when_compiled() {
     assert!(m["compiled_ns"][1].as_u64() > m["cpython_ns"][2].as_u64(), "{m}");
     let shown = check(&pkg, &out);
     assert!(
-        shown.contains("rejected: pkg.m:leaf: slower when compiled: the workload took "),
+        shown.contains("rejected: pkg.m:leaf: not faster when compiled: the workload took "),
         "{shown}"
     );
     // Profiled again, it stays rejected without a build: its source is the
@@ -122,7 +122,7 @@ fn a_leaf_called_from_the_interpreter_is_rejected_as_slower_when_compiled() {
     assert!(r.status.success(), "{stderr}");
     assert!(!stderr.contains("pass 3"), "{stderr}");
     assert_eq!(measured(&out, "leaf"), m);
-    assert!(check(&pkg, &out).contains("rejected: pkg.m:leaf: slower when compiled"));
+    assert!(check(&pkg, &out).contains("rejected: pkg.m:leaf: not faster when compiled"));
 }
 
 #[test]
@@ -138,7 +138,16 @@ fn a_measured_winner_stays_selected() {
     assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
     let m = measured(&out, "work");
     assert_eq!(m["compiled"], true, "{m}");
-    assert!(m["compiled_ns"][1].as_u64() <= m["cpython_ns"][2].as_u64(), "{m}");
+    assert!(m["compiled_ns"][1].as_u64() < m["cpython_ns"][0].as_u64(), "{m}");
+    assert!(check(&pkg, &out).contains("selected: pkg.m:work"));
+    // Profiled again, the win is kept without a build: a re-run never flips a
+    // recorded verdict while the source is the same.
+    let r = profile(&pkg, &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("pass 3: 1 candidates keep the verdicts an earlier profile recorded"), "{stderr}");
+    assert!(!stderr.contains("functions compiled: "), "{stderr}");
+    assert_eq!(measured(&out, "work"), m);
     assert!(check(&pkg, &out).contains("selected: pkg.m:work"));
 }
 

@@ -71,8 +71,8 @@ pub(crate) struct Entry {
 /// One pass-3 check's outcome, recorded on each function it compiled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Measured {
-    /// Whether the workload ran no slower compiled: the compiled median
-    /// under CPython's third quartile.
+    /// Whether the workload ran faster compiled: the compiled median under
+    /// CPython's first quartile.
     pub(crate) compiled: bool,
     /// The functions the check compiled, this one among them.
     pub(crate) with: usize,
@@ -113,7 +113,7 @@ impl Measured {
         }
         let ms = |ns: u64| ns as f64 / 1e6;
         format!(
-            "slower when compiled: the workload took {:.1} ms with it and {} other functions compiled, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
+            "not faster when compiled: the workload took {:.1} ms with it and {} other functions compiled, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
             ms(self.compiled_ns[1]),
             self.with - 1,
             ms(self.cpython_ns[1]),
@@ -705,14 +705,14 @@ pub(crate) fn run_profile(
             })
         })
         .collect();
-    // A function an earlier profile in `out` measured slower stays rejected
-    // while its source is unchanged (pass 3).
+    // A function an earlier profile in `out` measured keeps its verdict while
+    // its source is unchanged (pass 3).
     if let Ok(old) = Profile::read(out) {
         let mut carried = Profile {
             functions: std::mem::take(&mut functions),
             ..old.clone()
         };
-        verify::carry_rejections(&mut carried, &old);
+        verify::carry_verdicts(&mut carried, &old);
         functions = carried.functions;
     }
     let eligible = |e: &Entry| {

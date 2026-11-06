@@ -9,17 +9,21 @@
 //! processes each after one discarded warm-up run of each (a check stops after [`EARLY_ROUNDS`] once the two
 //! interquartile ranges are apart):
 //!
-//! 1. all the candidates together; if the workload is no slower (the compiled
-//!    median under CPython's third quartile), every one is kept;
+//! 1. all the candidates together; if the workload is faster (the compiled
+//!    median under CPython's first quartile), every one is kept;
 //! 2. else each region (the candidates connected by calls among them), most
 //!    self time first, alone;
-//! 3. then the regions that were no slower alone, together, once more.
+//! 3. then the regions that were faster alone, together, once more.
 //!
-//! At most [`MAX_BUILDS`] builds. A function a check finds slower, or one no
-//! check could reach within the budget, is recorded as measured slower; the
-//! selection rule rejects it from then on, in `--check` and in builds alike, and
-//! a later `pycc profile` keeps the verdict while the function's source hash
-//! is unchanged (`carry_rejections`). The verdict is on wall time;
+//! A win inside CPython's interquartile range is noise, and a function that wins
+//! only by noise adds size and risk for no gain, so it is not kept. At most
+//! [`MAX_BUILDS`] builds. A function a check does not find faster, or one no
+//! check could reach within the budget, is recorded as not faster; the
+//! selection rule rejects it from then on, in `--check` and in builds alike.
+//! A later `pycc profile` keeps every verdict, a win as well as a rejection,
+//! while the function's source hash is unchanged (`carry_verdicts`), and
+//! measures only the candidates without one, so a re-run never flips a
+//! recorded verdict. The verdict is on wall time;
 //! `--verify-instructions` adds each check's instruction delta under callgrind
 //! as evidence.
 
@@ -53,18 +57,18 @@ pub(super) struct Context<'a> {
     pub(super) options: Options,
 }
 
-/// Copies each rejection a previous profile `old` recorded onto the entry of
+/// Copies each verdict a previous profile `old` recorded onto the entry of
 /// `profile` with the same module, qualified name and source hash: a function
-/// measured slower stays rejected until its source changes. A function a
-/// build refused is not carried: the next pycc may compile it.
-pub(crate) fn carry_rejections(profile: &mut Profile, old: &Profile) {
+/// measured keeps its verdict, kept or rejected, until its source changes. A
+/// function a build refused is not carried: the next pycc may compile it.
+pub(crate) fn carry_verdicts(profile: &mut Profile, old: &Profile) {
     let rejected: BTreeMap<(&str, &str, &str), &Measured> = old
         .functions
         .iter()
         .filter_map(|e| {
             e.measured
                 .as_ref()
-                .filter(|m| !m.compiled && m.refused.is_none())
+                .filter(|m| m.refused.is_none())
                 .map(|m| ((e.module.as_str(), e.qualname.as_str(), e.sha256.as_str()), m))
         })
         .collect();
@@ -155,8 +159,10 @@ struct Check {
 }
 
 impl Check {
-    fn no_slower(&self) -> bool {
-        self.compiled[1] <= self.cpython[2]
+    /// Whether the workload ran faster compiled: the compiled median under
+    /// CPython's first quartile, outside the noise of CPython's own runs.
+    fn faster(&self) -> bool {
+        self.compiled[1] < self.cpython[0]
     }
 }
 
@@ -171,6 +177,18 @@ pub(super) fn verify(
     // measured winners are selected, never a function that would fill the
     // slot of a rejected one.
     profile.verified = true;
+    // A candidate with a verdict carried from an earlier profile keeps it.
+    let recorded: BTreeSet<FunctionKey> = profile
+        .functions
+        .iter()
+        .filter(|e| e.measured.is_some())
+        .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno))
+        .collect();
+    let carried = candidates.iter().filter(|key| recorded.contains(*key)).count();
+    let candidates: Vec<FunctionKey> = candidates.iter().filter(|key| !recorded.contains(*key)).cloned().collect();
+    if carried > 0 {
+        eprintln!("pycc profile: pass 3: {carried} candidates keep the verdicts an earlier profile recorded");
+    }
     if candidates.is_empty() {
         return Ok(());
     }
@@ -182,7 +200,7 @@ pub(super) fn verify(
             verdicts.insert(
                 key.clone(),
                 Measured {
-                    compiled: c.no_slower(),
+                    compiled: c.faster(),
                     with: set.len(),
                     cpython_ns: c.cpython,
                     compiled_ns: c.compiled,
@@ -197,7 +215,7 @@ pub(super) fn verify(
         record(&mut verdicts, &all, &whole);
         let compiled: Vec<FunctionKey> = all.iter().cloned().collect();
         let regions = regions(profile, &compiled);
-        if !whole.no_slower() && regions.len() > 1 {
+        if !whole.faster() && regions.len() > 1 {
             let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
             let mut kept_regions = 0;
             for region in &regions {
@@ -210,7 +228,7 @@ pub(super) fn verify(
                     continue;
                 };
                 record(&mut verdicts, &set, &c);
-                if c.no_slower() {
+                if c.faster() {
                     kept.extend(set);
                     kept_regions += 1;
                 }
@@ -323,7 +341,7 @@ fn check(
         ms(c.cpython[1]),
         ms(c.cpython[0]),
         ms(c.cpython[2]),
-        if c.no_slower() { "no slower" } else { "slower" }
+        if c.faster() { "faster" } else { "not faster" }
     );
     // The copy is not needed past the check.
     let _ = std::fs::remove_dir_all(&dir);

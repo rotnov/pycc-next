@@ -199,16 +199,21 @@ selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidat
 a copy of the package and times the training workload with them compiled against the
 unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
 (`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
-verdict is on wall time: the compiled median must not exceed CPython's third quartile.
-If all the candidates together are slower, each region (the candidates connected by
-calls among them, most self time first) is checked alone, then the regions that were no
-slower alone are checked together once more; at most 6 builds. Every candidate gets its
+verdict is on wall time: the compiled median must be under CPython's first quartile. A
+median inside CPython's interquartile range is noise, and a function that wins only by
+noise adds size and risk for no gain, so it is not kept (PR 5 measured pydantic's 5
+training candidates kept in one run and rejected in another under the earlier "no
+slower than CPython's third quartile").
+If all the candidates together are not faster, each region (the candidates connected by
+calls among them, most self time first) is checked alone, then the regions that were
+faster alone are checked together once more; at most 6 builds. Every candidate gets its
 last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
 `compiled_ns` as first quartile, median and third quartile, and with
 `--verify-instructions` the instruction delta under callgrind, as evidence only). A
-function measured slower is rejected ("slower when compiled") by builds and `--check`
-alike, and a later `pycc profile` keeps the rejection while the function's source hash
-is unchanged, so builds do not flap (deleting the profile measures every function
+function measured not faster is rejected ("not faster when compiled") by builds and `--check`
+alike. A later `pycc profile` keeps every verdict, a win as well as a rejection, while
+the function's source hash is unchanged, and measures only the candidates without one,
+so a re-run never flips a recorded verdict and builds do not flap (deleting the profile measures every function
 again, as a new pycc whose code got faster should); `--no-verify` skips the pass.
 Each check's build compiles exactly its set (`--select none --compile MODULE:QUALNAME`)
 and reports what it compiled (`--report-fallbacks`); a candidate the build leaves
