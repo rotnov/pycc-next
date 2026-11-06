@@ -5,6 +5,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- `bench/pydantic_check.py --cachegrind [PYTHON]`: pydantic's instructions, I1 misses and
+  branch mispredictions per phase of the workload (each phase alone, define and schema
+  together, and the whole process) under `valgrind --tool=callgrind --cache-sim=yes
+  --branch-sim=yes`, compiled tree against CPython, with the extension's `.so` and `.text`
+  size; the CI benchmark workflow publishes them. The per-function harness behind
+  `docs/design/compile-little.md`'s section 1 moved to `bench/headroom/`.
 - `pycc build --exact-cpython` (with `--ext`): leaves out the import fast paths whose
   effects CPython code could observe, so the module imports exactly as CPython runs its
   source (`docs/DEVIATIONS.md` names each): the dataclass texts and forward references

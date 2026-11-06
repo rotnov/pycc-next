@@ -20,7 +20,7 @@ def ga(self, name):
     rec["getattr"].append((self.config_dict, name))
     return r
 js._deduplicate_schemas, js._make_json_hashable, cfg.ConfigWrapper.__getattr__ = dedup, hsh, ga
-src = open(os.path.join(HERE, "..", "..", "..", "bench", "pydantic_workload.py")).read(); src = src[: src.index("\nmain()\n")]
+src = open(os.path.join(HERE, "..", "pydantic_workload.py")).read(); src = src[: src.index("\nmain()\n")]
 g = {"__name__": "wl"}; sys.argv = ["wl", tree, "5", "schema"]
 exec(compile(src, "wl", "exec"), g)
 models, _ = g["timed"](g["define"]); g["timed"](g["schemas"], models)
