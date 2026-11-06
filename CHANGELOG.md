@@ -5,6 +5,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- `pycc profile PKG -o pycc.profile.json -- PYTHON SCRIPT [ARGS]`
+  (`docs/design/compile-little.md`, section 2.2): runs a workload against a package's
+  sources, nothing compiled, and writes one JSON file with, per function of the package,
+  its calls, self time and calls to Python functions by callee (medians over `--runs`
+  fresh `cProfile` runs) and the SHA-256 of its source; the functions the selection rule
+  (`--select-share`, `--select-calls`, `--select-max`, and `--select-outside`: less
+  than that share of a function's Python calls may leave the selected region, section 2.3)
+  picks also get the exact types of their arguments in their first 1,000
+  calls (`sys.monitoring`). Entries are sorted, so a re-profile diffs cleanly; `--check`
+  reads a profile against the current sources and prints its stale entries and the
+  selection. `bench/pydantic_workload.py --train` is the training input: the same phases
+  over other models.
 - `bench/pydantic_check.py --cachegrind [PYTHON]`: pydantic's instructions, I1 misses and
   branch mispredictions per phase of the workload (each phase alone, define and schema
   together, and the whole process) under `valgrind --tool=callgrind --cache-sim=yes

@@ -1,10 +1,13 @@
 """The pydantic timing workload of `bench/pydantic_check.py --time` (v0.7 accept 4).
 
-Usage: python3 -I bench/pydantic_workload.py TREE REPEAT [PHASES]
+Usage: python3 -I bench/pydantic_workload.py TREE REPEAT [PHASES] [--train]
        PYDANTIC_WORKLOAD_MARK=PHASE:DIR python3 -I bench/pydantic_workload.py ...
   TREE    the directory holding the `pydantic` package to time (compiled or not).
   REPEAT  how many times each phase runs; the time printed is the mean per run.
   PHASES  comma-separated phases after `define` (default `schema,roundtrip`).
+  --train  the training input `pycc profile` profiles (docs/design/compile-little.md,
+           section 4): the same phases over another model set (`define_train`,
+           `sample_train`), so a profile never comes from the timed run itself.
   PYDANTIC_WORKLOAD_MARK
           run PHASE (all its repetitions; `define+schema`: both, each in its own
           call) inside `hrmark.run`, imported from DIR
@@ -33,6 +36,9 @@ import time
 import typing
 import uuid
 
+TRAIN = "--train" in sys.argv
+if TRAIN:
+    sys.argv.remove("--train")
 sys.path.insert(0, sys.argv[1])
 REPEAT = int(sys.argv[2])
 PHASES = sys.argv[3].split(",") if len(sys.argv) > 3 else ["schema", "roundtrip"]
@@ -182,6 +188,108 @@ def sample(i):
     }
 
 
+def define_train():
+    """The training model set (`--train`): the features `define` uses, over other
+    models."""
+    class Status(enum.Enum):
+        OPEN = "open"
+        PAID = "paid"
+        VOID = "void"
+
+    class Money(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        amount: decimal.Decimal = Field(ge=0, max_digits=14, decimal_places=4)
+        currency: str = Field(pattern=r"^[A-Z]{3}$", default="EUR")
+
+    class Line(BaseModel):
+        sku: str = Field(min_length=2, max_length=20)
+        qty: int = Field(default=1, gt=0)
+        price: Money
+        notes: list[str] = []
+
+        @field_validator("sku")
+        @classmethod
+        def upper(cls, v: str) -> str:
+            return v.upper()
+
+    class Card(BaseModel):
+        method: typing.Literal["card"] = "card"
+        last4: str = Field(pattern=r"^\d{4}$")
+
+    class Transfer(BaseModel):
+        method: typing.Literal["transfer"] = "transfer"
+        iban: str = Field(min_length=10)
+        reference: str | None = None
+
+    class Batch(BaseModel, typing.Generic[T]):
+        entries: list[T]
+        cursor: int | None = None
+
+    class Order(BaseModel):
+        model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
+        number: int = Field(alias="orderNumber", ge=1)
+        placed: datetime.date
+        status: Status = Status.OPEN
+        lines: list[Line] = Field(min_length=1)
+        payment: Card | Transfer = Field(discriminator="method")
+        labels: frozenset[str] = frozenset()
+        extra: dict[str, float | bool] = {}
+        parent: typing.Optional["Order"] = None
+
+        @model_validator(mode="before")
+        @classmethod
+        def defaults(cls, data):
+            return data
+
+        @computed_field
+        @property
+        def total(self) -> decimal.Decimal:
+            return sum((ln.price.amount * ln.qty for ln in self.lines), decimal.Decimal(0))
+
+        @field_serializer("placed")
+        def ser_placed(self, v: datetime.date) -> str:
+            return v.isoformat()
+
+    class Refund(Order):
+        reason: str = Field(max_length=200)
+
+    @pdataclass
+    class Span:
+        start: int
+        end: int = 0
+
+    class Timeline(BaseModel):
+        spans: list[Span]
+        name: str = "t"
+
+    OrderBatch = Batch[Order]
+    adapter = TypeAdapter(dict[str, tuple[int, ...]])
+    return Order, Refund, OrderBatch, Timeline, adapter
+
+
+def sample_train(i):
+    return {
+        "orderNumber": i + 1, "placed": "2024-03-04", "status": "paid" if i % 2 else "open",
+        "lines": [{"sku": f"ab{j}", "qty": j + 1,
+                   "price": {"amount": "3.25", "currency": "USD"}} for j in range(3)],
+        "payment": {"method": "card", "last4": "1234"} if i % 2
+        else {"method": "transfer", "iban": "DE0012345678"},
+        "labels": ["x", "y"], "extra": {"a": 1.5, "b": True},
+    }
+
+
+def roundtrip_train(models, data, batch):
+    Order, Refund, OrderBatch, Timeline, adapter = models
+    orders = [Order.model_validate(d) for d in data]
+    OrderBatch.model_validate(batch)
+    dumped = [o.model_dump(mode="json", by_alias=True) for o in orders]
+    texts = [o.model_dump_json(by_alias=True) for o in orders]
+    back = [Order.model_validate_json(t) for t in texts]
+    adapter.validate_python({str(i): (i, i + 1) for i in range(50)})
+    Timeline.model_validate({"spans": [{"start": i, "end": i + 1} for i in range(50)]})
+    assert back[5] == orders[5] and dumped[5]["orderNumber"] == 6
+
+
 def timed(fn, *args):
     t0 = time.perf_counter()
     for _ in range(REPEAT):
@@ -210,6 +318,15 @@ def roundtrip(models, data, page):
 def main():
     # `Page[User]` (in define()) walks `sys._getframe(3)` to find its caller, which
     # needs that many frames above it: define() runs three calls deep in both trees.
+    if TRAIN:
+        models, times["define"] = timed(define_train)
+        if "schema" in PHASES:
+            times["schema"] = timed(schemas, models)[1]
+        if "roundtrip" in PHASES:
+            data = [sample_train(i) for i in range(200)]
+            times["roundtrip"] = timed(roundtrip_train, models, data,
+                                       {"entries": data[:20]})[1]
+        return
     models, times["define"] = phase("define", timed, define)
     if "schema" in PHASES:
         times["schema"] = phase("schema", timed, schemas, models)[1]

@@ -1,6 +1,7 @@
 # Library compilation: compile little, compile well
 
-Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted, section 7 item 12). Tracking issue:
+Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted,
+section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -109,7 +110,10 @@ to be hot are compiled, and each is compiled into specialized native code.
   workload under the target interpreter against the package's sources, with nothing
   compiled. It makes two passes:
   1. `cProfile` (deterministic). For each code object of the package it records calls
-     and self time (`tottime`), as a median over `--runs` repetitions (default 5).
+     and self time (`tottime`), and its calls to Python functions by callee (a function
+     of the package, or any other), each a median over `--runs` repetitions (default 5).
+     The calls a generator expression or lambda makes count as its enclosing
+     function's, since compiled they are part of its body.
   2. `sys.monitoring` `PY_START`, only for functions that pass 1 would select. It
      records the exact types of the arguments in the first 1,000 calls of each.
      Section 2.4 uses them.
@@ -117,14 +121,24 @@ to be hot are compiled, and each is compiled into specialized native code.
   file holds:
   - `{"version": 1, "python": "3.15.2", "workload": "<command line>"}`;
   - one entry per function: `module`, `qualname`, `firstlineno`, the SHA-256 of the
-    function's source text, `calls`, `self_ns`, and `arg_types` (exact type name to
-    count, per parameter).
+    function's source text, `calls`, `self_ns`, `callees` (`module:qualname:firstlineno`
+    of a package function, or `*` for any other Python function, to its count), and
+    `arg_types` (exact type name to count, per parameter).
 
-  Entries are sorted by `module`, then `qualname`, so a re-profile diffs cleanly.
+  Entries are sorted by `module`, then `qualname`, so a re-profile diffs cleanly. The
+  header also records `runs` and `total_ns`, the run's total self time (the median over
+  the runs of everything `cProfile` saw), the denominator of section 2.3's share. Calls,
+  callees and argument types are exact (`PYTHONHASHSEED=0`); self times vary by run, so two
+  profiles of one workload differ only in `self_ns` and `total_ns`, and the same samples
+  always serialize to the same bytes. A function's source text runs from its first
+  decorator's line (its `co_firstlineno`) to its last line, as `ast` reports them.
 - **Use.** Pass the profile with `pycc build PKG --ext --non-strict --profile pycc.profile.json`,
   or name it in `[tool.pycc] profile = "..."`.
 - **Stale entries.** An entry whose source hash no longer matches is dropped, with a note
-  naming it. A changed function is not compiled from a profile of other code.
+  naming it. A changed function is not compiled from a profile of other code. Entries
+  are matched by module, qualified name and hash, so a function that only moved stays
+  current. `pycc profile ... --check -- PYTHON` prints what a build would make of a
+  profile: its stale entries and the selection.
 - **Default with no profile.** Nothing is selected. The build says so in one note, and a
   package with nothing selected gets no extension at all, so CPython imports it unchanged.
   Compiling without evidence was measured as a loss (section 1, point 2).
@@ -136,15 +150,36 @@ to be hot are compiled, and each is compiled into specialized native code.
 
 ### 2.3 Selection rule
 
-A function is selected when it is eligible, its profile entry is current, and:
+The cost of a compiled function sits at its boundary with interpreted code, not inside
+its body. A prototype of PR 4 measured this on pydantic's schema phase: patching a function into
+CPython's function object loses the specialized inline call CPython had for it
+(`LOAD_ATTR_PROPERTY`, `CALL_PY_EXACT_ARGS`), and each call the compiled body makes to a
+Python function goes through the C API. A function that mostly calls interpreted code
+pays both and gains little: `GenerateJsonSchema._config` (one Python call per call)
+cost 0.4 ms of schema and `ConfigWrapper.__getattr__` 0.2 ms, while
+`_make_json_hashable` (0.22 Python calls per call) saved 0.55 ms.
+
+So selection is by call-graph region, not by single function. The profile records, per
+function, its calls to Python functions by callee (section 2.2). A function is selected
+when it is eligible, its profile entry is current, and:
 
 - its self time is at least 0.5% of the run's total;
 - it was called at least 50 times;
-- it ranks in the top 64 functions by self time.
+- it ranks in the top 64 functions by self time;
+- most of its calls to Python functions stay inside the region: less than half leave it. Calls to itself, to
+  its own nested functions and to the other selected functions stay inside. Rejecting a
+  function can push its callers out, so this condition is applied until no function
+  changes. A function that calls no Python function passes.
 
-The defaults are build options (`--select-share`, `--select-calls`, `--select-max`).
-They stay until the measurements in section 8 justify other values. The report lists
-every selected function with its share, and every function it rejected with the reason.
+Thin glue (properties, accessors, functions that mostly call Python code) therefore
+stays bytecode unless the functions it calls are selected with it. Inside a region the
+calls become native direct calls in PR 7 (section 2.8). The rule uses only the
+profile's numbers, never a function's name.
+
+The defaults are build options (`--select-share`, `--select-calls`, `--select-max`,
+`--select-outside`). They stay until the measurements in section 8 justify other
+values. The report lists every selected function with its share, and every function it
+rejected with the reason.
 
 ### 2.4 Installation: the module runs as bytecode, then selected functions are patched
 
@@ -379,10 +414,10 @@ request that makes it unnecessary.
 | 1 | Measurement: move `docs/design/headroom/` to `bench/headroom/`; `bench/pydantic_check.py --cachegrind` reports instructions, I1 misses and mispredictions per phase; `bench.yml` publishes them | the section 1 numbers reproduce within 5%; no compiler change |
 | 2 | Delete `hot_api.c` (item 12) | pydantic and pystache import wall within the IQR of main (81 rounds); import instructions within 0.3M |
 | 3 | `pycc profile` (section 2.2): the two passes, the JSON file, staleness | profile of `bench/pydantic_workload.py --train` lists the three section 1 functions in its top 10 by self time; byte-identical output for the same runs; tests for stale and missing entries |
-| 4 | The switch: a non-strict `--ext` build runs module bytecode and patches the selected functions (sections 2.1, 2.4); one marshalled code object per served module (item 1's replacement); `--profile`, `--select all\|none`, `[tool.pycc] compile/exclude`; default none; the finder serves only modules with selected functions (item 22); `bench.yml` builds with the training profile. Today's whole-module compilation stays reachable only as a transitional `--select module`, which the existing non-strict tests use until PR 6 | pydantic import >= 1.0x, define >= 1.0x, schema >= 1.05x (today's codegen on the selected functions; the replay in section 1 predicts about 1.1x), whole process >= 1.0x; pystache and mistune with their profiles no slower than current main; all three suites pass, plus pydantic's `__file__` test that fails today |
+| 4 | The switch: a non-strict `--ext` build runs module bytecode and patches the selected functions (sections 2.1, 2.4); one marshalled code object per served module (item 1's replacement); `--profile`, `--select all\|none`, `[tool.pycc] compile/exclude`; default none; the finder serves only modules with selected functions (item 22); `bench.yml` builds with the training profile. Today's whole-module compilation stays reachable only as a transitional `--select module`, which the existing non-strict tests use until PR 6 | no phase of pydantic, pystache or mistune slower than CPython (within the IQR), with the training profiles; all three suites pass, plus pydantic's `__file__` test that fails today. Only measured winners are selected. (The first plan asked schema >= 1.05x here; section 2.3 gives the measurement that moved it to PR 7) |
 | 5 | Delete the chunk machinery (items 1-5): chunk tables, dataclass texts, forward references, direct defs, `--exact-cpython`, their tests and DEVIATIONS rows. The transitional `--select module` runs its fallback statements with `exec(compile(...))`, as the native path does | the PR 4 numbers hold within the IQR; pydantic `.so` at least 1.3 MB smaller (the chunk tables were 1.32 MB of `.rodata`); build time reported |
 | 6 | Delete non-strict module-body compilation (items 6, 7, 8 slot sync, 9, 20) and `--select module` | as PR 5; non-strict test suite converted to `--select all` passes; LOC removed reported |
-| 7 | Direct calls (section 2.8), replacing non-strict sibling interfaces (item 21) | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95); schema >= 1.1x |
+| 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21) | schema >= 1.05x (if missed, stop and report before PR 8); `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
 | 8 | Call-site specialization (section 2.5): exact-type guards inline, helpers cold, per-site attribute records (item 13), profile-observed types (item 19, then delete `specialize.rs`), `isinstance` exact path | schema I1 misses <= 1.1x CPython's; `ConfigWrapper.__getattr__` replay <= 1.75 ms (no slower than CPython); schema >= 1.15x |
 | 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34) |
 | 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally |

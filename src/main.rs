@@ -15,6 +15,7 @@ mod memoryview_mode;
 mod mode;
 mod modules;
 mod package_build;
+mod profile;
 mod project_config;
 mod source;
 mod specialize;
@@ -279,6 +280,36 @@ fn main() -> ExitCode {
                 Err(e) => {
                     eprintln!("error: pycc init failed: cannot read current directory: {e}");
                     ExitCode::from(2)
+                }
+            }
+        }
+        Command::Profile {
+            path,
+            out,
+            runs,
+            select_share,
+            select_calls,
+            select_max,
+            select_outside,
+            check,
+            workload,
+        } => {
+            let rule = profile::Rule {
+                share: select_share,
+                calls: select_calls,
+                max: select_max,
+                outside: select_outside,
+            };
+            let done = if check {
+                profile::check_profile(&path, &out, &workload, rule)
+            } else {
+                profile::run_profile(&path, &out, &workload, runs, rule)
+            };
+            match done {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    ExitCode::from(1)
                 }
             }
         }
