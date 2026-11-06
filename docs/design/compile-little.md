@@ -205,6 +205,15 @@ function measured slower is rejected ("slower when compiled") by builds and `--c
 alike, and a later `pycc profile` keeps the rejection while the function's source hash
 is unchanged, so builds do not flap (deleting the profile measures every function
 again, as a new pycc whose code got faster should); `--no-verify` skips the pass.
+Each check's build compiles exactly its set (`--select none --compile MODULE:QUALNAME`)
+and reports what it compiled (`--report-fallbacks`); a candidate the build leaves
+bytecode is never timed: it is rejected with the build's reason ("not compiled: ...",
+`measured.refused`, not carried to the next profile, whose pycc may compile it) and the
+check is built again without it. The timed runs keep the original module's import root
+on `sys.path` after the copy's, so a standalone module's siblings are found. Once
+pass 3 has run the profile is `verified`, and a verified profile selects only its
+measured winners: a function pass 3 did not build is never selected in a rejected
+one's place.
 
 Pass 3 exists because of what PR 4 measured on mistune. Its 11 candidates (escape,
 `HTMLRenderer.text`, `InlineState.append_token`, the emphasis parser and its helpers)

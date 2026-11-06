@@ -206,7 +206,10 @@ fn main() -> ExitCode {
                         .unwrap_or_default()
                 });
                 match selection.modules.get(&module) {
-                    Some(selected) if !selected.is_empty() => select::set_module(selected.clone()),
+                    Some(selected) if !selected.is_empty() => {
+                        select::set_module(selected.clone());
+                        select::set_module_name(module.clone());
+                    }
                     _ => {
                         return match select::ship_source(&path, &out, target.as_deref()) {
                             Ok(source) => {

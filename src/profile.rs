@@ -82,11 +82,31 @@ pub(crate) struct Measured {
     /// verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) instructions: Option<i64>,
+    /// Why the check's build did not compile this function, when it did
+    /// not: it was never timed, and is rejected for this reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) refused: Option<String>,
 }
 
 impl Measured {
-    /// Why a function this check compiled is rejected.
+    /// The verdict on a function the build of a check of `with` functions
+    /// did not compile, for `reason`: never timed.
+    pub(crate) fn refused(with: usize, reason: String) -> Measured {
+        Measured {
+            compiled: false,
+            with,
+            cpython_ns: [0; 3],
+            compiled_ns: [0; 3],
+            instructions: None,
+            refused: Some(reason),
+        }
+    }
+
+    /// Why a function this check compiled, or would have, is rejected.
     pub(crate) fn rejection(&self) -> String {
+        if let Some(reason) = &self.refused {
+            return format!("not compiled: {reason}");
+        }
         let ms = |ns: u64| ns as f64 / 1e6;
         format!(
             "slower when compiled: the workload took {:.1} ms with it and {} other functions compiled, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
@@ -486,6 +506,10 @@ struct Driver<'a> {
     python: &'a OsStr,
     script: &'a Path,
     pkg: &'a Path,
+    /// The package `pkg` is pass 3's copy of: its import root stays on
+    /// `sys.path` after the copy's, so the modules beside it (a standalone
+    /// module's siblings) are still found.
+    origin: Option<&'a Path>,
 }
 
 impl Driver<'_> {
@@ -526,6 +550,9 @@ impl Driver<'_> {
             command.arg("--").args(workload);
         }
         command.env("PYTHONHASHSEED", "0");
+        if let Some(origin) = self.origin {
+            command.env("PYCC_PROFILE_ORIGIN", origin);
+        }
         command
     }
 
@@ -555,6 +582,7 @@ pub(crate) fn index(python: &OsStr, pkg: &Path) -> Result<Vec<Function>, String>
         python,
         script: &script,
         pkg,
+        origin: None,
     };
     let out = scratch.join("index.json");
     driver.run("index", &out, &[], &[])?;
@@ -627,6 +655,7 @@ pub(crate) fn run_profile(
         python,
         script: &script,
         pkg: &pkg,
+        origin: None,
     };
     let mut samples = Vec::new();
     for i in 0..runs.max(1) {

@@ -281,6 +281,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
         cpython_ns: [10, 11, 12],
         compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
         instructions: None,
+        refused: None,
     };
     let mut a = entry("m", "a", 1, "", 100, 300);
     a.measured = Some(measured(false));

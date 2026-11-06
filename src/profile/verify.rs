@@ -55,7 +55,8 @@ pub(super) struct Context<'a> {
 
 /// Copies each rejection a previous profile `old` recorded onto the entry of
 /// `profile` with the same module, qualified name and source hash: a function
-/// measured slower stays rejected until its source changes.
+/// measured slower stays rejected until its source changes. A function a
+/// build refused is not carried: the next pycc may compile it.
 pub(crate) fn carry_rejections(profile: &mut Profile, old: &Profile) {
     let rejected: BTreeMap<(&str, &str, &str), &Measured> = old
         .functions
@@ -63,7 +64,7 @@ pub(crate) fn carry_rejections(profile: &mut Profile, old: &Profile) {
         .filter_map(|e| {
             e.measured
                 .as_ref()
-                .filter(|m| !m.compiled)
+                .filter(|m| !m.compiled && m.refused.is_none())
                 .map(|m| ((e.module.as_str(), e.qualname.as_str(), e.sha256.as_str()), m))
         })
         .collect();
@@ -175,8 +176,6 @@ pub(super) fn verify(
     }
     let started = Instant::now();
     let mut builds = 0usize;
-    let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
-    let whole = check(&all, cx, &mut builds)?;
     let mut verdicts: BTreeMap<FunctionKey, Measured> = BTreeMap::new();
     let record = |verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<FunctionKey>, c: &Check| {
         for key in set {
@@ -188,31 +187,39 @@ pub(super) fn verify(
                     cpython_ns: c.cpython,
                     compiled_ns: c.compiled,
                     instructions: c.instructions,
+                    refused: None,
                 },
             );
         }
     };
-    record(&mut verdicts, &all, &whole);
-    let regions = regions(profile, candidates);
-    if !whole.no_slower() && regions.len() > 1 {
-        let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
-        let mut kept_regions = 0;
-        for region in &regions {
-            // One build stays for the kept regions together.
-            if builds >= MAX_BUILDS - 1 {
-                break;
+    let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
+    if let Some((all, whole)) = measure(all, cx, &mut builds, &mut verdicts)? {
+        record(&mut verdicts, &all, &whole);
+        let compiled: Vec<FunctionKey> = all.iter().cloned().collect();
+        let regions = regions(profile, &compiled);
+        if !whole.no_slower() && regions.len() > 1 {
+            let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
+            let mut kept_regions = 0;
+            for region in &regions {
+                // One build stays for the kept regions together.
+                if builds >= MAX_BUILDS - 1 {
+                    break;
+                }
+                let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
+                let Some((set, c)) = measure(set, cx, &mut builds, &mut verdicts)? else {
+                    continue;
+                };
+                record(&mut verdicts, &set, &c);
+                if c.no_slower() {
+                    kept.extend(set);
+                    kept_regions += 1;
+                }
             }
-            let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
-            let c = check(&set, cx, &mut builds)?;
-            record(&mut verdicts, &set, &c);
-            if c.no_slower() {
-                kept.extend(set);
-                kept_regions += 1;
+            if kept_regions > 1
+                && let Some((kept, c)) = measure(kept, cx, &mut builds, &mut verdicts)?
+            {
+                record(&mut verdicts, &kept, &c);
             }
-        }
-        if kept_regions > 1 {
-            let c = check(&kept, cx, &mut builds)?;
-            record(&mut verdicts, &kept, &c);
         }
     }
     let kept = verdicts.values().filter(|m| m.compiled).count();
@@ -229,21 +236,51 @@ pub(super) fn verify(
     Ok(())
 }
 
-/// Builds exactly `set` into a copy of the package and times
-/// the workload against it and against the sources.
+/// Checks `set`, leaving out every function a build refuses (recorded in
+/// `verdicts` as refused, never timed) until a build compiles the whole
+/// rest: that rest and its check, or None when the build compiles none.
+fn measure(
+    mut set: BTreeSet<FunctionKey>,
+    cx: &Context<'_>,
+    builds: &mut usize,
+    verdicts: &mut BTreeMap<FunctionKey, Measured>,
+) -> Result<Option<(BTreeSet<FunctionKey>, Check)>, String> {
+    while !set.is_empty() {
+        match check(&set, cx, builds)? {
+            Ok(c) => return Ok(Some((set, c))),
+            Err(refused) => {
+                let with = set.len();
+                for (key, reason) in refused {
+                    set.remove(&key);
+                    verdicts.insert(key, Measured::refused(with, reason));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Builds exactly `set` into a copy of the package and times the workload
+/// against it and against the sources; or, when the build leaves a function
+/// of `set` bytecode, those functions and why, untimed.
 fn check(
     set: &BTreeSet<FunctionKey>,
     cx: &Context<'_>,
     builds: &mut usize,
-) -> Result<Check, String> {
+) -> Result<Result<Check, BTreeMap<FunctionKey, String>>, String> {
     *builds += 1;
     let dir = cx.scratch.join(format!("verify{builds}"));
     let copy = copy_package(cx.driver.pkg, &dir.join("tree"))?;
-    build(&copy, set, cx)?;
+    let refused = build(&copy, set, cx)?;
+    if !refused.is_empty() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Ok(Err(refused));
+    }
     let compiled = Driver {
         python: cx.driver.python,
         script: cx.driver.script,
         pkg: &copy,
+        origin: Some(cx.driver.pkg),
     };
     let out = dir.join("time.json");
     // One discarded run of each first: the copy's bytecode cache is written
@@ -290,7 +327,7 @@ fn check(
     );
     // The copy is not needed past the check.
     let _ = std::fs::remove_dir_all(&dir);
-    Ok(c)
+    Ok(Ok(c))
 }
 
 /// One run of the workload, its wall time; its output is kept from the
@@ -361,8 +398,15 @@ fn instructions(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Resul
 }
 
 /// `pycc build COPY --ext --non-strict --release --select none --compile
-/// MODULE:QUALNAME ...` of exactly `set`, by this pycc.
-fn build(copy: &Path, set: &BTreeSet<FunctionKey>, cx: &Context<'_>) -> Result<(), String> {
+/// MODULE:QUALNAME ...` of exactly `set`, by this pycc: the functions of
+/// `set` it left bytecode, each with why. The build reports what it
+/// compiled (`--report-fallbacks`), so a function it refused is never timed
+/// as compiled.
+fn build(
+    copy: &Path,
+    set: &BTreeSet<FunctionKey>,
+    cx: &Context<'_>,
+) -> Result<BTreeMap<FunctionKey, String>, String> {
     let out = if copy.is_dir() {
         copy.join("__init__")
     } else {
@@ -377,7 +421,7 @@ fn build(copy: &Path, set: &BTreeSet<FunctionKey>, cx: &Context<'_>) -> Result<(
         .arg(copy)
         .arg("-o")
         .arg(&out)
-        .args(["--ext", "--non-strict", "--release", "--select", "none"]);
+        .args(["--ext", "--non-strict", "--release", "--select", "none", "--report-fallbacks"]);
     // Exactly `set`: no selection rule runs again, so leaving the other
     // candidates out changes nothing else.
     for (module, qualname, _) in set {
@@ -398,7 +442,42 @@ fn build(copy: &Path, set: &BTreeSet<FunctionKey>, cx: &Context<'_>) -> Result<(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(())
+    Ok(refusals(set, &String::from_utf8_lossy(&output.stderr)))
+}
+
+/// The functions of `set` a build whose report is `report` did not compile,
+/// each with the reason it gives (`not compiled: MODULE:QUALNAME: REASON`),
+/// or that it does not name compiled at all.
+pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<FunctionKey, String> {
+    let mut compiled: BTreeSet<&str> = BTreeSet::new();
+    let mut reasons: BTreeMap<&str, &str> = BTreeMap::new();
+    for line in report.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(name) = line.strip_prefix("compiled: ") {
+            compiled.insert(name);
+        } else if let Some(rest) = line.strip_prefix("not compiled: ") {
+            // MODULE:QUALNAME, then ": " and the reason; a qualified name
+            // has no ':'.
+            if let Some((module, rest)) = rest.split_once(':')
+                && let Some((qualname, reason)) = rest.split_once(": ")
+            {
+                let name = &line["not compiled: ".len()..][..module.len() + 1 + qualname.len()];
+                reasons.entry(name).or_insert(reason);
+            }
+        }
+    }
+    set.iter()
+        .filter_map(|key| {
+            let name = format!("{}:{}", key.0, key.1);
+            if compiled.contains(name.as_str()) {
+                return None;
+            }
+            let reason = reasons
+                .get(name.as_str())
+                .map_or("the build did not compile it", |reason| reason);
+            Some((key.clone(), reason.to_string()))
+        })
+        .collect()
 }
 
 /// Copies the package (or single module) `pkg` under `root` at the same path

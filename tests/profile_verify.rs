@@ -211,3 +211,56 @@ fn pass_3_refuses_an_interpreter_that_cannot_patch() {
     assert!(stderr.contains("or pass --no-verify"), "{stderr}");
     assert!(!out.exists(), "no verdict is recorded");
 }
+
+#[test]
+fn a_candidate_the_build_cannot_compile_is_rejected_untimed() {
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    // Hot, so the rule picks it, but it reads the module's globals by a
+    // string, which a compiled function does not: the build leaves it
+    // bytecode, and timing that would compare bytecode with bytecode.
+    std::fs::write(
+        pkg.join("m.py"),
+        "def work(n):\n    if n < 0:\n        return globals()[\"work\"]\n    s = 0\n    for i in range(n):\n        s += i * i % 7\n    return s\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, "from pkg import m\nfor i in range(60):\n    m.work(20000)\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(!stderr.contains("functions compiled: "), "never timed: {stderr}");
+    assert!(stderr.contains("pass 3 kept 0 of 1 candidates, measured in 1 builds in "), "{stderr}");
+    let m = measured(&out, "work");
+    assert_eq!(m["compiled"], false, "{m}");
+    assert_eq!(m["refused"], "it reaches the module's globals by a string", "{m}");
+    let shown = check(&pkg, &out);
+    assert!(
+        shown.contains("rejected: pkg.m:work: not compiled: it reaches the module's globals by a string"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn a_standalone_module_that_imports_a_module_beside_it_is_measured() {
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let lib = dir.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("helper.py"), "value = 7\n").unwrap();
+    std::fs::write(lib.join("m.py"), format!("from helper import value\n\n\n{MODULE}")).unwrap();
+    // The workload is outside `lib`: `helper` is found through `m`'s import
+    // root, which pass 3's copy of `m` replaces.
+    let work = dir.join("work.py");
+    std::fs::write(&work, "import m\nassert m.value == 7\nfor i in range(60):\n    m.work(20000)\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&lib.join("m.py"), &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
+    assert_eq!(measured(&out, "work")["compiled"], true);
+}

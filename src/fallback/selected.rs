@@ -146,11 +146,18 @@ pub(super) fn with_selection<T, E>(
         }
     };
     if reporting() {
+        // The name `--compile` takes: a package member's dotted name, or the
+        // one the selection indexed a module built alone under.
         let module = crate::package_build::member().map_or_else(
             || {
-                std::path::Path::new(display)
-                    .file_stem()
-                    .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
+                crate::select::module_name().map_or_else(
+                    || {
+                        std::path::Path::new(display)
+                            .file_stem()
+                            .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
+                    },
+                    str::to_string,
+                )
             },
             |member| member.dotted.clone(),
         );

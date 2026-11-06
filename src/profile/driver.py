@@ -146,6 +146,11 @@ def run(pkg, script, args):
     sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
     # PKG's sources, not a copy installed or beside the script.
     sys.path.insert(0, import_root(pkg))
+    # Pass 3's copy of a package: the modules beside the original (a
+    # standalone module's siblings) are found where they are.
+    origin = os.environ.pop("PYCC_PROFILE_ORIGIN", None)
+    if origin is not None:
+        sys.path.insert(1, import_root(origin))
     try:
         runpy.run_path(script, run_name="__main__")
     except SystemExit as e:

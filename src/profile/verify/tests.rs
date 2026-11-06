@@ -39,6 +39,7 @@ fn slower() -> Measured {
         cpython_ns: [90, 100, 110],
         compiled_ns: [115, 120, 125],
         instructions: None,
+        refused: None,
     }
 }
 
@@ -140,4 +141,23 @@ fn a_check_is_clear_once_the_interquartile_ranges_are_apart() {
     assert!(clear(&plain, &[110, 111, 112, 113, 114]));
     assert!(clear(&plain, &[90, 91, 92, 93, 94]));
     assert!(!clear(&plain, &[102, 103, 104, 105, 106]));
+}
+
+/// What a build's report says it left bytecode: the reason it gives, or,
+/// for a function it does not name compiled at all, that.
+#[test]
+fn a_refusal_is_read_from_the_build_report() {
+    let set: BTreeSet<FunctionKey> = [k("a"), k("b"), k("c")].into_iter().collect();
+    let report = "selected: m:a\ncompiled: m:a\r\nnot compiled: m:b: C0001: a nested def\nfallback: x\n";
+    let refused = refusals(&set, report);
+    assert_eq!(
+        refused,
+        [
+            (k("b"), "C0001: a nested def".to_string()),
+            (k("c"), "the build did not compile it".to_string()),
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert!(refusals(&set, "compiled: m:a\ncompiled: m:b\ncompiled: m:c\n").is_empty());
 }

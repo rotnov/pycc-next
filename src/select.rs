@@ -265,6 +265,21 @@ pub(crate) fn module() -> Option<&'static BTreeSet<Key>> {
     MODULE.get()
 }
 
+/// The dotted name the selection indexed this build's module under (`pkg.mod`
+/// for a member of a package built alone), when it resolved one.
+static MODULE_NAME: OnceLock<String> = OnceLock::new();
+
+/// Records [`module_name`].
+pub(crate) fn set_module_name(name: String) {
+    let _ = MODULE_NAME.set(name);
+}
+
+/// The dotted name the build reports its module's functions under, as
+/// `--compile` names them.
+pub(crate) fn module_name() -> Option<&'static str> {
+    MODULE_NAME.get().map(String::as_str)
+}
+
 /// A member's selection as the package build passes it (`--select-functions
 /// FILE`): one `firstlineno qualname` per line.
 pub(crate) fn to_text(selected: &BTreeSet<Key>) -> String {
