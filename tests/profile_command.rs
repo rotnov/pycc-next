@@ -276,3 +276,47 @@ fn a_workload_that_imports_none_of_the_package_or_another_copy_is_an_error() {
         String::from_utf8_lossy(&r.stderr)
     );
 }
+
+/// A module of a package, profiled on its own, is named and imported as the
+/// package's member (`pkg.hot`, from above `pkg`), and a module in another
+/// encoding than UTF-8 is read in its own.
+#[test]
+fn a_package_member_and_a_latin_1_module_are_profiled() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    std::fs::write(
+        pkg.join("latin.py"),
+        b"# -*- coding: latin-1 -*-\ndef caf\xe9():\n    return '\xe9'\n" as &[u8],
+    )
+    .unwrap();
+    let away = dir.join("away");
+    std::fs::create_dir_all(&away).unwrap();
+    let work = away.join("member.py");
+    std::fs::write(
+        &work,
+        "from pkg.hot import hot\nfrom pkg import latin\nfor i in range(60):\n    hot({}, i)\n    latin.caf\u{e9}()\n",
+    )
+    .unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg.join("hot.py"), &out, &["--runs", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let modules: Vec<&str> = p["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["module"].as_str().unwrap())
+        .collect();
+    assert!(!modules.is_empty() && modules.iter().all(|m| *m == "pkg.hot"), "{p}");
+    let r = profile(&pkg, &out, &["--runs", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let cafe = p["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["module"] == "pkg.latin")
+        .unwrap_or_else(|| panic!("{p}"));
+    assert_eq!(cafe["qualname"], "caf\u{e9}");
+    assert_eq!(cafe["calls"], 60);
+}

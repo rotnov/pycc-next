@@ -19,36 +19,53 @@
 #                           the exact types of its arguments in its first 1,000
 #                           calls (type name to count, per parameter).
 #
-# SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own and
-# PKG's directory first on `sys.path`; a `SystemExit` it raises ends it as it
+# SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own and the
+# directory PKG is imported from (above every package holding it) first on
+# `sys.path`; a `SystemExit` it raises ends it as it
 # would end the interpreter. A pass whose workload imports no module of PKG,
 # or one from elsewhere, fails.
 import ast
 import hashlib
+import io
 import json
 import os
 import sys
+import tokenize
 
 TYPE_CALLS = 1000
 
 
+def import_root(pkg):
+    """The directory PKG (a package directory, or a single module) is imported
+    from: above every package that holds it, so a member `pkg/mod.py` is
+    `pkg.mod`."""
+    base = os.path.dirname(os.path.realpath(pkg))
+    while os.path.isfile(os.path.join(base, "__init__.py")):
+        base = os.path.dirname(base)
+    return base
+
+
+def dotted(base, path):
+    parts = os.path.relpath(path, base)[:-3].split(os.sep)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
 def modules(pkg):
     """(dotted name, path) of every `.py` file under PKG (a package directory, or
-    a single module)."""
+    a single module), named as imported from `import_root(PKG)`."""
+    base = import_root(pkg)
     pkg = os.path.realpath(pkg)
     if os.path.isfile(pkg):
-        yield os.path.splitext(os.path.basename(pkg))[0], pkg
+        yield dotted(base, pkg), pkg
         return
-    base = os.path.dirname(pkg)
     for root, dirs, files in os.walk(pkg):
         dirs.sort()
         for f in sorted(files):
             if f.endswith(".py"):
                 path = os.path.join(root, f)
-                parts = os.path.relpath(path, base)[:-3].split(os.sep)
-                if parts[-1] == "__init__":
-                    parts.pop()
-                yield ".".join(parts), path
+                yield dotted(base, path), path
 
 
 def direct(node, kinds):
@@ -100,7 +117,9 @@ def index(pkg):
             tree = ast.parse(raw, path)
         except SyntaxError:
             continue
-        lines = raw.decode("utf-8").splitlines(keepends=True)
+        # In the module's own encoding (a `coding:` declaration, else UTF-8).
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
+        lines = raw.decode(encoding).splitlines(keepends=True)
         for qual, first, digest, eligible in functions(tree, lines):
             out.append({"module": name, "qualname": qual, "firstlineno": first,
                         "sha256": digest, "eligible": eligible})
@@ -112,7 +131,7 @@ def run(pkg, script, args):
     sys.argv = [script, *args]
     sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
     # PKG's sources, not a copy installed or beside the script.
-    sys.path.insert(0, os.path.dirname(os.path.realpath(pkg)))
+    sys.path.insert(0, import_root(pkg))
     try:
         runpy.run_path(script, run_name="__main__")
     except SystemExit as e:
