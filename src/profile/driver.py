@@ -29,6 +29,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tokenize
 
@@ -119,7 +120,9 @@ def index(pkg):
             continue
         # In the module's own encoding (a `coding:` declaration, else UTF-8).
         encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
-        lines = raw.decode(encoding).splitlines(keepends=True)
+        # Lines as `ast` counts them: ended only by `\r\n`, `\r` or `\n`
+        # (`str.splitlines` also splits on `\f`, `\x85`, U+2028, ...).
+        lines = re.split(r"(?<=\n)|(?<=\r)(?!\n)", raw.decode(encoding))
         for qual, first, digest, eligible in functions(tree, lines):
             out.append({"module": name, "qualname": qual, "firstlineno": first,
                         "sha256": digest, "eligible": eligible})
@@ -137,6 +140,11 @@ def run(pkg, script, args):
     except SystemExit as e:
         if e.code not in (None, 0):
             raise
+
+
+def check_loaded(pkg):
+    """Fails unless the workload imported a module of PKG, every one from PKG. Run
+    once the profiler is off, so its work is not in the profile."""
     loaded = 0
     for name, path in modules(pkg):
         m = sys.modules.get(name)
@@ -186,6 +194,7 @@ def calls(pkg, script, args):
         run(pkg, script, args)
     finally:
         prof.disable()
+    check_loaded(pkg)
     total = 0.0
     found = {}
     for e in prof.getstats():
@@ -250,6 +259,7 @@ def types(pkg, candidates, script, args):
     finally:
         mon.set_events(tool, 0)
         mon.free_tool_id(tool)
+    check_loaded(pkg)
     return {"functions": [[m, q, f, rec[1]] for (m, q, f), rec in seen.items()]}
 
 

@@ -320,3 +320,61 @@ fn a_package_member_and_a_latin_1_module_are_profiled() {
     assert_eq!(cafe["qualname"], "caf\u{e9}");
     assert_eq!(cafe["calls"], 60);
 }
+
+/// A function's source text is its lines as `ast` numbers them: a U+2028 or a
+/// form feed inside a line does not end it, so a change to a later function
+/// is seen.
+#[test]
+fn source_hashes_follow_ast_lines() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    let src = "def f():\n    return \"a\u{2028}b\x0cc\"\n\n\ndef g():\n    return 1\n";
+    std::fs::write(pkg.join("m.py"), src).unwrap();
+    let work = dir.join("w.py");
+    std::fs::write(&work, "from pkg import m\nfor _ in range(60):\n    m.f(); m.g()\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    std::fs::write(pkg.join("m.py"), src.replace("return 1", "return 2")).unwrap();
+    let r = profile(&pkg, &out, &["--check"], &[]);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("note: profile entry pkg.m:g (line 5) dropped: its source changed"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("pkg.m:f "), "{stderr}");
+}
+
+/// The run's total self time, the selection's denominator, is the workload's
+/// alone: the check that it imported the package's modules runs after the
+/// profiler stops. Here that check reads a module's `__file__`, which runs a
+/// package function; the profile must not see that call.
+#[test]
+fn the_profile_leaves_out_the_driver_s_own_check() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(
+        pkg.join("lazy.py"),
+        "import sys\n\n\ndef spin():\n    return sum(range(100000))\n\n\n\
+         class Lazy:\n    @property\n    def __file__(self):\n        spin()\n        return FILE\n\n\n\
+         FILE = __file__\nsys.modules[__name__] = Lazy()\n",
+    )
+    .unwrap();
+    let work = dir.join("w.py");
+    std::fs::write(&work, "import pkg.lazy\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1"], &[work.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let names: Vec<&str> = p["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["qualname"].as_str().unwrap())
+        .collect();
+    assert!(!names.contains(&"spin") && !names.contains(&"Lazy.__file__"), "{p}");
+}
