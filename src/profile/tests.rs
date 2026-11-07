@@ -22,8 +22,40 @@ fn function(module: &str, qualname: &str, line: u32, sha: &str) -> Function {
         qualname: qualname.into(),
         firstlineno: line,
         sha256: sha.into(),
+        lines: 10,
         eligible: true,
+        excluded: false,
     }
+}
+
+/// `e` as [`select`] decides it: ten lines long.
+fn candidate(e: &Entry, eligible: bool) -> Candidate<'_> {
+    Candidate {
+        entry: e,
+        eligible,
+        excluded: false,
+        lines: 10,
+        winning: crate::profile::Winning::No,
+    }
+}
+
+/// Records `names` as `p`'s winning set, measured with no `--exclude`.
+fn win(p: &mut Profile, names: &[&str]) {
+    let members = p
+        .functions
+        .iter()
+        .filter(|e| names.contains(&e.qualname.as_str()))
+        .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno, e.sha256.clone()))
+        .collect();
+    p.winner = Some(Winner { members, excludes: Vec::new(), python: p.python.clone() });
+}
+
+/// `p`'s candidates, marked by its winning set (taken as valid).
+fn marked(p: &Profile) -> Vec<Candidate<'_>> {
+    static VALID: Result<(), String> = Ok(());
+    let mut input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    p.mark(&mut input, &VALID);
+    input
 }
 
 fn profile(functions: Vec<Entry>) -> Profile {
@@ -36,6 +68,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         functions,
         sampled: true,
         verified: false,
+        winner: None,
     }
 }
 
@@ -92,7 +125,7 @@ fn stale_and_missing_entries_are_dropped_with_a_note() {
         function("pkg.m", "C.x", 21, "get"),
         function("pkg.m", "C.x", 25, "set"),
     ];
-    let (current, notes) = p.current(&sources);
+    let (current, notes) = p.current(&sources, None);
     let kept: Vec<(&str, u32)> = current
         .iter()
         .map(|(e, f)| (e.qualname.as_str(), f.firstlineno))
@@ -117,7 +150,7 @@ fn the_rule_takes_eligible_hot_and_often_called_functions_by_self_time() {
         entry("m", "cool", 5, "", 50, 5),
         entry("m", "cold", 6, "", 1000, 4),
     ];
-    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, e.qualname != "gen")).collect();
+    let input: Vec<Candidate> = es.iter().map(|e| candidate(e, e.qualname != "gen")).collect();
     let decided = select(1000, &input, Rule::default());
     let got: Vec<(&str, Option<&str>)> = decided
         .iter()
@@ -174,28 +207,31 @@ fn runs_aggregate_to_medians_and_a_missing_call_counts_zero() {
 }
 
 #[test]
-fn the_region_keeps_functions_whose_calls_stay_inside_the_selection() {
-    let with = |q: &str, ns: u64, out: &[(&str, u64)]| {
-        let mut e = entry("m", q, 1, "", 1000, ns);
+fn a_region_is_judged_together_and_a_crossing_by_its_cost() {
+    let with = |q: &str, calls: u64, ns: u64, out: &[(&str, u64)]| {
+        let mut e = entry("m", q, 1, "", calls, ns);
         e.callees = out.iter().map(|(k, n)| (k.to_string(), *n)).collect();
         e
     };
     let es = [
         // Calls only selected functions, itself and its own nested code.
-        with("hub", 500, &[("m:leaf:1", 10), ("m:hub:1", 5), ("m:hub.<locals>.inner:1", 5)]),
+        with("hub", 1000, 500, &[("m:leaf:1", 10), ("m:hub:1", 5), ("m:hub.<locals>.inner:1", 5)]),
         // No calls to Python functions at all.
-        with("leaf", 400, &[]),
-        // Half of its calls leave: not most inside, rejected.
-        with("even", 300, &[("m:leaf:1", 1), ("*", 1)]),
-        // A third leave: kept.
-        with("most", 250, &[("m:leaf:1", 2), ("*", 1)]),
-        // Mostly glue: rejected.
-        with("glue", 200, &[("*", 3), ("m:leaf:1", 1)]),
-        // Only selected through `glue`: rejected once `glue` is.
-        with("caller", 100, &[("m:glue:1", 1)]),
+        with("leaf", 1000, 400, &[]),
+        // Hot, calling a cold function: the region pulls it in.
+        with("bisect", 1000, 300, &[("m:split:1", 900)]),
+        // One call out per call costs 36 ns against 100 ns of self time: kept.
+        with("caller", 1000, 100, &[("m:glue:1", 1)]),
+        // Three calls out cost 108 ns against 30 ns of self time.
+        with("glue", 1000, 30, &[("*", 3), ("m:leaf:1", 1)]),
+        // A region of cold functions: 0.40% together.
+        with("a", 100, 2, &[("m:b:1", 1)]),
+        with("b", 100, 2, &[]),
+        // Cold and rarely called, but in `bisect`'s region.
+        with("split", 10, 1, &[]),
     ];
-    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, true)).collect();
-    let decided = select(1000, &input, Rule { share: 0.0, ..Rule::default() });
+    let input: Vec<Candidate> = es.iter().map(|e| candidate(e, true)).collect();
+    let decided = select(1000, &input, Rule::default());
     let got: Vec<(&str, Option<&str>)> = decided
         .iter()
         .map(|d| (d.entry.qualname.as_str(), d.rejected.as_deref()))
@@ -205,18 +241,40 @@ fn the_region_keeps_functions_whose_calls_stay_inside_the_selection() {
         [
             ("hub", None),
             ("leaf", None),
-            ("even", Some("1 of its 2 calls to Python functions leave the selection")),
-            ("most", None),
-            ("glue", Some("3 of its 4 calls to Python functions leave the selection")),
-            ("caller", Some("1 of its 1 calls to Python functions leave the selection")),
+            ("bisect", None),
+            ("caller", None),
+            (
+                "glue",
+                Some("its 3 calls out of the selection would cost about 0.1 us (36 ns each), against 0.0 us of self time")
+            ),
+            ("a", Some("its region's self time 0.40% (2 functions) is under 0.50%")),
+            ("b", Some("its region's self time 0.40% (2 functions) is under 0.50%")),
+            ("split", None),
         ]
     );
-    // At 0 no call may leave; at 1 only a function all of whose calls leave
-    // is rejected.
-    let strict = select(1000, &input, Rule { share: 0.0, outside: 0.0, ..Rule::default() });
-    assert!(strict[3].rejected.is_some() && strict[0].rejected.is_none() && strict[1].rejected.is_none());
-    let loose = select(1000, &input, Rule { share: 0.0, outside: 1.0, ..Rule::default() });
-    assert!(loose[2].rejected.is_none() && loose[4].rejected.is_none());
+    // A cheaper crossing keeps `glue`; a dearer one drops `caller` too.
+    let cheap = select(1000, &input, Rule { crossing_ns: 9, ..Rule::default() });
+    assert!(cheap[4].rejected.is_none());
+    let dear = select(1000, &input, Rule { crossing_ns: 100, ..Rule::default() });
+    assert!(dear[3].rejected.is_some() && dear[0].rejected.is_none());
+    // The size cap: 15 lines take `hub` (10 lines) alone, and `hub`'s calls
+    // to `leaf` then cross, cheaply enough.
+    let small = select(1000, &input, Rule { lines: 15, ..Rule::default() });
+    assert_eq!(small[0].rejected, None);
+    assert_eq!(small[1].rejected.as_deref(), Some("its 10 lines would take the selection past 15 lines"));
+}
+
+/// A rejection by a later pass never hides the step a function failed
+/// first: a function its region rejects says so in a verified profile too.
+#[test]
+fn a_rejection_names_the_first_step_the_function_failed() {
+    let mut glue = entry("m", "glue", 1, "", 1000, 30);
+    glue.callees = BTreeMap::from([("*".to_string(), 3)]);
+    let mut p = profile(vec![glue]);
+    p.verified = true;
+    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    let d = &select(p.total_ns, &input, p.rule(Rule::default()))[0];
+    assert!(d.rejected.as_deref().unwrap().starts_with("its 3 calls out of the selection"), "{d:?}");
 }
 
 #[test]
@@ -256,7 +314,7 @@ fn a_function_that_mostly_catches_exceptions_is_not_selected() {
     let mut some = entry("m", "some", 3, "", 100, 100);
     some.handled = 49;
     let es = [often, rare, some];
-    let input: Vec<(&Entry, bool)> = es.iter().map(|e| (e, true)).collect();
+    let input: Vec<Candidate> = es.iter().map(|e| candidate(e, true)).collect();
     let decided = select(1000, &input, Rule { calls: 1, ..Rule::default() });
     let got: Vec<Option<&str>> = decided.iter().map(|d| d.rejected.as_deref()).collect();
     assert_eq!(
@@ -279,11 +337,12 @@ fn a_function_that_mostly_catches_exceptions_is_not_selected() {
 fn a_verified_profile_selects_only_its_measured_winners() {
     let measured = |compiled| Measured {
         compiled,
-        with: 2,
+        with: if compiled { 1 } else { 2 },
         cpython_ns: [10, 11, 12],
         compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
         instructions: None,
         refused: None,
+        without: None,
     };
     let mut a = entry("m", "a", 1, "", 100, 300);
     a.measured = Some(measured(false));
@@ -293,7 +352,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     let mut p = profile(vec![a, b, c]);
     let rule = Rule { max: 2, ..Rule::default() };
     let picked = |p: &Profile| -> Vec<String> {
-        let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+        let input = marked(p);
         select(p.total_ns, &input, p.rule(rule))
             .into_iter()
             .filter(|d| d.rejected.is_none())
@@ -303,8 +362,9 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     // Unverified (`--no-verify`), the rule alone decides.
     assert_eq!(picked(&p), ["b", "c"]);
     p.verified = true;
+    win(&mut p, &["b"]);
     assert_eq!(picked(&p), ["b"]);
-    let input: Vec<(&Entry, bool)> = p.functions.iter().map(|e| (e, true)).collect();
+    let input = marked(&p);
     let c = select(p.total_ns, &input, p.rule(rule)).into_iter().find(|d| d.entry.qualname == "c").unwrap();
     assert_eq!(c.rejected.as_deref(), Some("not measured by pass 3 (it was not among the candidates it built)"));
     // The flag is part of the file.
@@ -313,4 +373,64 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     std::fs::write(&path, p.to_json()).unwrap();
     assert!(Profile::read(&path).unwrap().verified);
     assert!(!profile(Vec::new()).to_json().contains("verified"));
+}
+
+/// Pass 3's winning set is selected member for member: the rule's region
+/// and crossing steps chose its candidates and are not applied again. Here
+/// the winning core is `a` and `b`; `a` calls the cold `c`, measured not
+/// faster, 1000 times, which as a crossing (36 us) costs more than its
+/// 25 us of self time. Rejecting `a` for it would compile `{b}`, a set
+/// never measured.
+#[test]
+fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
+    let won = |with| Measured {
+        compiled: true,
+        with,
+        cpython_ns: [100, 110, 120],
+        compiled_ns: [80, 85, 90],
+        instructions: None,
+        refused: None,
+        without: None,
+    };
+    let mut a = entry("m", "a", 1, "", 100, 25_000);
+    a.callees.insert("m:c:3".into(), 1000);
+    a.callees.insert("m:b:2".into(), 100);
+    a.measured = Some(won(2));
+    let mut b = entry("m", "b", 2, "", 100, 900_000);
+    b.measured = Some(won(2));
+    let mut c = entry("m", "c", 3, "", 1000, 75_000);
+    c.measured = Some(Measured {
+        compiled: false,
+        without: Some([80, 85, 90]),
+        compiled_ns: [95, 100, 105],
+        with: 3,
+        ..won(3)
+    });
+    let mut p = profile(vec![a, b, c]);
+    p.total_ns = 1_000_000;
+    p.verified = true;
+    win(&mut p, &["a", "b"]);
+    let input = marked(&p);
+    let decided = select(p.total_ns, &input, p.rule(Rule::default()));
+    let selected: Vec<&str> = decided
+        .iter()
+        .filter(|d| d.rejected.is_none())
+        .map(|d| d.entry.qualname.as_str())
+        .collect();
+    assert_eq!(selected, ["b", "a"], "{decided:?}");
+    // Unverified, the crossing rule rejects `a` (the rule chooses what pass
+    // 3 measures).
+    p.verified = false;
+    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    let decided = select(p.total_ns, &input, p.rule(Rule::default()));
+    assert!(decided.iter().find(|d| d.entry.qualname == "a").unwrap().rejected.is_some(), "{decided:?}");
+    // A winning set that is not valid selects nothing, and says why.
+    p.verified = true;
+    let invalid: Result<(), String> = Err("its member m:a (line 1) changed or is gone".into());
+    let mut input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    p.mark(&mut input, &invalid);
+    let decided = select(p.total_ns, &input, p.rule(Rule::default()));
+    assert!(decided.iter().all(|d| d.rejected.as_deref().unwrap().starts_with(
+        "pass 3's winning set is not valid (its member m:a (line 1) changed or is gone)"
+    )), "{decided:?}");
 }

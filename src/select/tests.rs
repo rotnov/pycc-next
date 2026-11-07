@@ -6,7 +6,9 @@ fn function(module: &str, qualname: &str, line: u32, eligible: bool) -> Function
         qualname: qualname.into(),
         firstlineno: line,
         sha256: format!("{module}:{qualname}"),
+        lines: 10,
         eligible,
+        excluded: false,
     }
 }
 
@@ -17,6 +19,10 @@ fn request<'a>(mode: SelectMode, compile: &'a [String], no_compile: &'a [String]
         compile,
         no_compile,
         rule: Rule::default(),
+        package_sources: &[],
+        python: "",
+        excludes: None,
+        module: None,
     }
 }
 
@@ -109,6 +115,7 @@ fn a_profile_selects_by_the_rule() {
         functions: vec![entry("hot", 1, 100, 500), entry("rare", 5, 2, 400), entry("gone", 9, 100, 50)],
         sampled: true,
         verified: false,
+        winner: None,
     };
     std::fs::write(&path, p.to_json()).unwrap();
     let sources = [function("m", "hot", 1, true), function("m", "rare", 5, true)];

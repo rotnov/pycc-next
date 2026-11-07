@@ -34,7 +34,14 @@ pub(crate) const VERSION: u32 = 1;
 
 const DRIVER: &str = include_str!("profile/driver.py");
 
+mod select;
+mod sources;
 pub(crate) mod verify;
+mod winner;
+
+pub(crate) use select::{select, Candidate, Rule, CROSSING_NS};
+pub(crate) use sources::{index, index_excluding, python_version, Function};
+pub(crate) use winner::{normalized, Scope, Winner, Winning};
 
 /// Parameter name to exact type name to count.
 pub(crate) type ArgTypes = BTreeMap<String, BTreeMap<String, u64>>;
@@ -90,6 +97,12 @@ pub(crate) struct Measured {
     /// not: it was never timed, and is rejected for this reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) refused: Option<String>,
+    /// The workload's times (as `compiled_ns`) with the selected set
+    /// compiled, when that set leaves this function out of a set it was
+    /// measured in, or this function's own set won too: it is rejected,
+    /// the selection winning without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) without: Option<[u64; 3]>,
 }
 
 impl Measured {
@@ -103,6 +116,7 @@ impl Measured {
             compiled_ns: [0; 3],
             instructions: None,
             refused: Some(reason),
+            without: None,
         }
     }
 
@@ -112,6 +126,14 @@ impl Measured {
             return format!("not compiled: {reason}");
         }
         let ms = |ns: u64| ns as f64 / 1e6;
+        if let Some(without) = self.without {
+            return format!(
+                "faster without it: the workload took {:.1} ms with a measured set of candidates that leaves it out compiled, against {:.1} ms with it and {} other functions",
+                ms(without[1]),
+                ms(self.compiled_ns[1]),
+                self.with - 1,
+            );
+        }
         format!(
             "not faster when compiled: the workload took {:.1} ms with it and {} other functions compiled, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
             ms(self.compiled_ns[1]),
@@ -150,68 +172,11 @@ pub(crate) struct Profile {
     /// winners are selected ([`Rule::measured_only`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) verified: bool,
-}
-
-/// One function of the package's current sources (the driver's `index`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(crate) struct Function {
-    pub(crate) module: String,
-    pub(crate) qualname: String,
-    pub(crate) firstlineno: u32,
-    pub(crate) sha256: String,
-    /// Module-level functions and methods of module-level classes that are
-    /// not generators or coroutines (section 2.1).
-    pub(crate) eligible: bool,
-}
-
-/// The selection rule's thresholds (section 2.3).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Rule {
-    /// The least share of the run's total self time.
-    pub(crate) share: f64,
-    /// The fewest calls.
-    pub(crate) calls: u64,
-    /// The most functions selected, by self time.
-    pub(crate) max: usize,
-    /// The share of a function's calls to Python functions that leave the
-    /// selection must be under this (its own nested code, itself and the
-    /// other selected functions are inside it): at 0.5, most stay inside.
-    pub(crate) outside: f64,
-    /// The share of its sampled calls in which a function catches an
-    /// exception must be under this. Exceptions as control flow are slower
-    /// compiled than in CPython until PR 9 (section 2.7).
-    pub(crate) handled: f64,
-    /// Only functions pass 2 sampled are selected: a function that would
-    /// fill a slot a rejected candidate left has no `handled` count.
-    pub(crate) sampled_only: bool,
-    /// Only functions pass 3 measured are selected: a profile whose
-    /// candidates were measured keeps exactly its winners, and a function
-    /// that would fill a slot a rejected candidate left is not one of them.
-    pub(crate) measured_only: bool,
-}
-
-impl Default for Rule {
-    fn default() -> Self {
-        Rule {
-            share: 0.005,
-            calls: 50,
-            max: 64,
-            outside: 0.5,
-            handled: 0.5,
-            sampled_only: false,
-            measured_only: false,
-        }
-    }
-}
-
-/// What [`select`] decided for one function.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Decision<'p> {
-    pub(crate) entry: &'p Entry,
-    /// Its share of the run's total self time.
-    pub(crate) share: f64,
-    /// `None` when selected, else why not.
-    pub(crate) rejected: Option<String>,
+    /// The set pass 3 measured as the winner, and what it was measured
+    /// under: the selection of a verified profile, valid only as a whole
+    /// ([`Profile::winner_valid`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) winner: Option<Winner>,
 }
 
 impl Profile {
@@ -259,10 +224,12 @@ impl Profile {
     /// entry dropped: its function changed or is gone. Functions are matched
     /// by module, qualified name and source hash, so a function that only
     /// moved stays current, and of two `def`s with one qualified name (a
-    /// property's getter and setter) each keeps its own entry.
+    /// property's getter and setter) each keeps its own entry. With `module`
+    /// (a build of that module alone), only its entries are considered.
     pub(crate) fn current<'p, 'f>(
         &'p self,
         sources: &'f [Function],
+        module: Option<&str>,
     ) -> (Vec<(&'p Entry, &'f Function)>, Vec<String>) {
         let mut by_name: BTreeMap<(&str, &str), Vec<&Function>> = BTreeMap::new();
         for f in sources {
@@ -274,6 +241,11 @@ impl Profile {
         let mut current = Vec::new();
         let mut notes = Vec::new();
         for e in &self.functions {
+            // A build of one module indexes that module alone: the entries
+            // of the package's other modules are not its to drop.
+            if module.is_some_and(|m| m != e.module) {
+                continue;
+            }
             let same = by_name
                 .get(&(e.module.as_str(), e.qualname.as_str()))
                 .and_then(|fs| fs.iter().find(|f| f.sha256 == e.sha256));
@@ -293,103 +265,6 @@ impl Profile {
             }
         }
         (current, notes)
-    }
-}
-
-/// The selection rule (section 2.3) over `entries` (current ones): eligible,
-/// at least `rule.share` of the run's total self time, at least `rule.calls`
-/// calls, catching an exception in less than `rule.handled` of its sampled
-/// calls, and among the `rule.max` such functions with the most self time;
-/// then, of those, the ones less than `rule.outside` of whose calls to Python
-/// functions leave the selection (the region, section 2.3).
-/// Every entry is decided, in order of self time (most first; then by name).
-pub(crate) fn select<'p>(
-    total_ns: u64,
-    entries: &[(&'p Entry, bool)],
-    rule: Rule,
-) -> Vec<Decision<'p>> {
-    let mut order: Vec<&(&Entry, bool)> = entries.iter().collect();
-    order.sort_by(|(a, _), (b, _)| {
-        b.self_ns
-            .cmp(&a.self_ns)
-            .then_with(|| (&a.module, &a.qualname, a.firstlineno).cmp(&(&b.module, &b.qualname, b.firstlineno)))
-    });
-    let mut taken = 0usize;
-    let mut decided = order
-        .into_iter()
-        .map(|&(entry, eligible)| {
-            let share = if total_ns == 0 {
-                0.0
-            } else {
-                entry.self_ns as f64 / total_ns as f64
-            };
-            let rejected = if !eligible {
-                Some("not eligible (a generator, coroutine or nested function)".to_string())
-            } else if let Some(m) = entry.measured.as_ref().filter(|m| !m.compiled) {
-                Some(m.rejection())
-            } else if share < rule.share {
-                Some(format!(
-                    "self time {:.2}% is under {:.2}%",
-                    share * 100.0,
-                    rule.share * 100.0
-                ))
-            } else if entry.calls < rule.calls {
-                Some(format!("{} calls is under {}", entry.calls, rule.calls))
-            } else if rule.sampled_only && !entry.sampled {
-                Some("not sampled by pass 2 (it was not among the candidates it sampled)".to_string())
-            } else if entry.handled > 0
-                && entry.handled as f64 >= entry.calls.min(TYPE_CALLS) as f64 * rule.handled
-            {
-                Some(format!(
-                    "it catches an exception in {} of its first {} calls",
-                    entry.handled,
-                    entry.calls.min(TYPE_CALLS)
-                ))
-            } else if rule.measured_only && entry.measured.is_none() {
-                Some("not measured by pass 3 (it was not among the candidates it built)".to_string())
-            } else if taken >= rule.max {
-                Some(format!("not among the top {} by self time", rule.max))
-            } else {
-                taken += 1;
-                None
-            };
-            Decision {
-                entry,
-                share,
-                rejected,
-            }
-        })
-        .collect::<Vec<_>>();
-    // The region: a selected function whose calls mostly leave the selection
-    // would cross between compiled and interpreted code on each of them, so
-    // it is not selected, and its callers are decided again without it.
-    loop {
-        let inside: BTreeSet<String> = decided
-            .iter()
-            .filter(|d| d.rejected.is_none())
-            .map(|d| d.entry.callee_key())
-            .collect();
-        let mut changed = false;
-        for d in decided.iter_mut().filter(|d| d.rejected.is_none()) {
-            let nested = format!("{}:{}.<locals>.", d.entry.module, d.entry.qualname);
-            let total: u64 = d.entry.callees.values().sum();
-            let out: u64 = d
-                .entry
-                .callees
-                .iter()
-                .filter(|(callee, _)| !inside.contains(*callee) && !callee.starts_with(&nested))
-                .map(|(_, n)| n)
-                .sum();
-            if out > 0 && out as f64 >= total as f64 * rule.outside {
-                d.rejected = Some(format!(
-                    "{out} of its {total} calls to Python functions leave the selection"
-                ));
-                changed = true;
-            }
-        }
-        if !changed {
-            break decided;
-        }
     }
 }
 
@@ -590,22 +465,6 @@ impl Driver<'_> {
     }
 }
 
-/// The package's current functions, from `python` (the driver's `index`).
-pub(crate) fn index(python: &OsStr, pkg: &Path) -> Result<Vec<Function>, String> {
-    let scratch = pycc_scratch::ScratchDir::new("profile").map_err(|e| e.to_string())?;
-    let script = scratch.join("driver.py");
-    std::fs::write(&script, DRIVER.replace("\r\n", "\n")).map_err(|e| e.to_string())?;
-    let driver = Driver {
-        python,
-        script: &script,
-        pkg,
-        origin: None,
-    };
-    let out = scratch.join("index.json");
-    driver.run("index", &out, &[], &[])?;
-    Driver::json(&out)
-}
-
 /// `pycc profile PKG -o PROFILE --check -- PYTHON`: reads PROFILE against
 /// PKG's current sources (indexed with PYTHON) and prints what a build would
 /// do with it: each entry dropped as stale, each function the rule selects
@@ -616,17 +475,29 @@ pub(crate) fn check_profile(
     profile_path: &Path,
     workload: &[OsString],
     rule: Rule,
+    excludes: &[String],
 ) -> Result<(), String> {
     let [python, ..] = workload else {
         return Err("pycc profile --check needs the interpreter: -- PYTHON".to_string());
     };
     let profile = Profile::read(profile_path)?;
-    let sources = index(python, pkg)?;
-    let (current, notes) = profile.current(&sources);
+    let sources = index_excluding(python, pkg, excludes)?;
+    let (current, notes) = profile.current(&sources, None);
     for note in &notes {
         eprintln!("{note}");
     }
-    let decided: Vec<(&Entry, bool)> = current.iter().map(|(e, f)| (*e, f.eligible)).collect();
+    let version = python_version(python)?;
+    let valid = profile.winner_valid(&Scope {
+        sources: &sources,
+        python: &version,
+        excludes: Some(excludes),
+        module: None,
+    });
+    if let Err(why) = &valid {
+        println!("invalid: pass 3's winning set is not valid ({why}): profile again to measure it");
+    }
+    let mut decided: Vec<Candidate> = current.iter().map(|(e, f)| f.candidate(e)).collect();
+    profile.mark(&mut decided, &valid);
     for d in select(profile.total_ns, &decided, profile.rule(rule)) {
         let e = d.entry;
         match &d.rejected {
@@ -652,6 +523,7 @@ pub(crate) fn run_profile(
     runs: u32,
     rule: Rule,
     verify: Option<verify::Options>,
+    excludes: &[String],
 ) -> Result<(), String> {
     let [python, rest @ ..] = workload else {
         return Err("pycc profile needs a workload: -- PYTHON SCRIPT [ARGS]".to_string());
@@ -664,7 +536,7 @@ pub(crate) fn run_profile(
     }
     // Without a Windows verbatim prefix: the path goes on the workload's `sys.path`.
     let pkg = crate::canonical::canonicalize(pkg).map_err(|e| e.to_string())?;
-    let sources = index(python, &pkg)?;
+    let sources = index_excluding(python, &pkg, excludes)?;
     let scratch = pycc_scratch::ScratchDir::new("profile").map_err(|e| e.to_string())?;
     let script = scratch.join("driver.py");
     std::fs::write(&script, DRIVER.replace("\r\n", "\n")).map_err(|e| e.to_string())?;
@@ -705,22 +577,35 @@ pub(crate) fn run_profile(
             })
         })
         .collect();
+    let version = python_version(python)?;
     // A function an earlier profile in `out` measured keeps its verdict while
-    // its source is unchanged (pass 3).
-    if let Ok(old) = Profile::read(out) {
-        let mut carried = Profile {
-            functions: std::mem::take(&mut functions),
-            ..old.clone()
-        };
-        verify::carry_verdicts(&mut carried, &old);
-        functions = carried.functions;
-    }
-    let eligible = |e: &Entry| {
-        by_key
-            .get(&(e.module.as_str(), e.qualname.as_str(), e.firstlineno))
-            .is_some_and(|f| f.eligible)
+    // its source is unchanged (pass 3), and while the winning set that
+    // profile measured is still valid under this run's interpreter and
+    // `--exclude`: else every function is measured again.
+    let scope = Scope {
+        sources: &sources,
+        python: &version,
+        excludes: Some(excludes),
+        module: None,
     };
-    let decided: Vec<(&Entry, bool)> = functions.iter().map(|e| (e, eligible(e))).collect();
+    if let Ok(old) = Profile::read(out) {
+        match old.winner_valid(&scope) {
+            Ok(()) => {
+                let mut carried = Profile {
+                    functions: std::mem::take(&mut functions),
+                    ..old.clone()
+                };
+                verify::carry_verdicts(&mut carried, &old);
+                functions = carried.functions;
+            }
+            Err(why) => eprintln!("pycc profile: the earlier profile's verdicts are not kept: its winning set is not valid ({why})"),
+        }
+    }
+    // Every entry has its function: `functions` holds only those `by_key` has.
+    fn candidate<'p>(by_key: &BTreeMap<(&str, &str, u32), &Function>, e: &'p Entry) -> Candidate<'p> {
+        by_key[&(e.module.as_str(), e.qualname.as_str(), e.firstlineno)].candidate(e)
+    }
+    let decided: Vec<Candidate> = functions.iter().map(|e| candidate(&by_key, e)).collect();
     let candidates: Vec<(String, String, u32)> = select(total_ns, &decided, rule)
         .into_iter()
         .filter(|d| d.rejected.is_none())
@@ -750,13 +635,9 @@ pub(crate) fn run_profile(
             }
         }
     }
-    let version = std::process::Command::new(python)
-        .args(["-I", "-c", "import platform; print(platform.python_version())"])
-        .output()
-        .map_err(|e| e.to_string())?;
     let mut profile = Profile {
         version: VERSION,
-        python: String::from_utf8_lossy(&version.stdout).trim().to_string(),
+        python: version.clone(),
         workload: rest
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -767,28 +648,43 @@ pub(crate) fn run_profile(
         functions,
         sampled: !candidates.is_empty(),
         verified: false,
+        winner: None,
     };
     // Pass 2's samples can reject a candidate (and with it its callers),
     // never admit one it did not sample; pass 3 keeps only the measured
     // winners.
     if let Some(options) = verify {
-        let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
+        let decided: Vec<Candidate> = profile.functions.iter().map(|e| candidate(&by_key, e)).collect();
         let candidates: Vec<FunctionKey> = select(total_ns, &decided, profile.rule(rule))
             .into_iter()
             .filter(|d| d.rejected.is_none())
             .map(|d| (d.entry.module.clone(), d.entry.qualname.clone(), d.entry.firstlineno))
             .collect();
+        // The hot ones on their own: pass 3 checks them alone against their
+        // regions.
+        let core: BTreeSet<FunctionKey> = profile
+            .functions
+            .iter()
+            .filter(|e| {
+                let share = if total_ns == 0 { 0.0 } else { e.self_ns as f64 / total_ns as f64 };
+                share >= rule.share && e.calls >= rule.calls
+            })
+            .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno))
+            .collect();
         let cx = verify::Context {
             driver: &driver,
+            excludes,
             workload: rest,
             scratch: &scratch,
             options,
         };
-        verify::verify(&mut profile, &candidates, &cx)?;
+        verify::verify(&mut profile, &candidates, &core, &cx)?;
     }
     std::fs::write(out, profile.to_json())
         .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
-    let decided: Vec<(&Entry, bool)> = profile.functions.iter().map(|e| (e, eligible(e))).collect();
+    let valid = profile.winner_valid(&scope);
+    let mut decided: Vec<Candidate> = profile.functions.iter().map(|e| candidate(&by_key, e)).collect();
+    profile.mark(&mut decided, &valid);
     let selected = select(total_ns, &decided, profile.rule(rule))
         .iter()
         .filter(|d| d.rejected.is_none())

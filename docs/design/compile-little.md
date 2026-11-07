@@ -174,20 +174,45 @@ cost 0.4 ms of schema and `ConfigWrapper.__getattr__` 0.2 ms, while
 `_make_json_hashable` (0.22 Python calls per call) saved 0.55 ms.
 
 So selection is by call-graph region, not by single function. The profile records, per
-function, its calls to Python functions by callee (section 2.2). A function is selected
-when it is eligible, its profile entry is current, and:
+function, its calls to Python functions by callee (section 2.2), and the rule
+(`src/profile/select.rs`, `select`) decides each function by the first of these steps it fails:
 
-- its self time is at least 0.5% of the run's total;
-- it was called at least 50 times;
-- it ranks in the top 64 functions by self time;
-- it catches an exception in less than half of its sampled calls (`handled`).
-  Exceptions as control flow run slower compiled than in CPython until PR 9 (section
-  2.7): PR 4 measured `ConfigWrapper.__getattr__`, which catches a `KeyError` in 989 of
-  its first 1,000 calls, at +0.2 ms of schema;
-- most of its calls to Python functions stay inside the region: less than half leave it. Calls to itself, to
-  its own nested functions and to the other selected functions stay inside. Rejecting a
-  function can push its callers out, so this condition is applied until no function
-  changes. A function that calls no Python function passes.
+1. **The function itself**: eligible, its profile entry current, not measured slower by
+   pass 3, sampled by pass 2 once pass 2 has run, and catching an exception in less than
+   half of its sampled calls (`handled`). Exceptions as control flow run slower compiled
+   than in CPython until PR 9 (section 2.7): PR 4 measured `ConfigWrapper.__getattr__`,
+   which catches a `KeyError` in 989 of its first 1,000 calls, at +0.2 ms of schema.
+2. **Its region**: the functions that pass step 1, connected by calls among them, whatever
+   their own heat. The region is judged as a whole: its functions together have at least
+   0.5% of the run's total self time, and one of them was called at least 50 times. A
+   cold callee joins its hot caller's region, so diff-match-patch's `diff_bisectSplit`
+   (0.03% of the time) comes with `diff_bisect` (98%).
+3. **Its crossings**: each call it makes to a Python function outside the selection
+   (itself and its own nested code are inside) costs about 36 ns more than the
+   interpreter's own call (`CROSSING_NS`: a compiled loop calling an identity function,
+   47.7 ns a call, against the interpreter's 11.7 ns for the call itself, CPython 3.15.2
+   x86-64). A function whose crossings would cost its whole self time cannot win and is
+   not selected. Through PR 5 this step counted the share of calls that leave, not
+   their cost: it rejected `diff_bisect`, whose one call out per call is nothing beside
+   its loop, and pydantic's glue alike.
+4. **The size**: at most 64 functions and 4,000 source lines, taken by self time. This,
+   not heat, caps how far regions grow: each selected line is compiled code in the `.so`.
+5. **Pass 3's evidence**, once pass 3 has run: the set pass 3 measured as the winner is
+   the selection, member for member. Steps 2 to 4 chose the candidates pass 3 measured
+   and are not applied to its result again, so a build compiles exactly the set that was
+   timed. The profile records the set's key (`winner`): each member with the source hash
+   it was measured with, the `--exclude` list and the interpreter's version. The set is
+   valid only while all of them hold, checked against the whole package's sources
+   whichever module a build compiles: a build of one module compiles that module's share
+   of it, so the builds of every module together compile exactly the measured set. A
+   member that changed, is gone or is now excluded, a different `--exclude` list, or
+   another interpreter version makes the set invalid: it selects nothing (an exclusion
+   never yields to an old verdict), `--check` reports it, and the next profile measures
+   from scratch.
+
+Steps 2 to 4 repeat until no function changes. A rejection names the first step the
+function failed: a function its region or its crossings reject says so in a verified
+profile too, never "not measured by pass 3".
 
 Thin glue (properties, accessors, functions that mostly call Python code) therefore
 stays bytecode unless the functions it calls are selected with it. Inside a region the
@@ -196,7 +221,7 @@ profile's numbers, never a function's name.
 
 The rule's picks are candidates, not the selection: only measured winners are
 selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidates into
-a copy of the package and times the training workload with them compiled against the
+a copy of the project and times the training workload with them compiled against the
 unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
 (`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
 verdict is on wall time: the compiled median must be under CPython's first quartile. A
@@ -204,9 +229,44 @@ median inside CPython's interquartile range is noise, and a function that wins o
 noise adds size and risk for no gain, so it is not kept (PR 5 measured pydantic's 5
 training candidates kept in one run and rejected in another under the earlier "no
 slower than CPython's third quartile").
-If all the candidates together are not faster, each region (the candidates connected by
-calls among them, most self time first) is checked alone, then the regions that were
-faster alone are checked together once more; at most 6 builds. Every candidate gets its
+A region pulls its cold functions in only when that pays. Measured on diff-match-patch's
+diff_main (best of 3), CPython took 4.89 s, `diff_bisect` alone compiled 1.75 s (2.8x),
+its whole region compiled 1.88 s (2.6x) and `--select all` 2.11 s (2.3x): a generic lift
+of a cold function costs more than its bytecode. So pass 3 checks all the candidates
+together and their hot functions (each at least 0.5% and 50 calls on its own) alone, and
+If neither is faster, each region (the candidates connected by calls among them, most
+self time first) is checked the same way alone, then the regions that won are checked
+together once more; at most 8 builds, one of them reserved for that last check before any
+region is measured. The selection is always exactly one set that was measured as a whole
+and won: the winner with the lowest median, the smaller on a tie, never a union of sets
+measured apart. When the regions together cannot be built within the budget, or lose,
+the best single winner is kept (a region, a core, or nothing). A function the winner
+leaves out of a set it was measured in is rejected ("faster without it",
+`measured.without`). Pass 3 enforces this structurally:
+- **Every build is checked against its request.** The functions a check's build compiled
+  (its `compiled:` report) must equal the set it was asked for, compared as sets. A
+  missing member is refused and the rest built again. An extra (for example from a copied
+  `pyproject.toml`'s `[tool.pycc] compile`, which its builds also ignore with the internal
+  `--no-project-select`) refuses the measurement: it is never timed.
+- **The selection is one entry of an append-only list of measurements, whole, or nothing.**
+  An entry is selectable only if it was timed, won, and no member of it was refused at any
+  point of the run; no subset of an entry is ever derived or restored.
+- **A carried winning set is the first entry.** A later profile carries an earlier winning
+  set that is still valid (step 5) as that entry, inside every set it measures. A refusal
+  of any of its members invalidates it whole.
+
+A seeded property test drives these decisions through thousands of random runs (wins,
+losses, refusals, extras, carried sets, budgets, a changed key) and checks that the
+selection is always one valid winning entry and that the build compiles exactly it. The copy is the project root: the nearest directory at or above the
+package's import root with a `pyproject.toml`, `setup.cfg` or `setup.py`, searched up to
+the first `site-packages` or `dist-packages`, so the workload's tests and data are found
+at the same paths (the workload reads the copy's import root from `PYCC_PROFILE_ROOT`).
+With no marker, or for an installed package, it is the package alone, plus the paths
+`--verify-include` names. An unreadable entry outside the package is left out with a
+note, and one inside it is an error. A module a build keeps in Python (`--exclude`) is
+excluded from the profile's candidates by the same `--exclude` (it is still profiled, so
+the calls into it count as crossings), so the build compiles exactly the set pass 3
+measured; `bench/package_check.py --select profile` checks that it does. Every candidate gets its
 last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
 `compiled_ns` as first quartile, median and third quartile, and with
 `--verify-instructions` the instruction delta under callgrind, as evidence only). A
@@ -244,7 +304,7 @@ not make mistune's emphasis region a measured winner, that is the point to stop 
 report.
 
 The defaults are build options (`--select-share`, `--select-calls`, `--select-max`,
-`--select-outside`, `--select-handled`). They stay until the measurements in section 8 justify other
+`--select-lines`, `--select-crossing-ns`, `--select-handled`). They stay until the measurements in section 8 justify other
 values. The report lists every selected function with its share, and every function it
 rejected with the reason.
 
@@ -500,9 +560,11 @@ request that makes it unnecessary.
 | 3 | `pycc profile` (section 2.2): the two passes, the JSON file, staleness | profile of `bench/pydantic_workload.py --train` lists the three section 1 functions in its top 10 by self time; byte-identical output for the same runs; tests for stale and missing entries |
 | 4 | The switch: a non-strict `--ext` build runs module bytecode and patches the selected functions (sections 2.1, 2.4); one marshalled code object per served module (item 1's replacement); `--profile`, `--select all\|none`, `[tool.pycc] compile/exclude`; default none; the finder serves only modules with selected functions (item 22); `bench.yml` builds with the training profile. Today's whole-module compilation stays reachable only as a transitional `--select module`, which the existing non-strict tests use until PR 6 | no phase of pydantic, pystache or mistune slower than CPython (within the IQR), with the training profiles; all three suites pass, plus pydantic's `__file__` test that fails today. Only measured winners are selected. (The first plan asked schema >= 1.05x here; section 2.3 gives the measurement that moved it to PR 7) |
 | 5 | Delete the chunk machinery (items 1-5): chunk tables, dataclass texts, forward references, direct defs, `--exact-cpython`, their tests and DEVIATIONS rows. The transitional `--select module` runs its fallback statements with `exec(compile(...))`, as the native path does | the PR 4 numbers hold within the IQR; pydantic `.so` at least 1.3 MB smaller (the chunk tables were 1.32 MB of `.rodata`); build time reported |
-| 6 | Delete non-strict module-body compilation (items 6, 7, 8 slot sync, 9, 20) and `--select module` | as PR 5; non-strict test suite converted to `--select all` passes; LOC removed reported |
-| 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21) | schema >= 1.05x (if missed, stop and report before PR 8); `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
-| 8 | Call-site specialization (section 2.5): exact-type guards inline, helpers cold, per-site attribute records (item 13), profile-observed types (item 19, then delete `specialize.rs`), `isinstance` exact path | schema I1 misses <= 1.1x CPython's; `ConfigWrapper.__getattr__` replay <= 1.75 ms (no slower than CPython); schema >= 1.15x |
+| 5a | Selection by region (section 2.3): a region judged on its combined self time, crossings by cost, a size cap in lines; pass 3 checks a region against its hot functions alone; a rejection names the first step that failed; `package_check --select profile` trains on the test suite plus the timed workloads | diff-match-patch's diff_main with the profile about 2.8x (`diff_bisect` selected; hand-selected it measured 2.8x); no phase of pydantic, mistune or pystache slower than CPython within the IQR |
+| 6 | Delete non-strict module-body compilation (items 6, 7, 8 slot sync, 9, 20) where it does not serve `--select module` | as PR 5; LOC removed reported |
+| 8 | Call-site specialization (section 2.5): exact-type guards inline, helpers cold, per-site attribute records (item 13), profile-observed types (item 19, then delete `specialize.rs`), `isinstance` exact path. **The concept checkpoint** (moved ahead of PR 7) | profile mode on diff-match-patch's diff_main >= 6x (`--select module`: 7.1x); pydantic schema >= 1.05x; schema I1 misses <= 1.1x CPython's; `ConfigWrapper.__getattr__` replay <= 1.75 ms. If either of the first two is missed, stop and report |
+| 6b | Delete `--select module`; CI's `--instructions` gate and `package_check` move to profile mode | as PR 8; the non-strict test suite converted to `--select all` passes |
+| 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
 | 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34) |
 | 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally |
 | 11 | Size and layout (section 2.9); item 10's decision; item 18's re-measure; item 23 dead-helper sweep | pydantic `.so` <= 1.5 MB; import >= 1.0x with no regression of any phase |
@@ -511,6 +573,20 @@ request that makes it unnecessary.
 PRs 7-10 each touch a separate code seam (call lowering, guards, `try` lowering,
 comprehension and builtin lowering). They can be reordered if a measurement says so; the
 acceptance numbers stay.
+
+**Order revised after PR 5.** With `--select module`, diff-match-patch's diff_main runs
+7.1x CPython. With its training profile, it ran 1.02x: nothing was selected. Two causes:
+- step 3 of section 2.3 then counted calls, not their cost, and rejected `diff_bisect` (98%
+  of the self time);
+- the report masked that as "not measured".
+
+Selected by hand, `diff_bisect` alone is 2.8x and its region 2.6x. The gap to 7.1x is the
+typed body that whole-module compilation infers from call sites, which a generic lift lacks.
+So typed bodies (PR 8) are the lever and direct calls (PR 7) add little there:
+- PR 5a fixes selection;
+- PR 8 follows as the checkpoint;
+- `--select module` stays until PR 8 shows profile mode can replace it (6b);
+- PR 7 comes after that, only if measured to pay.
 
 ## 9. Open risks
 

@@ -30,7 +30,7 @@ fn is_module_name(name: &str) -> bool {
 /// Whether `relative` (`sub.mod`) is kept in Python by an `--exclude`
 /// entry: a module or a whole subpackage, named relative to the package or
 /// with the package's name first.
-fn excluded(package: &str, relative: &str, excludes: &[String]) -> bool {
+pub(crate) fn excluded(package: &str, relative: &str, excludes: &[String]) -> bool {
     excludes.iter().any(|entry| {
         let entry = if entry == package {
             ""

@@ -89,14 +89,23 @@ pub struct SelectFlags {
     /// The selection rule: the most functions selected.
     #[arg(long, value_name = "N", requires = "ext")]
     pub select_max: Option<usize>,
-    /// The selection rule: the largest share of a function's calls to Python
-    /// functions that may leave the selected region.
-    #[arg(long, value_name = "SHARE", requires = "ext")]
-    pub select_outside: Option<f64>,
+    /// The selection rule: the most source lines selected.
+    #[arg(long, value_name = "N", requires = "ext")]
+    pub select_lines: Option<u64>,
+    /// The selection rule: what one call from a compiled function to a
+    /// Python function outside the selection costs, in nanoseconds; a
+    /// function whose such calls cost its self time is not selected.
+    #[arg(long, value_name = "NS", requires = "ext")]
+    pub select_crossing_ns: Option<u64>,
     /// The selection rule: the share of a function's sampled calls that catch
     /// an exception in its frame must be under this.
     #[arg(long, value_name = "SHARE", requires = "ext")]
     pub select_handled: Option<f64>,
+    /// Internal (pass 3's builds): ignore `[tool.pycc]`'s `profile`,
+    /// `compile` and `exclude-functions`, so the build compiles exactly the
+    /// `--compile` functions it is given.
+    #[arg(long, hide = true, requires = "ext")]
+    pub no_project_select: bool,
     /// Internal (the package build's member builds): the member's selected
     /// functions, one `FIRSTLINENO QUALNAME` per line.
     #[arg(long, value_name = "PATH", hide = true, requires = "package_member")]
@@ -315,11 +324,15 @@ pub enum Command {
         /// The selection rule's most functions.
         #[arg(long, default_value_t = 64)]
         select_max: usize,
-        /// The selection rule: the share of a function's calls to Python
-        /// functions that leave the selection (each one a crossing between
-        /// compiled and interpreted code) must be under this.
-        #[arg(long, default_value_t = 0.5)]
-        select_outside: f64,
+        /// The selection rule's most source lines.
+        #[arg(long, default_value_t = 4000)]
+        select_lines: u64,
+        /// The selection rule: what one call from a compiled function to a
+        /// Python function outside the selection (a crossing between compiled
+        /// and interpreted code) costs, in nanoseconds; a function whose
+        /// crossings cost its self time is not selected.
+        #[arg(long, default_value_t = crate::profile::CROSSING_NS)]
+        select_crossing_ns: u64,
         /// The selection rule: the share of a function's sampled calls that
         /// catch an exception in its frame must be under this.
         #[arg(long, default_value_t = 0.5)]
@@ -335,6 +348,20 @@ pub enum Command {
         /// (needs valgrind), as evidence beside the wall-time verdict.
         #[arg(long)]
         verify_instructions: bool,
+        /// A file or directory pass 3's copy holds besides the project (its
+        /// tests, data), at the same path relative to the package's import
+        /// root; repeatable. The copy is of the project root (the nearest
+        /// directory above the package with a `pyproject.toml`, `setup.cfg`
+        /// or `setup.py`, never past `site-packages`), or of the package
+        /// alone when there is none or it is installed.
+        #[arg(long = "verify-include", value_name = "PATH")]
+        verify_include: Vec<PathBuf>,
+        /// A module or subpackage of the package (as a package build's
+        /// `--exclude`) kept in Python: profiled, never a candidate, so the
+        /// set pass 3 measures is the set a build with the same `--exclude`
+        /// compiles. Repeatable.
+        #[arg(long = "exclude", value_name = "MODULE")]
+        excludes: Vec<String>,
         /// Run no workload: read the profile `-o` names against PKG's current
         /// sources and print its stale entries and what the selection rule
         /// takes from it (`-- PYTHON` indexes the sources).

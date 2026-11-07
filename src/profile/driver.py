@@ -5,9 +5,10 @@
 #
 #   index  PKG OUT          every function of the package's sources: its module,
 #                           qualified name, first line (its first decorator's, as
-#                           `co_firstlineno`), the SHA-256 of its source text and
-#                           whether it is eligible (docs/design/compile-little.md,
-#                           section 2.1), as JSON in OUT.
+#                           `co_firstlineno`), the SHA-256 of its source text, its
+#                           length in lines and whether it is eligible
+#                           (docs/design/compile-little.md, section 2.1), as JSON
+#                           in OUT.
 #   calls  PKG OUT -- ...   runs SCRIPT under `cProfile`; writes, as JSON in OUT,
 #                           the total self time of everything it saw and, per
 #                           package function, its calls, self time and calls to
@@ -32,7 +33,8 @@
 #
 # SCRIPT runs as `__main__` (`runpy.run_path`) with `sys.argv` its own and the
 # directory PKG is imported from (above every package holding it) first on
-# `sys.path`; a `SystemExit` it raises ends it as it
+# `sys.path`, and that directory in `PYCC_PROFILE_ROOT` (pass 3's built copy's,
+# for a workload that finds its test files by path); a `SystemExit` it raises ends it as it
 # would end the interpreter. A pass whose workload imports no module of PKG,
 # or one from elsewhere, fails.
 import ast
@@ -94,7 +96,7 @@ def direct(node, kinds):
 
 
 def functions(tree, lines):
-    """(qualname, firstlineno, sha256, eligible) of every function of a module, with
+    """(qualname, firstlineno, sha256, lines, eligible) of every function of a module, with
     CPython's qualified names."""
     out = []
 
@@ -106,7 +108,8 @@ def functions(tree, lines):
                 eligible = (not in_function and isinstance(n, ast.FunctionDef)
                             and not direct(n, (ast.Yield, ast.YieldFrom, ast.Await)))
                 out.append((qual + n.name, first,
-                            hashlib.sha256(text.encode("utf-8")).hexdigest(), eligible))
+                            hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                            n.end_lineno - first + 1, eligible))
                 walk(n.body, qual + n.name + ".<locals>.", True)
             elif isinstance(n, ast.ClassDef):
                 walk(n.body, qual + n.name + ".", in_function)
@@ -134,9 +137,9 @@ def index(pkg):
         # Lines as `ast` counts them: ended only by `\r\n`, `\r` or `\n`
         # (`str.splitlines` also splits on `\f`, `\x85`, U+2028, ...).
         lines = re.split(r"(?<=\n)|(?<=\r)(?!\n)", raw.decode(encoding))
-        for qual, first, digest, eligible in functions(tree, lines):
+        for qual, first, digest, length, eligible in functions(tree, lines):
             out.append({"module": name, "qualname": qual, "firstlineno": first,
-                        "sha256": digest, "eligible": eligible})
+                        "sha256": digest, "lines": length, "eligible": eligible})
     return out
 
 
@@ -144,8 +147,12 @@ def run(pkg, script, args):
     import runpy
     sys.argv = [script, *args]
     sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
-    # PKG's sources, not a copy installed or beside the script.
+    # PKG's sources, not a copy installed or beside the script. Its import root
+    # is also the workload's to read (`PYCC_PROFILE_ROOT`): in pass 3 it is the
+    # built copy's, where a suite that discovers its test files by path must
+    # look (`unittest` refuses a test module imported from elsewhere).
     sys.path.insert(0, import_root(pkg))
+    os.environ["PYCC_PROFILE_ROOT"] = import_root(pkg)
     # Pass 3's copy of a package: the modules beside the original (a
     # standalone module's siblings) are found where they are.
     origin = os.environ.pop("PYCC_PROFILE_ORIGIN", None)

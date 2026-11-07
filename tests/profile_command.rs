@@ -447,8 +447,9 @@ fn handled_exceptions_count_per_call_on_every_thread() {
     std::fs::create_dir_all(&pkg).unwrap();
     std::fs::write(pkg.join("__init__.py"), "").unwrap();
     // Three threads are inside `f` at once when each catches: every call's
-    // handler runs while the other two calls are active. (`f` calls mostly
-    // outside the package, `Barrier.wait`, hence `--select-outside 1`.)
+    // handler runs while the other two calls are active. (`f` mostly waits
+    // in `Barrier.wait`, outside the package: its crossings are free here,
+    // `--select-crossing-ns 0`.)
     std::fs::write(
         pkg.join("t.py"),
         "def f(barrier):\n    barrier.wait()\n    try:\n        {}[0]\n    except KeyError:\n        pass\n    barrier.wait()\n",
@@ -464,7 +465,7 @@ fn handled_exceptions_count_per_call_on_every_thread() {
     )
     .unwrap();
     let out = dir.join("p.json");
-    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0", "--select-outside", "1"], &[work.as_os_str()]);
+    let r = profile(&pkg, &out, &["--runs", "1", "--select-share", "0", "--select-crossing-ns", "0"], &[work.as_os_str()]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     let p = read(&out);
     let rec = &p["functions"][0];
@@ -542,12 +543,15 @@ fn a_function_pass_2_did_not_sample_never_takes_a_rejected_one_s_slot() {
     std::fs::write(pkg.join("__init__.py"), "").unwrap();
     std::fs::write(
         pkg.join("m.py"),
-        "def a(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 1\n\n\n\
+        "def a(d):\n    for _ in range(200):\n        pass\n    try:\n        return d[0]\n    except KeyError:\n        return 1\n\n\n\
          def b(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 2\n",
     )
     .unwrap();
     let work = dir.join("work.py");
-    // `a` takes more self time than `b`.
+    // `a` takes far more self time than `b`: twice the calls, each with a
+    // loop of 200 steps before its `try`. With the call count alone the
+    // margin was 2x, and one run's timing noise (a macOS runner measured
+    // `b` slower) let `b` take the one slot.
     std::fs::write(&work, "from pkg import m\nfor i in range(3000):\n    m.a({})\n    m.a({})\n    m.b({})\n").unwrap();
     let out = dir.join("p.json");
     let rule = ["--runs", "1", "--select-share", "0", "--select-max", "1"];
@@ -575,4 +579,79 @@ fn a_function_pass_2_did_not_sample_never_takes_a_rejected_one_s_slot() {
     assert!(shown.contains("rejected: pkg.m:a: it catches an exception in 1000 of its first 1000 calls"), "{shown}");
     assert!(shown.contains("rejected: pkg.m:b: not sampled by pass 2"), "{shown}");
     assert!(!shown.contains("selected: pkg.m:b"), "{shown}");
+}
+
+/// A cold function a hot one calls is in the hot one's region (section 2.3):
+/// the region is selected on its combined self time, so pass 2 samples the
+/// cold callee's argument types too, and the hot caller's call out to it is
+/// no crossing. (`split` alone is far under the rule's share and calls.)
+#[test]
+fn a_cold_callee_is_sampled_with_its_hot_callers_region() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    std::fs::write(
+        pkg.join("b.py"),
+        "def bisect(s, n):\n    t = 0\n    for i in range(n):\n        t += ord(s[i % len(s)])\n    return split(s, t)\n\n\
+         def split(s, t):\n    return t % 7\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(
+        &work,
+        "import sys\nsys.path.insert(0, sys.argv[1])\nfrom pkg import b\nfor i in range(60):\n    b.bisect('abc', 5000)\n",
+    )
+    .unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &["--runs", "1"], &[work.as_os_str(), pkg.parent().unwrap().as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let split = p["functions"].as_array().unwrap().iter().find(|f| f["qualname"] == "split").unwrap();
+    assert_eq!(split["sampled"], true, "{p}");
+    assert_eq!(split["arg_types"]["s"]["str"], 60, "{p}");
+    let check = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("profile")
+        .arg(&pkg)
+        .arg("-o")
+        .arg(&out)
+        .args(["--check", "--"])
+        .arg(python())
+        .output()
+        .expect("pycc runs");
+    let text = String::from_utf8_lossy(&check.stdout);
+    assert!(text.contains("selected: pkg.b:bisect"), "{text}");
+    assert!(text.contains("selected: pkg.b:split"), "{text}");
+}
+
+/// A module `--exclude` keeps in Python (a package's own tests) is
+/// profiled, so its time and the calls into it count, but never a
+/// candidate: the set pass 3 measures is the one a build with the same
+/// `--exclude` compiles.
+#[test]
+fn an_excluded_module_is_profiled_but_never_a_candidate() {
+    let dir = ScratchDir::new("profile_cmd").unwrap();
+    let pkg = package(&dir);
+    std::fs::create_dir_all(pkg.join("tests")).unwrap();
+    std::fs::write(pkg.join("tests/__init__.py"), "").unwrap();
+    std::fs::write(
+        pkg.join("tests/t.py"),
+        "def spin(n):\n    s = 0\n    for i in range(n):\n        s += i\n    return s\n",
+    )
+    .unwrap();
+    let work = dir.join("work.py");
+    std::fs::write(&work, format!("{WORKLOAD}from pkg.tests import t\nfor i in range(200):\n    t.spin(500)\n")).unwrap();
+    let out = dir.join("p.json");
+    let rule = ["--select-share", "0", "--select-calls", "1"];
+    let r = profile(&pkg, &out, &["--runs", "1", "--exclude", "tests", rule[0], rule[1], rule[2], rule[3]], &[work.as_os_str(), dir.as_os_str()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let p = read(&out);
+    let spin = p["functions"].as_array().unwrap().iter().find(|f| f["qualname"] == "spin").unwrap();
+    assert!(spin["calls"].as_u64().unwrap() >= 200, "{spin}");
+    // Not a candidate, so pass 2 never sampled it.
+    assert!(spin["arg_types"].as_object().is_none_or(|t| t.is_empty()), "{spin}");
+    let r = profile(&pkg, &out, &["--check", "--exclude", "pkg.tests", rule[0], rule[1], rule[2], rule[3]], &[]);
+    let stdout = String::from_utf8_lossy(&r.stdout);
+    assert!(stdout.contains("rejected: pkg.tests.t:spin: its module is kept in Python (`--exclude`)"), "{stdout}");
+    assert!(stdout.contains("selected: pkg.hot:Box.size"), "{stdout}");
 }

@@ -51,6 +51,14 @@ pub(crate) struct Request<'a> {
     pub(crate) compile: &'a [String],
     pub(crate) no_compile: &'a [String],
     pub(crate) rule: Rule,
+    /// What a verified profile's winning set is checked against
+    /// ([`profile::Profile::winner_valid`]): the whole package's sources,
+    /// the interpreter's version, the build's `--exclude` (`None` for a
+    /// build of one module) and that module.
+    pub(crate) package_sources: &'a [Function],
+    pub(crate) python: &'a str,
+    pub(crate) excludes: Option<&'a [String]>,
+    pub(crate) module: Option<&'a str>,
 }
 
 fn split(spec: &str) -> Option<(&str, &str)> {
@@ -83,10 +91,23 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
             }
             Some(path) => {
                 let loaded = profile::Profile::read(path)?;
-                let (current, notes) = loaded.current(sources);
+                let (current, notes) = loaded.current(sources, request.module);
                 out.notes.extend(notes);
-                let entries: Vec<(&profile::Entry, bool)> =
-                    current.iter().map(|(e, f)| (*e, f.eligible)).collect();
+                // A build compiles the winning set's share of its modules
+                // only while the set is valid package-wide.
+                let valid = loaded.winner_valid(&profile::Scope {
+                    sources: request.package_sources,
+                    python: request.python,
+                    excludes: request.excludes,
+                    module: request.module,
+                });
+                if let Err(why) = &valid {
+                    out.notes.push(format!(
+                        "note: the profile's winning set is not valid ({why}): nothing is selected; profile again to measure it"
+                    ));
+                }
+                let mut entries: Vec<profile::Candidate> = current.iter().map(|(e, f)| f.candidate(e)).collect();
+                loaded.mark(&mut entries, &valid);
                 let by_entry: BTreeMap<*const profile::Entry, &Function> =
                     current.iter().map(|(e, f)| (*e as *const _, *f)).collect();
                 for decision in profile::select(loaded.total_ns, &entries, loaded.rule(request.rule)) {
@@ -208,17 +229,39 @@ pub(crate) fn resolve(
     mode: Option<SelectMode>,
     flags: &crate::cli::SelectFlags,
     interpreter: &OsStr,
+    excludes: Option<&[String]>,
 ) -> Result<Option<Selection>, String> {
     let mode = mode.unwrap_or_default();
     if mode == SelectMode::Module {
         return Ok(None);
     }
-    let project = Project::read(path)?;
+    // Pass 3's builds compile exactly the set they are given: the copied
+    // project's `[tool.pycc]` must not add to it.
+    let project = if flags.no_project_select { Project::default() } else { Project::read(path)? };
     let profile = flags.profile.clone().or(project.profile);
     let compile: Vec<String> = flags.compile.iter().cloned().chain(project.compile).collect();
     let no_compile: Vec<String> = flags.no_compile.iter().cloned().chain(project.exclude).collect();
     let defaults = Rule::default();
+    // The package a verified profile's winning set is checked in: the
+    // outermost package holding `path` (or `path` alone), indexed whole.
+    let package_root = package_root(path);
+    let checks_winner = mode == SelectMode::Profile && profile.is_some();
+    let package_sources = if checks_winner {
+        profile::index_excluding(interpreter, &package_root, excludes.unwrap_or(&[]))?
+    } else {
+        Vec::new()
+    };
+    let python = if checks_winner {
+        profile::python_version(interpreter)?
+    } else {
+        String::new()
+    };
+    let module = (!path.is_dir()).then(|| import_name(path));
     let request = Request {
+        package_sources: &package_sources,
+        python: &python,
+        excludes,
+        module: module.as_deref(),
         mode,
         profile: profile.as_deref(),
         compile: &compile,
@@ -227,7 +270,8 @@ pub(crate) fn resolve(
             share: flags.select_share.unwrap_or(defaults.share),
             calls: flags.select_calls.unwrap_or(defaults.calls),
             max: flags.select_max.unwrap_or(defaults.max),
-            outside: flags.select_outside.unwrap_or(defaults.outside),
+            lines: flags.select_lines.unwrap_or(defaults.lines),
+            crossing_ns: flags.select_crossing_ns.unwrap_or(defaults.crossing_ns),
             handled: flags.select_handled.unwrap_or(defaults.handled),
             sampled_only: false,
             measured_only: false,
@@ -255,6 +299,19 @@ pub(crate) fn resolve(
 /// build selects functions (not set under `--select module`, or in strict
 /// mode).
 static MODULE: OnceLock<BTreeSet<Key>> = OnceLock::new();
+
+/// The outermost package directory holding `path` (a module or a package
+/// directory), or `path` itself when no package holds it.
+fn package_root(path: &Path) -> PathBuf {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut root = path.clone();
+    let mut dir = if path.is_dir() { Some(path.as_path()) } else { path.parent() };
+    while let Some(d) = dir.filter(|d| d.join("__init__.py").is_file()) {
+        root = d.to_path_buf();
+        dir = d.parent();
+    }
+    root
+}
 
 /// Records this build's module's selection.
 pub(crate) fn set_module(selected: BTreeSet<Key>) {
