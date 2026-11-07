@@ -46,6 +46,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   left out take the call as before. `isinstance` against a builtin also answers `False`
   inline when the object is exactly another builtin, and packing an object argument is an
   inline reference increment.
+- `x += 1` (and `x = x + y`, `-`, `&`, `|`, `^`) on an object local in a generic body
+  writes the result into `x`'s `int` when the local holds its only reference, the result
+  is a compact `int` and not one of CPython's cached small ints, instead of making a new
+  `int` and freeing the old one (`docs/design/compile-little.md`, section 2.5).
 - A non-strict `--ext` module's CPython code (its whole source, which runs as bytecode,
   and each published signature's wrapper) is compiled once at build time by the target
   interpreter and embedded as one marshalled tuple of code objects, which the import
