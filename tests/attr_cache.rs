@@ -38,7 +38,8 @@ fn matches_cpython_hitting(fixture: &str, min_hits: usize) {
 
 /// [`matches_cpython_hitting`], the call sites' caches also making at least
 /// `min_forward` calls straight to a compiled body behind its Python
-/// forwarder (`pycc_ext_site_forward_calls`; none with the caches off), and
+/// forwarder (`pycc_ext_site_forward_calls`, none with the caches off, plus
+/// the direct calls of `pycc_ext_direct_calls`), and
 /// at least `min_seq` `int` indexes read at a `tuple`'s or `list`'s layout
 /// (`pycc_ext_seq_layout_reads`, which the caches do not switch).
 fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, min_seq: usize) {
@@ -69,6 +70,8 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, 
          print('FORWARD', ctypes.CDLL({module}.__file__).pycc_ext_site_forward_calls(), \
          file=sys.stderr)\n\
          print('SEQ', ctypes.CDLL({module}.__file__).pycc_ext_seq_layout_reads(), \
+         file=sys.stderr)\n\
+         print('DIRECT', ctypes.CDLL({module}.__file__).pycc_ext_direct_calls(), \
          file=sys.stderr)\n"
     );
     for off in [false, true] {
@@ -112,12 +115,20 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, 
                 .find_map(|line| line.strip_prefix("FORWARD "))
                 .and_then(|n| n.trim().parse().ok())
                 .expect("the probe prints the forwarded call count");
+            // A call the direct path takes (`pycc_ext_direct_calls`,
+            // `crates/pycc_codegen/src/direct_call.rs`) skips the forwarder:
+            // it counts toward the calls that reached the compiled body.
+            let direct: usize = stderr
+                .lines()
+                .find_map(|line| line.strip_prefix("DIRECT "))
+                .and_then(|n| n.trim().parse().ok())
+                .expect("the probe prints the direct call count");
             if off {
                 assert_eq!(forward, 0, "caches off\n{stderr}");
             } else {
                 assert!(
-                    forward >= min_forward,
-                    "{forward} forwarded calls, at least {min_forward} expected\n{stderr}"
+                    forward + direct >= min_forward,
+                    "{forward} forwarded and {direct} direct calls, at least {min_forward} expected\n{stderr}"
                 );
             }
         }

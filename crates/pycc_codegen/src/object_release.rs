@@ -168,6 +168,22 @@ fn emit_release<'ctx>(builder: &Builder<'ctx>, object: PendingObject<'ctx>) {
         .expect("build_call should not fail for pycc_ext_obj_release");
 }
 
+/// Releases the new reference `pointer` at the builder's position.
+pub(super) fn release_now<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    builder: &Builder<'ctx>,
+    pointer: PointerValue<'ctx>,
+) {
+    emit_release(
+        builder,
+        PendingObject {
+            pointer,
+            release: release_fn(context, module),
+        },
+    );
+}
+
 /// Holds `scalar`, the already-evaluated operand `expr`, on the pending
 /// stack when it is a produced object, so that every failure edge emitted
 /// until the matching [`Held`] is retired releases it.

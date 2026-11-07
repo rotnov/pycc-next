@@ -141,6 +141,35 @@ fn forward_trampolines_c(exports: &[ExtExport]) -> String {
         "static const int pycc_fwd_slot_count = {count};\n\
          static vectorcallfunc pycc_fwd_trampoline(int index)\n{{\n{switch}    return NULL;\n}}\n\n"
     ));
+    out.push_str(&direct_cells_c(exports));
+    out
+}
+
+/// The direct-call cell of each lifted body (`fnptr_<name>__pycc_dcell`,
+/// defined by codegen's `crate::direct_call` beside `fnptr_<name>`), and
+/// `pycc_fwd_direct_cell`, which answers the cell of the body whose
+/// wrapper is `entry`: `src/ext/module/forward.c` fills it when it patches
+/// the body's forwarder, so a compiled call site can call the body without
+/// the forwarder. Comparisons rather than a table, as for the trampolines.
+fn direct_cells_c(exports: &[ExtExport]) -> String {
+    let mut out = String::new();
+    let mut cases = String::new();
+    for export in exports.iter().filter(|export| {
+        export.class.is_none() && export.name.starts_with(crate::fallback::LIFT_PREFIX)
+    }) {
+        let name = &export.name;
+        out.push_str(&format!(
+            "extern PyccDirectCell fnptr_{name}{suffix};\n",
+            suffix = pycc_codegen::DIRECT_CELL_SUFFIX
+        ));
+        cases.push_str(&format!(
+            "    if (entry == (void *)pycc_ext_wrap_{name}) {{\n        return &fnptr_{name}{suffix};\n    }}\n",
+            suffix = pycc_codegen::DIRECT_CELL_SUFFIX
+        ));
+    }
+    out.push_str(&format!(
+        "static PyccDirectCell *pycc_fwd_direct_cell(void *entry)\n{{\n    (void)entry;\n{cases}    return NULL;\n}}\n\n"
+    ));
     out
 }
 

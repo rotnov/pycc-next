@@ -719,6 +719,41 @@ static int pycc_fwd_wanted(PyObject *code, const PycFwdWant *want)
 }
 
 /*
+ * Publishes `slot`'s forwarder in its body's direct-call cell
+ * (`PyccDirectCell`, `bridge.c`), when a call binding the parameters in
+ * order binds them as the trampoline does: no `*args`, `**kwargs` or
+ * `__class__`, and the body called with the parameters alone. The first
+ * forwarder of a body keeps the cell; a call site whose callee is another
+ * goes through that callee's vectorcall, as before.
+ */
+int pycc_ext_fast_ops_enabled(void);
+static void pycc_fwd_publish_direct(PyccExtModule *m, PycFwdSlot *slot)
+{
+    void *entry = slot->entry != NULL ? (void *)slot->entry : (void *)slot->entry_kw;
+    PyccDirectCell *cell;
+    unsigned long long nargs = 0;
+    int n;
+
+    /* With the fast paths off (`PYCC_NO_FAST_OPS=1`, `fast_ops.c`), every
+     * call goes through the forwarder too. */
+    if (entry == NULL || slot->varargs || slot->varkw || slot->cell != NULL
+        || slot->argcount + slot->kwonly >= 64 || m->fwd_direct_cell == NULL
+        || !pycc_ext_fast_ops_enabled()) {
+        return;
+    }
+    cell = m->fwd_direct_cell(entry);
+    if (cell == NULL || cell->func != NULL) {
+        return;
+    }
+    for (n = slot->posonly; n <= slot->argcount; n++) {
+        nargs |= 1ULL << n;
+    }
+    cell->nargs = nargs;
+    cell->code = slot->code;
+    cell->func = slot->func;
+}
+
+/*
  * Patches `func` when it is an unpatched forwarder of this module: a
  * Python function whose code names only a lift (`__pycc_lift...`) bound in
  * `ns` and has at most the `__class__` cell. With `want` (`__pycc_patch__`),
@@ -808,6 +843,7 @@ static int pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func, const 
     *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampoline(m->fwd_used);
     m->fwd_used++;
     pycc_fwd_index_add(slot);
+    pycc_fwd_publish_direct(m, slot);
     patched = 1;
 done:
     PyErr_Clear();

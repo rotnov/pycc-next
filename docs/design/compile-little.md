@@ -398,7 +398,7 @@ interpreter does, and calls its helper only when the check fails
 | `s[i]` | an exact compact ASCII `str` and a compact `int` in range: the cached one-character `str`; an exact `bytes` or `bytearray`: its byte | `BINARY_SUBSCR_STR_INT` |
 | `b[i] = v` | an exact `bytearray`, a compact `int` index in range and a value in `range(256)`: the byte stored | `STORE_SUBSCR` |
 | `c in s` | an exact `str` in an exact `set` or `frozenset`: `PySet_Contains`, the item unpacked | `CONTAINS_OP_SET` |
-| `isinstance(o, dict)` (a builtin class) | `o` exactly of that class: `True` | |
+| `isinstance(o, dict)` (a builtin class) | `o` exactly of that class: `True`; exactly of another of the 12 builtins the shim publishes: `False` | |
 | a module global | a per-site cache of the namespace dict, its version and the value | `LOAD_GLOBAL_MODULE` |
 
 The layouts these read are checked at module exec (`src/ext/module/fast_ops.c`), which
@@ -411,6 +411,44 @@ A release stays one call into the module's own out-of-line copy (`object_rc.rs`)
 inlining its common case (a mortal object that stays alive) took 1.5% of tomli's
 instructions and 0.5% of mistune's, for 23% more `.text` and 17% more build time on
 mistune.
+
+**PR 7, first part: direct calls between generic bodies (section 2.8).** A call from a compiled body to another
+lifted body went through that body's forwarder: the Python function object, vectorcall,
+the forwarder's argument binding, a recursion check, then the body. For pydantic's
+`_sort_recursive` these out-of-line layers, not cache misses, were the gap to CPython:
+callgrind's cache and branch simulation put its I1, D1 and mispredict counts within a few
+percent of the interpreter's, while it made about 67,000 calls per top-level call against
+CPython's 46,000. Now each lift has a cell (`fnptr_<lift>__pycc_dcell`: the function
+object, its code object, and a mask of the argument counts it binds in order), which the
+shim fills when it patches the function (`pycc_fwd_publish_direct` in
+`src/ext/module/forward.c`). The cell stays empty for a function with `*args`, `**kw`, a
+`__class__` cell, 64 or more parameters, or with `PYCC_NO_FAST_OPS=1`.
+
+A call site whose callee is a module global or a method named like exactly one lift, with
+the keywords naming that lift's parameters in order, checks inline that the callee is the
+cell's function, still runs the cell's code object, and binds this many arguments in
+order. It then enters CPython's recursion check (`Py_EnterRecursiveCall`) and calls the
+body with the packed arguments (`crates/pycc_codegen/src/direct_call.rs`). Any failed
+check, a rebound global, a replaced `__code__`, an override in a subclass, a default
+left out, takes the call as before, and so does a recursion limit reached, so the
+`RecursionError` is raised where CPython raises it.
+
+Two of the inline paths above changed with it:
+- `isinstance` answers `False` too: the exact class of the object is one of the 12
+  builtins the shim publishes (`NoneType` among them), so the answer is whether it is the
+  class asked for (or `bool` for `int`).
+- Packing an object argument is an inline reference increment, with the call kept for a
+  missing value.
+
+Local callgrind on CPython 3.15.2, `--select all`, before (PR 8) → after:
+- `_sort_recursive`: 2.38M → 2.04M instructions per call (CPython 2.53M);
+- tomli `loads()`: 38.0M → 31.9M;
+- mistune: 61.8M → 59.8M;
+- pystache: 0.47M → 0.45M.
+
+Wall time of `_sort_recursive`, best of 9: 184.8 us against CPython's 189.3 us (PR 8:
+230.9 us). mistune's `.text` grows from 1.79 MB to 1.87 MB (+4.5%), and its build from 6.0 s
+to 6.4 s.
 
 `specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
 reasons:
@@ -582,6 +620,12 @@ of `src/ext/module/global_sync.c`, one compare per call. When the dict changed s
 last check (for example after `mock.patch`), the global is read again. If it no longer
 names the function, the call is an ordinary vectorcall. Across modules of one package, a
 `from .mod import f` binding is checked the same way, against the binding module's dict.
+
+Between generic bodies, where every argument is already an object, the call is made
+without the module dict's version: the callee is read as before and compared with the
+function the callee's direct-call cell names (section 2.5, PR 7's first part). The same
+check serves methods, so `self.m(...)` reaches `m`'s body too unless a subclass or an
+instance overrides it. The replay targets of PR 7 in section 8 are not measured yet.
 
 ### 2.9 Size and layout
 

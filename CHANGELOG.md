@@ -38,6 +38,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - A keyword method call from compiled code (`self.m(x, key=y)`) loads the method without
   making a bound method, and a call whose keywords name the parameters in order goes
   straight to the compiled body behind the method's forwarder.
+- A call between compiled generic bodies (a module global or a method that names one
+  compiled function, its keywords in parameter order) calls the body directly, without
+  the forwarder: an inline check that the callee is still that function with its own
+  `__code__`, then CPython's recursion check (`docs/design/compile-little.md`, sections
+  2.5 and 2.8). A rebound name, a replaced `__code__`, an override, `*args` or a default
+  left out take the call as before. `isinstance` against a builtin also answers `False`
+  inline when the object is exactly another builtin, and packing an object argument is an
+  inline reference increment.
 - A non-strict `--ext` module's CPython code (its whole source, which runs as bytecode,
   and each published signature's wrapper) is compiled once at build time by the target
   interpreter and embedded as one marshalled tuple of code objects, which the import
