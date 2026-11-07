@@ -29,7 +29,7 @@ typedef struct {
 
 static struct PycFwdSlot *pycc_fwd_slot_of(PyObject *func);
 static PyObject *pycc_fwd_direct(struct PycFwdSlot *slot, PyObject *func, PyObject *const *args,
-                                 Py_ssize_t n);
+                                 Py_ssize_t n, PyObject *kwnames);
 
 /* `method_descriptor`'s layout (`PyMethodDescrObject`): its `PyMethodDef *`
  * after the common descriptor fields, checked on `str.join`. */
@@ -122,7 +122,7 @@ static PyObject *pycc_ext_site_call(PyccExtCallSite *site, PyObject *method, PyO
     PyObject *result;
 
     if (site->fwd != NULL) {
-        return pycc_fwd_direct(site->fwd, method, stack, (Py_ssize_t)(nargs + 1));
+        return pycc_fwd_direct(site->fwd, method, stack, (Py_ssize_t)(nargs + 1), NULL);
     }
     if (site->fast == NULL) {
         return PyObject_Vectorcall(method, stack, (size_t)(nargs + 1), NULL);

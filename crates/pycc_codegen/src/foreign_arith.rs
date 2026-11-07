@@ -161,40 +161,95 @@ pub(super) fn emit_binop<'ctx>(
         right,
         |l, r| {
             let edge = ForeignFailEdge::for_current(builder);
-            let (l, l_owned) = operand_pointer(context, builder, module, l);
-            let (r, r_owned) = operand_pointer(context, builder, module, r);
-            let owned = u64::from(l_owned) | (u64::from(r_owned) << 1);
-            let ptr = context.ptr_type(inkwell::AddressSpace::default());
-            let i32_type = context.i32_type();
-            let binop = shim_fn(
-                module,
-                EXT_OBJ_BINOP_SYMBOL,
-                ptr.fn_type(
-                    &[ptr.into(), ptr.into(), i32_type.into(), i32_type.into()],
-                    false,
-                ),
-            );
-            let result = builder
-                .build_call(
-                    binop,
-                    &[
-                        l.into(),
-                        r.into(),
-                        i32_type
-                            .const_int(binop_selector(op) + 12 * u64::from(in_place), false)
-                            .into(),
-                        i32_type.const_int(owned, false).into(),
-                    ],
-                    "foreign_binop",
+            let call = || {
+                let (l, l_owned) = operand_pointer(context, builder, module, l);
+                let (r, r_owned) = operand_pointer(context, builder, module, r);
+                let owned = u64::from(l_owned) | (u64::from(r_owned) << 1);
+                let ptr = context.ptr_type(inkwell::AddressSpace::default());
+                let i32_type = context.i32_type();
+                let binop = shim_fn(
+                    module,
+                    EXT_OBJ_BINOP_SYMBOL,
+                    ptr.fn_type(
+                        &[ptr.into(), ptr.into(), i32_type.into(), i32_type.into()],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        binop,
+                        &[
+                            l.into(),
+                            r.into(),
+                            i32_type
+                                .const_int(binop_selector(op) + 12 * u64::from(in_place), false)
+                                .into(),
+                            i32_type.const_int(owned, false).into(),
+                        ],
+                        "foreign_binop",
+                    )
+                    .expect("build_call should not fail for pycc_ext_obj_binop")
+                    .try_as_basic_value()
+                    .expect_basic("pycc_ext_obj_binop returns PyObject *")
+            };
+            let result = if matches!(
+                op,
+                BinOpKind::Add | BinOpKind::Sub | BinOpKind::BitAnd | BinOpKind::BitOr | BinOpKind::BitXor
+            ) && fast_int_operand(l)
+                && fast_int_operand(r)
+            {
+                // `BINARY_OP_ADD_INT`/`_SUBTRACT_INT` (and `&`, `|`, `^`):
+                // two compact `int`s (a native operand a small word) combine
+                // without overflow, their magnitudes being below 2**30 and
+                // 2**62.
+                crate::fast_ops::guarded(
+                    context,
+                    builder,
+                    module,
+                    "fast_int_addsub",
+                    |fast| {
+                        let a = fast_int_value(fast, l, "fast_l");
+                        let b = fast_int_value(fast, r, "fast_r");
+                        let value = match op {
+                            BinOpKind::Add => builder.build_int_add(a, b, "fast_sum"),
+                            BinOpKind::Sub => builder.build_int_sub(a, b, "fast_difference"),
+                            BinOpKind::BitAnd => builder.build_and(a, b, "fast_and"),
+                            BinOpKind::BitOr => builder.build_or(a, b, "fast_or"),
+                            _ => builder.build_xor(a, b, "fast_xor"),
+                        }
+                        .expect("an operation of two i64");
+                        fast.int_object(value, "fast_int").into()
+                    },
+                    call,
                 )
-                .expect("build_call should not fail for pycc_ext_obj_binop")
-                .try_as_basic_value()
-                .expect_basic("pycc_ext_obj_binop returns PyObject *")
-                .into_pointer_value();
+            } else {
+                call()
+            }
+            .into_pointer_value();
             route_null(context, builder, module, rt, edge, result, "foreign_binop");
             Scalar::Object(result)
         },
     )
+}
+
+/// Whether `operand` can take an `int` fast path: an object, or a native
+/// `int` word.
+pub(super) fn fast_int_operand(operand: Scalar<'_>) -> bool {
+    matches!(operand, Scalar::Object(_) | Scalar::Int(_))
+}
+
+/// The value of a [`fast_int_operand`] on `fast`'s path: a compact `int`
+/// object's, or a small native word's.
+pub(super) fn fast_int_value<'ctx>(
+    fast: &crate::fast_ops::Fast<'_, 'ctx>,
+    operand: Scalar<'ctx>,
+    name: &str,
+) -> inkwell::values::IntValue<'ctx> {
+    match operand {
+        Scalar::Object(pointer) => fast.compact_int(pointer, name),
+        Scalar::Int(word) => fast.small_word(word, name),
+        _ => unreachable!("fast_int_operand admitted it"),
+    }
 }
 
 /// Emits `-o`, `+o` or `~o` on an object operand.
@@ -289,36 +344,74 @@ pub(super) fn emit_set_item<'ctx>(
         |base_scalar, key_scalar| {
             pop_pending_int_release(rt, pending);
             let edge = ForeignFailEdge::for_current(builder);
-            let packed_key = emit_pack(
-                context,
-                builder,
-                module,
-                key_scalar,
-                "foreign_store_item_key",
-            );
-            let packed = packed_value(context, builder, module, value, value_scalar);
-            let ptr = context.ptr_type(inkwell::AddressSpace::default());
-            let setitem = shim_fn(
-                module,
-                EXT_OBJ_SETITEM_SYMBOL,
-                context
-                    .i32_type()
-                    .fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
-            );
-            let status = builder
-                .build_call(
-                    setitem,
-                    &[
-                        expect_object_pointer(base_scalar).into(),
-                        packed_key.into(),
-                        packed.into(),
-                    ],
-                    "foreign_set_item",
+            let base_ptr = expect_object_pointer(base_scalar);
+            let call = || {
+                let packed_key = emit_pack(
+                    context,
+                    builder,
+                    module,
+                    key_scalar,
+                    "foreign_store_item_key",
+                );
+                let packed = packed_value(context, builder, module, value, value_scalar);
+                let ptr = context.ptr_type(inkwell::AddressSpace::default());
+                let setitem = shim_fn(
+                    module,
+                    EXT_OBJ_SETITEM_SYMBOL,
+                    context
+                        .i32_type()
+                        .fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+                );
+                builder
+                    .build_call(
+                        setitem,
+                        &[base_ptr.into(), packed_key.into(), packed.into()],
+                        "foreign_set_item",
+                    )
+                    .expect("build_call should not fail for pycc_ext_obj_setitem")
+                    .try_as_basic_value()
+                    .expect_basic("pycc_ext_obj_setitem returns int")
+            };
+            let status = if fast_int_operand(key_scalar)
+                && fast_int_operand(value_scalar)
+                && value.ty() != Ty::None
+            {
+                // `STORE_SUBSCR` of a byte: a compact `int` in `range(256)`
+                // stored at a compact `int` index in range of an exact
+                // `bytearray` (`bytearray_ass_subscript`'s own path).
+                crate::fast_ops::guarded(
+                    context,
+                    builder,
+                    module,
+                    "fast_bytearray_store",
+                    |fast| {
+                        let (length, start) = fast.byte_buffer(base_ptr, false, "fast_store");
+                        let at = fast_int_value(fast, key_scalar, "fast_store_index");
+                        let at = fast.index_within(at, length, "fast_store_index");
+                        let byte = fast_int_value(fast, value_scalar, "fast_store_value");
+                        let fits = builder
+                            .build_int_compare(
+                                inkwell::IntPredicate::ULT,
+                                byte,
+                                context.i64_type().const_int(256, false),
+                                "fast_store_fits",
+                            )
+                            .expect("icmp");
+                        fast.require(fits, "fast_store_byte");
+                        let byte = builder
+                            .build_int_truncate(byte, context.i8_type(), "fast_store_byte")
+                            .expect("trunc");
+                        builder
+                            .build_store(fast.byte_at(start, at, "fast_store_at"), byte)
+                            .expect("store");
+                        context.i32_type().const_zero().into()
+                    },
+                    call,
                 )
-                .expect("build_call should not fail for pycc_ext_obj_setitem")
-                .try_as_basic_value()
-                .expect_basic("pycc_ext_obj_setitem returns int")
-                .into_int_value();
+            } else {
+                call()
+            }
+            .into_int_value();
             route_negative(
                 context,
                 builder,

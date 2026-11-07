@@ -528,31 +528,59 @@ long long pycc_ext_site_forward_calls(void)
     return pycc_fwd_direct_calls;
 }
 
-/* `func(*args)` for the forwarder of `slot` (`pycc_fwd_slot_of(func)`),
- * `args[0]` its receiver: what its trampoline does for a call without
- * keywords (`pycc_fwd_call_in`), else the vectorcall itself. */
-static PyObject *pycc_fwd_direct(struct PycFwdSlot *slot, PyObject *func, PyObject *const *args,
-                                 Py_ssize_t n)
+/* Whether a call of `slot`'s function passing `nargs` arguments
+ * positionally, then the keyword arguments `kwnames` (or none), passes
+ * exactly its parameters in their order: each keyword names, as the same
+ * interned string, the parameter after the ones before it (`f(x, k=v)` for
+ * `def f(x, k)`), as CPython's own calls name them. The arguments then are
+ * the parameters as they stand, and the compiled body takes them as they
+ * are: nothing to bind. A keyword that names its parameter by an equal but
+ * other string, or out of order, is bound by `pycc_fwd_bind`. */
+static int pycc_fwd_in_order(const PycFwdSlot *slot, Py_ssize_t nargs, PyObject *kwnames)
 {
-    if (n == slot->argcount && slot->simple && func == slot->func
+    Py_ssize_t i, nkw = kwnames != NULL ? PyTuple_Size(kwnames) : 0;
+
+    if (!slot->simple || nargs + nkw != slot->argcount || (nkw > 0 && nargs < slot->posonly)) {
+        return 0;
+    }
+    for (i = 0; i < nkw; i++) {
+        if (PyTuple_GetItem(kwnames, i) != PyTuple_GetItem(slot->names, nargs + i)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* `func(*args, **kw)` for the forwarder of `slot` (`pycc_fwd_slot_of(func)`),
+ * `args[0]` its receiver, the last of the `n` arguments the values of the
+ * keywords `kwnames` (or none): what its trampoline does for a call that
+ * passes exactly its parameters in order (`pycc_fwd_call_in`), else the
+ * vectorcall itself. */
+static PyObject *pycc_fwd_direct(struct PycFwdSlot *slot, PyObject *func, PyObject *const *args,
+                                 Py_ssize_t n, PyObject *kwnames)
+{
+    Py_ssize_t nkw = kwnames != NULL ? PyTuple_Size(kwnames) : 0;
+
+    if (func == slot->func && pycc_fwd_in_order(slot, n - nkw, kwnames)
         && PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE) == slot->code) {
         pycc_fwd_direct_calls++;
         return pycc_fwd_target(slot, args, n);
     }
-    return PyObject_Vectorcall(func, args, (size_t)n, NULL);
+    return PyObject_Vectorcall(func, args, (size_t)(n - nkw), kwnames);
 }
 
 /* Trampoline `index`'s call: straight to the compiled body when the call
- * passes exactly the positional parameters, else `pycc_fwd_bind`. */
+ * passes exactly the parameters in order (`pycc_fwd_in_order`), else
+ * `pycc_fwd_bind`. */
 static PyObject *pycc_fwd_call_in(PyccExtModule *m, int index, PyObject *func,
                                   PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
     PycFwdSlot *slot = &m->fwd_slots[index];
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
 
-    if (kwnames == NULL && nargs == slot->argcount && slot->simple
+    if (pycc_fwd_in_order(slot, nargs, kwnames)
         && PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE) == slot->code) {
-        return pycc_fwd_target(slot, args, nargs);
+        return pycc_fwd_target(slot, args, slot->argcount);
     }
     return pycc_fwd_bind(slot, func, args, nargsf, kwnames);
 }

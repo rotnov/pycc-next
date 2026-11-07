@@ -32,11 +32,12 @@
 //! **Why the lookup is a separate step.** CPython resolves a call's
 //! callable before it evaluates the arguments, so `obj.missing(1 // 0)`
 //! raises `AttributeError` rather than `ZeroDivisionError`. A positional
-//! method call therefore emits `pycc_ext_obj_load_method` ([`emit_load_method`],
+//! method call therefore emits `pycc_ext_obj_load_method` (`emit_load_method`,
 //! CPython's own `LOAD_ATTR` of a method: the function and its receiver when
 //! the receiver's class holds it, no bound method made) and its NULL check
-//! before the argument expressions, and [`emit_call_loaded`] after them; a
-//! keyword call loads the bound method with `pycc_ext_obj_getattr`
+//! before the argument expressions, and `emit_call_loaded` after them, with
+//! or without keywords (both in `foreign_method_call.rs`); a call that
+//! unpacks an argument loads the bound method with `pycc_ext_obj_getattr`
 //! (`emit_lookup`). A fused shim that did the load itself would necessarily
 //! run it last. The price
 //! is a second NULL check and a second failure edge. The bound method still
@@ -78,7 +79,7 @@ use inkwell::values::BasicMetadataValueEnum;
 /// constant that depends on nothing in scope, so the entry block is always a
 /// legal position for it, and LLVM's own convention is that every `alloca`
 /// belongs there.
-fn alloca_in_entry_block<'ctx>(
+pub(super) fn alloca_in_entry_block<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     entry_fn: FunctionValue<'ctx>,
@@ -108,7 +109,7 @@ fn alloca_in_entry_block<'ctx>(
 /// meaningful to GEP into -- and `gc.disable()` and an empty `[]` are both
 /// zero-length shapes. One slot is always allocated and simply left
 /// unread; the consumer reads only the count it is passed.
-fn emit_packed_array<'ctx>(
+pub(super) fn emit_packed_array<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     module: &inkwell::module::Module<'ctx>,
@@ -490,193 +491,6 @@ pub(super) fn emit_lookup<'ctx>(
     bound
 }
 
-/// v0.9: the static record of one method call site's cache
-/// (`PyccExtCallSite` in the shim's `call_site.c`: six words, zero at
-/// first), passed to the method-call entries.
-fn call_site_record<'ctx>(
-    context: &'ctx Context,
-    module: &inkwell::module::Module<'ctx>,
-) -> inkwell::values::PointerValue<'ctx> {
-    let ty = context.i64_type().array_type(6);
-    let global = module.add_global(ty, None, "pycc_call_site");
-    global.set_initializer(&ty.const_zero());
-    global.set_linkage(inkwell::module::Linkage::Private);
-    global.as_pointer_value()
-}
-
-/// The lookup half of a positional method call, as CPython's `LOAD_ATTR`
-/// of a method: [`crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL`] answers the
-/// callable and, for a method of the receiver's class the attribute caches
-/// hold, the receiver to pass first (both new references; the receiver
-/// `NULL` otherwise), with no bound method made. [`emit_call_loaded`]
-/// consumes both.
-pub(super) fn emit_load_method<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    base: Scalar<'ctx>,
-    method: &str,
-) -> (
-    inkwell::values::PointerValue<'ctx>,
-    inkwell::values::PointerValue<'ctx>,
-    inkwell::values::PointerValue<'ctx>,
-) {
-    let edge = ForeignFailEdge::for_current(builder);
-    let base_ptr = expect_object_pointer(base);
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let self_slot = alloca_in_entry_block(context, builder, edge.function(), 1);
-    let name = builder
-        .build_global_string_ptr(method, &format!("pycc_foreign_method_{method}"))
-        .expect("build_global_string_ptr should not fail")
-        .as_pointer_value();
-    let load = shim_fn(
-        module,
-        crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL,
-        ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false),
-    );
-    let site = call_site_record(context, module);
-    let callable = builder
-        .build_call(
-            load,
-            &[base_ptr.into(), name.into(), self_slot.into(), site.into()],
-            "foreign_call_bound",
-        )
-        .expect("build_call should not fail for pycc_ext_obj_load_method")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_load_method returns PyObject *")
-        .into_pointer_value();
-    route_null(
-        context,
-        builder,
-        module,
-        rt,
-        edge,
-        callable,
-        "foreign_call_lookup",
-    );
-    let receiver = builder
-        .build_load(ptr, self_slot, "foreign_call_self")
-        .expect("build_load should not fail")
-        .into_pointer_value();
-    (callable, receiver, site)
-}
-
-/// Marshals `args` and calls what [`emit_load_method`] loaded:
-/// [`crate::ext::EXT_OBJ_CALL_LOADED_SYMBOL`], which consumes `callable`,
-/// `receiver` (stored ahead of the arguments) and every packed argument;
-/// `site` is the call site's cache record [`emit_load_method`] passed too.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_call_loaded<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    callable: inkwell::values::PointerValue<'ctx>,
-    receiver: inkwell::values::PointerValue<'ctx>,
-    site: inkwell::values::PointerValue<'ctx>,
-    args: &[Scalar<'ctx>],
-) -> Scalar<'ctx> {
-    let edge = ForeignFailEdge::for_current(builder);
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let i64_type = context.i64_type();
-    // Slot 0 holds the receiver (or NULL) ahead of the arguments, so the
-    // call needs no copy to put it first.
-    let stack = alloca_in_entry_block(context, builder, edge.function(), args.len() + 1);
-    builder
-        .build_store(stack, receiver)
-        .expect("build_store should not fail");
-    for (index, value) in args.iter().enumerate() {
-        let packed = emit_pack(context, builder, module, *value, "foreign_call_arg");
-        let slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    ptr,
-                    stack,
-                    &[i64_type.const_int(index as u64 + 1, false)],
-                    "foreign_call_arg_slot",
-                )
-                .expect("build_in_bounds_gep should not fail")
-        };
-        builder
-            .build_store(slot, packed)
-            .expect("build_store should not fail");
-    }
-    let call = shim_fn(
-        module,
-        crate::ext::EXT_OBJ_CALL_LOADED_SYMBOL,
-        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into(), ptr.into()], false),
-    );
-    let result = builder
-        .build_call(
-            call,
-            &[
-                callable.into(),
-                stack.into(),
-                i64_type.const_int(args.len() as u64, false).into(),
-                site.into(),
-            ],
-            "foreign_call",
-        )
-        .expect("build_call should not fail for pycc_ext_obj_call_loaded")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_call_loaded returns PyObject *")
-        .into_pointer_value();
-    route_null(context, builder, module, rt, edge, result, "foreign_call");
-    Scalar::Object(result)
-}
-
-/// `base.method(args)` as one `pycc_ext_obj_call_method` call: no bound
-/// method is made. `base` is borrowed and `args` already evaluated; the
-/// caller guarantees evaluating them could neither raise nor run code
-/// (`foreign_call_emit::emit_method_call`), so the lookup may follow them.
-pub(super) fn emit_method_call_fused<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    base: Scalar<'ctx>,
-    method: &str,
-    args: &[Scalar<'ctx>],
-) -> Scalar<'ctx> {
-    let edge = ForeignFailEdge::for_current(builder);
-    let entry_fn = edge.function();
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let i64_type = context.i64_type();
-    let base_ptr = expect_object_pointer(base);
-    let name = builder
-        .build_global_string_ptr(method, &format!("pycc_foreign_method_{method}"))
-        .expect("build_global_string_ptr should not fail")
-        .as_pointer_value();
-    let arg_array = emit_packed_array(context, builder, module, entry_fn, args);
-    let call = shim_fn(
-        module,
-        crate::ext::EXT_OBJ_CALL_METHOD_SYMBOL,
-        ptr.fn_type(
-            &[ptr.into(), ptr.into(), ptr.into(), i64_type.into(), ptr.into()],
-            false,
-        ),
-    );
-    let site = call_site_record(context, module);
-    let result = builder
-        .build_call(
-            call,
-            &[
-                base_ptr.into(),
-                name.into(),
-                arg_array.into(),
-                i64_type.const_int(args.len() as u64, false).into(),
-                site.into(),
-            ],
-            "foreign_call",
-        )
-        .expect("build_call should not fail for pycc_ext_obj_call_method")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_call_method returns PyObject *")
-        .into_pointer_value();
-    route_null(context, builder, module, rt, edge, result, "foreign_call");
-    Scalar::Object(result)
-}
 
 /// Marshals `args` and calls `bound`, yielding the call's result as an
 /// opaque [`Scalar::Object`].
@@ -854,26 +668,7 @@ fn emit_call_with<'ctx>(
             vec![callable.into(), arg_array.into(), nargs.into()],
         )
     } else {
-        let name_array = alloca_in_entry_block(context, builder, entry_fn, names.len());
-        for (index, name) in names.iter().enumerate() {
-            let text = builder
-                .build_global_string_ptr(name, &format!("pycc_foreign_kwname_{name}"))
-                .expect("build_global_string_ptr should not fail")
-                .as_pointer_value();
-            let slot = unsafe {
-                builder
-                    .build_in_bounds_gep(
-                        ptr,
-                        name_array,
-                        &[i64_type.const_int(index as u64, false)],
-                        "foreign_call_kwname_slot",
-                    )
-                    .expect("build_in_bounds_gep should not fail")
-            };
-            builder
-                .build_store(slot, text)
-                .expect("build_store should not fail");
-        }
+        let name_array = emit_name_array(context, builder, entry_fn, names);
         (
             ptr.fn_type(
                 &[
@@ -904,6 +699,41 @@ fn emit_call_with<'ctx>(
 
     route_null(context, builder, module, rt, edge, result, "foreign_call");
     Scalar::Object(result)
+}
+
+/// The `const char *` array of a keyword call's `names`, hoisted into the
+/// entry block of `entry_fn` like the argument array; each text is a
+/// constant of the generated code, one address per text, which the shim's
+/// `kwnames` cache keys on.
+pub(super) fn emit_name_array<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    entry_fn: FunctionValue<'ctx>,
+    names: &[String],
+) -> inkwell::values::PointerValue<'ctx> {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let name_array = alloca_in_entry_block(context, builder, entry_fn, names.len());
+    for (index, name) in names.iter().enumerate() {
+        let text = builder
+            .build_global_string_ptr(name, &format!("pycc_foreign_kwname_{name}"))
+            .expect("build_global_string_ptr should not fail")
+            .as_pointer_value();
+        let slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    ptr,
+                    name_array,
+                    &[i64_type.const_int(index as u64, false)],
+                    "foreign_call_kwname_slot",
+                )
+                .expect("build_in_bounds_gep should not fail")
+        };
+        builder
+            .build_store(slot, text)
+            .expect("build_store should not fail");
+    }
+    name_array
 }
 
 /// Emits one `o[k]` load, yielding the result as an opaque
@@ -939,48 +769,95 @@ pub(super) fn emit_subscript<'ctx>(
     let base_ptr = expect_object_pointer(base);
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
 
-    if let Scalar::Int(word) = index {
-        // A native `int` key needs no packing for a `tuple` or `list`.
+    let call = || {
+        if let Scalar::Int(word) = index {
+            // A native `int` key needs no packing for a `tuple` or `list`.
+            let getitem = shim_fn(
+                module,
+                crate::ext::EXT_OBJ_GETITEM_INT_SYMBOL,
+                ptr.fn_type(&[ptr.into(), context.i64_type().into()], false),
+            );
+            return builder
+                .build_call(getitem, &[base_ptr.into(), word.into()], "foreign_subscript")
+                .expect("build_call should not fail for pycc_ext_obj_getitem_int")
+                .try_as_basic_value()
+                .expect_basic("pycc_ext_obj_getitem_int returns PyObject *");
+        }
+        let key = emit_pack(context, builder, module, index, "foreign_subscript_key");
         let getitem = shim_fn(
             module,
-            crate::ext::EXT_OBJ_GETITEM_INT_SYMBOL,
-            ptr.fn_type(&[ptr.into(), context.i64_type().into()], false),
+            if namespace {
+                crate::ext::EXT_NS_GETITEM_SYMBOL
+            } else {
+                EXT_OBJ_GETITEM_SYMBOL
+            },
+            ptr.fn_type(&[ptr.into(), ptr.into()], false),
         );
-        let result = builder
-            .build_call(getitem, &[base_ptr.into(), word.into()], "foreign_subscript")
-            .expect("build_call should not fail for pycc_ext_obj_getitem_int")
+        builder
+            .build_call(getitem, &[base_ptr.into(), key.into()], "foreign_subscript")
+            .expect("build_call should not fail for pycc_ext_obj_getitem")
             .try_as_basic_value()
-            .expect_basic("pycc_ext_obj_getitem_int returns PyObject *")
-            .into_pointer_value();
-        route_null(
+            .expect_basic("pycc_ext_obj_getitem returns PyObject *")
+    };
+    let result = if namespace {
+        // A module global: `LOAD_GLOBAL`'s cache, per site.
+        crate::fast_ops::ns_read(context, builder, module, rt, base_ptr, |cache| {
+            let key = emit_pack(context, builder, module, index, "foreign_subscript_key");
+            let getitem = shim_fn(
+                module,
+                crate::fast_ops::EXT_NS_GETITEM_CACHED_SYMBOL,
+                ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+            );
+            builder
+                .build_call(getitem, &[base_ptr.into(), key.into(), cache.into()], "foreign_global")
+                .expect("build_call should not fail for pycc_ext_ns_getitem_cached")
+                .try_as_basic_value()
+                .expect_basic("pycc_ext_ns_getitem_cached returns PyObject *")
+        })
+        .into()
+    } else if crate::foreign_arith::fast_int_operand(index) {
+        // `BINARY_SUBSCR_STR_INT`: a compact ASCII `str` indexed by a
+        // compact `int` in range is its cached one-character `str`; a
+        // `bytes` or `bytearray` item is its byte as an `int`.
+        crate::fast_ops::guarded(
             context,
             builder,
             module,
-            rt,
-            edge,
-            result,
-            "foreign_subscript",
-        );
-        return Scalar::Object(result);
+            "fast_str_index",
+            |fast| {
+                let length = fast.ascii_str(base_ptr, "fast_base");
+                let at = crate::foreign_arith::fast_int_value(fast, index, "fast_index");
+                let at = fast.index_within(at, length, "fast_index");
+                let byte = fast.ascii_byte(base_ptr, at, "fast_index");
+                fast.char_str(rt, byte, "fast_char").into()
+            },
+            || {
+                crate::fast_ops::guarded(
+                    context,
+                    builder,
+                    module,
+                    "fast_bytes_index",
+                    |fast| {
+                        let (length, start) = fast.byte_buffer(base_ptr, true, "fast_bytes");
+                        let at = crate::foreign_arith::fast_int_value(fast, index, "fast_bytes_index");
+                        let at = fast.index_within(at, length, "fast_bytes_index");
+                        let byte = builder
+                            .build_load(context.i8_type(), fast.byte_at(start, at, "fast_byte_at"), "fast_byte")
+                            .expect("load")
+                            .into_int_value();
+                        let value = builder
+                            .build_int_z_extend(byte, context.i64_type(), "fast_byte_value")
+                            .expect("zext");
+                        fast.int_object(value, "fast_byte_int").into()
+                    },
+                    call,
+                )
+            },
+        )
+    } else {
+        call()
     }
-    let key = emit_pack(context, builder, module, index, "foreign_subscript_key");
-
-    let getitem = shim_fn(
-        module,
-        if namespace {
-            crate::ext::EXT_NS_GETITEM_SYMBOL
-        } else {
-            EXT_OBJ_GETITEM_SYMBOL
-        },
-        ptr.fn_type(&[ptr.into(), ptr.into()], false),
-    );
-    let result = builder
-        .build_call(getitem, &[base_ptr.into(), key.into()], "foreign_subscript")
-        .expect("build_call should not fail for pycc_ext_obj_getitem")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_getitem returns PyObject *")
-        .into_pointer_value();
-
+    .into_pointer_value();
     route_null(
         context,
         builder,

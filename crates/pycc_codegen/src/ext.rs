@@ -268,6 +268,16 @@ pub const EXT_OBJ_LOAD_METHOD_SYMBOL: &str = "pycc_ext_obj_load_method";
 /// consumed on every path.
 pub const EXT_OBJ_CALL_LOADED_SYMBOL: &str = "pycc_ext_obj_call_loaded";
 
+/// `PyObject *pycc_ext_obj_call_loaded_kw(PyObject *callable, PyObject
+/// **stack, long long nargs, const char **names, long long nkw,
+/// PyccExtCallSite *site, PyObject **site_kwnames)`:
+/// [`EXT_OBJ_CALL_LOADED_SYMBOL`] with the last `nkw` of
+/// `stack[1..=nargs + nkw]` passed as the keywords `names` (no unpacking
+/// marker among them), their tuple kept in the site's own static slot
+/// `site_kwnames` from its first call; `callable` and every slot consumed on
+/// every path.
+pub const EXT_OBJ_CALL_LOADED_KW_SYMBOL: &str = "pycc_ext_obj_call_loaded_kw";
+
 /// The fixed C shim's direct-call helper (#1313): `f(args)` where `f` is
 /// any name typed `object` -- a foreign binding, such as `from itertools
 /// import product` followed by `product("ab", "cd")`, or a `for` loop

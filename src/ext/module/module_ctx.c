@@ -224,6 +224,49 @@ PYCC_ENTRY PyObject *pycc_ext_obj_import_from(const char *module_name, const cha
     return pycc_ext_obj_import_from_in(&pycc_ext_mod, module_name, fromlist, nfrom, index, level);
 }
 
+/*
+ * A cached global read of compiled code (`__pycc_fallback_ns["name"]`,
+ * `crates/pycc_codegen/src/fast_ops.rs`'s `ns_read`): the read is
+ * `pycc_ext_ns_getitem` (consuming `k`), and when the module's namespace
+ * dict bound the name itself and is watched, the site's cache records the
+ * dict, where its version is read and the version now, and the value
+ * (borrowed: the dict holds it as long as its version is unchanged). The
+ * generated code answers a later read from the cache while the version
+ * still matches, as `LOAD_GLOBAL`'s cache does. A name read from the
+ * builtins, or a dict not yet watched (3.15, while the body runs), is not
+ * cached.
+ */
+typedef struct PyccNsReadCache {
+    PyObject *dict;
+    const uint64_t *version;
+    uint64_t seen;
+    PyObject *value;
+} PyccNsReadCache;
+
+PYCC_ENTRY PyObject *pycc_ext_ns_getitem_cached(PyObject *ns, PyObject *k, PyccNsReadCache *cache)
+{
+    const uint64_t *version = pycc_ext_ns_deferred || ns == NULL || ns != pycc_ext_ns_dict
+                                  ? NULL
+                                  : pycc_ext_ns_version;
+    uint64_t seen = version == NULL ? 0 : *version;
+    PyObject *result;
+
+    cache->dict = NULL;
+    Py_XINCREF(k);
+    result = pycc_ext_ns_getitem(ns, k);
+    if (result != NULL && version != NULL && k != NULL && PyDict_CheckExact(ns) && *version == seen) {
+        if (PyDict_GetItemWithError(ns, k) == result && *version == seen) {
+            cache->version = version;
+            cache->seen = seen;
+            cache->value = result;
+            cache->dict = ns;
+        }
+        PyErr_Clear();
+    }
+    Py_XDECREF(k);
+    return result;
+}
+
 PYCC_ENTRY void pycc_ext_global_sync(const char *name, void *slot, int kind,
                                      PyccGlobalCache *cache, char *initialized)
 {

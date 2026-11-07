@@ -320,6 +320,8 @@ static int pycc_ext_exec_module(PyObject *module)
     if (pycc_ext_register_module_in(&pycc_ext_mod) != 0) {
         return -1;
     }
+    /* The layouts the compiled code's inline fast paths read (`fast_ops.c`). */
+    pycc_ext_fast_init();
     /* Native stdin/stdout share CPython's `sys` streams from here on. */
     pycc_rt_io_install(pycc_ext_io_write, pycc_ext_io_read, pycc_ext_io_flush);
     /* An instance's `o` slots are counted with CPython's own counts. */
