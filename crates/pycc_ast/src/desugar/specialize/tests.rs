@@ -419,9 +419,6 @@ fn a_specialized_parameter_reads_its_original_object_unless_provably_consumed() 
         "y = s if z else s",
         "return +x",
         "y = +i",
-        "y = x + 1",
-        "y = x * i - 2.5",
-        "y = len(s) + i",
         "return s + ''",
         "return s * 1",
         "y = s[:]",
@@ -436,12 +433,16 @@ fn a_specialized_parameter_reads_its_original_object_unless_provably_consumed() 
     ];
     for source in escaping {
         let mut body = parse(source).body.to_vec();
-        let used = escapes::keep_objects(&mut body, &params, &none);
+        let used = escapes::keep_objects(&mut body, &params, &Default::default(), &none);
         assert!(!used.is_empty(), "{source}");
         assert!(!objects_read(&body).is_empty(), "{source}");
     }
     let consumed = [
         "y = x + 1 < 2.5",
+        "y = x + 1",
+        "y = x * i - 2.5",
+        "y = len(s) + i",
+        "return i // 2",
         "y = -x",
         "y = ~i",
         "y = not s",
@@ -474,14 +475,14 @@ fn a_specialized_parameter_reads_its_original_object_unless_provably_consumed() 
     ];
     for source in consumed {
         let mut body = parse(source).body.to_vec();
-        let used = escapes::keep_objects(&mut body, &params, &none);
+        let used = escapes::keep_objects(&mut body, &params, &Default::default(), &none);
         assert!(used.is_empty(), "{source}");
     }
     // A builtin a module binding, a formal parameter or the body binds
     // is not taken to be one.
     let shadowed = std::collections::BTreeSet::from(["len"]);
     let mut body = parse("y = len(s)").body.to_vec();
-    assert_eq!(escapes::keep_objects(&mut body, &params, &shadowed), ["s"]);
+    assert_eq!(escapes::keep_objects(&mut body, &params, &Default::default(), &shadowed), ["s"]);
 
 }
 
@@ -586,4 +587,40 @@ fn a_builtin_shadowed_by_any_binding_form_is_not_taken_for_the_builtin() {
         panic!("the native copy")
     };
     assert!(objects_read(&native.body).is_empty());
+}
+
+/// A guessed parameter the body binds again stays native only when every
+/// binding gives it a value of its type in the function's own scope and no
+/// use, of it or of a value derived from it that may be it, leaves.
+#[test]
+fn a_rebound_guess_stays_native_only_if_its_value_never_leaves() {
+    let params = |source: &str| -> Vec<(String, &'static str)> {
+        guesses(source).into_iter().flat_map(|(_, params)| params).collect()
+    };
+    let x_only = vec![("x".to_string(), "int")];
+    // The rebound value leaves: `text` is not specialized.
+    assert_eq!(params("def f(text, x):\n    for i in range(x):\n        pass\n    text = text[x:]\n    return text\n"), x_only);
+    // A loop target, or a value of another type, may not fit the slot.
+    assert_eq!(params("def f(text, x):\n    for i in range(len(text) + x):\n        pass\n    for text in [x]:\n        pass\n    return 0\n"), x_only);
+    assert_eq!(params("def f(text, x):\n    for i in range(len(text) + x):\n        pass\n    text = len(text)\n    return 0\n"), x_only);
+    // Every use consumed: both stay native.
+    let both = vec![("text".to_string(), "str"), ("x".to_string(), "int")];
+    assert_eq!(params("def f(text, x):\n    n = 0\n    while len(text) > x % 7:\n        text = text[1:]\n        n += 1\n    return n\n"), both);
+    assert_eq!(params("def f(text, x):\n    for i in range(x):\n        x += 1\n        if x > 9:\n            break\n    return len(text[x:])\n"), both);
+    // A method's object parameters come after its attribute snapshots.
+    let source = "class C:\n    def __init__(self):\n        self.base = 0\n    def keep(self, s):\n        n = self.base\n        for i in range(len(s)):\n            n += 1\n        return s\n";
+    let (module, planned) = plan_of(source);
+    assert_eq!(planned.len(), 1);
+    let Stmt::ClassDef(class) = &module.body[module.body.len() - 1] else { panic!("the class") };
+    let native = class
+        .body
+        .iter()
+        .find_map(|stmt| match stmt {
+            Stmt::FunctionDef(def) if def.name.as_str().starts_with(NATIVE_PREFIX) => Some(def),
+            _ => None,
+        })
+        .expect("the native copy");
+    let names: Vec<&str> = native.parameters.args.iter().map(|a| a.parameter.name.as_str()).collect();
+    assert_eq!(names.last(), Some(&"_pycc_object_s"), "{names:?}");
+    assert_eq!(objects_read(&native.body), ["_pycc_object_s"]);
 }

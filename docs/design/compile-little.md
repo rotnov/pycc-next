@@ -429,6 +429,28 @@ NaN, a large `int` and a `str` that leave unchanged; `hash` of a NaN, a reflecte
 `s.strip()`, `s[:]`, `s + ''` and `s.split()` against CPython's identities; and a rebound
 parameter.
 
+The guessed specializations of `specialize_untyped` (the `--select module` path) follow
+the same rules, through the same `keep_objects` (object parameters come after a method's
+attribute snapshots), with one difference: their parameters may be rebound
+(`text1 = text1[x:]`). Such a parameter has no original object left to read, so it stays
+native only if every binding is `p = e` or `p op= e` in the function's own scope with `e`
+provably of its type, and no use of it, or of a value derived from it by an operation that
+may return its operand, may let the value out (`escapes::escaping_rebound`); otherwise it
+is not specialized. `tests/untyped_identity.rs` checks a large `int` and a `str` returned
+unchanged, through `s[0:]` or `+k`, stored in a list, rebound with the value leaving or
+consumed, and a method's object parameter. diff-match-patch `diff_main` (medians of 5, measured locally on CPython 3.15):
+- **Module mode:** 6.47x and 6.55x after (compiled 1.100 s and 1.071 s), 6.77x before
+  (1.054 s). `diff_commonOverlap` and `patch_apply` are no longer specialized: they rebind
+  `text1`/`text2`/`text` and let a slice of them leave (`pattern = text1[-length:]`,
+  which CPython may answer with `text1` itself).
+- **Profile mode:** unchanged, 6.80x after against 6.78x before (`diff_bisect`
+  specialized, compiled 1.058 s against 1.040 s).
+
+Numbers that a function computes do not need the original object back: CPython 3.15's
+`int` and `float` arithmetic never returns an operand itself, so arithmetic on numbers
+consumes its operands, while `+x` and `str` concatenation, repetition and `%` pass the
+escape of their result on.
+
 Measured locally on CPython 3.15:
 - **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
   0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for

@@ -130,6 +130,10 @@ pub fn specialize_untyped(
         .filter(|builtin| binds_at_module_level(&module.body, builtin))
         .collect();
     let module_binds = |name: &str| module_bound.contains(name);
+    let shadowed: std::collections::BTreeSet<&str> = escapes::PROVEN_BUILTINS
+        .into_iter()
+        .filter(|builtin| binds_at_module_level(&module.body, builtin))
+        .collect();
     let call_sites = call_sites::CallSites::of(module);
     let mut out = Vec::new();
     let old = std::mem::take(&mut module.body);
@@ -137,7 +141,7 @@ pub fn specialize_untyped(
     for stmt in old {
         match stmt {
             Stmt::FunctionDef(mut def) => {
-                let planned = plan(&def, None, skip, keep_builtins, &module_binds, &call_sites);
+                let planned = plan(&def, None, skip, keep_builtins, &module_binds, &shadowed, &call_sites);
                 if planned.is_none()
                     && let Some((clone, spec)) = plan_iterable(&def, skip)
                 {
@@ -147,8 +151,8 @@ pub fn specialize_untyped(
                     continue;
                 }
                 match planned {
-                    Some((clone, spec)) => {
-                        add_guard(&mut def, None, &spec, &[]);
+                    Some((clone, spec, objects)) => {
+                        add_guard(&mut def, None, &spec, &objects);
                         body.push(Stmt::FunctionDef(def));
                         body.push(Stmt::FunctionDef(clone));
                         out.push(spec);
@@ -170,10 +174,11 @@ pub fn specialize_untyped(
                                 skip,
                                 keep_builtins,
                                 &module_binds,
+                                &shadowed,
                                 &call_sites,
                             ) {
-                                Some((clone, spec)) => {
-                                    add_guard(&mut def, Some(&class_name), &spec, &[]);
+                                Some((clone, spec, objects)) => {
+                                    add_guard(&mut def, Some(&class_name), &spec, &objects);
                                     members.push(Stmt::FunctionDef(def));
                                     members.push(Stmt::FunctionDef(clone));
                                     out.push(spec);
@@ -251,8 +256,9 @@ fn plan(
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
     module_binds: &dyn Fn(&str) -> bool,
+    shadowed: &std::collections::BTreeSet<&str>,
     call_sites: &call_sites::CallSites,
-) -> Option<(StmtFunctionDef, Specialized)> {
+) -> Option<(StmtFunctionDef, Specialized, Vec<String>)> {
     let class_facts = class.map(|(_, facts)| facts);
     let class = class.map(|(name, _)| name);
     let fn_name = def.name.as_str();
@@ -321,6 +327,22 @@ fn plan(
         };
         annotations.push(annotation);
     }
+    // A builtin a formal parameter or a binding in the body shadows is not
+    // the builtin; a guessed parameter the body binds again stays native
+    // only if no use may let its value out (`escapes`).
+    let bound = crate::namespace::bound_anywhere(&def.body);
+    let mut shadowed = shadowed.clone();
+    shadowed.extend(p.iter().map(|param| param.name().as_str()));
+    shadowed.extend(bound.iter().map(String::as_str));
+    let dropped = escapes::escaping_rebound(&def.body, &guessed, &shadowed);
+    if !dropped.is_empty() {
+        guessed.retain(|(param, _)| !dropped.contains(param));
+        for (param, annotation) in params.iter().zip(annotations.iter_mut()) {
+            if dropped.contains(param.parameter.name.as_str()) {
+                *annotation = name("object", ExprContext::Load, param.range());
+            }
+        }
+    }
     // A method's integer attributes it may take as snapshots (`attrs`).
     let snapshots = match (receiver, class_facts) {
         (Some(receiver), Some(facts)) => {
@@ -338,7 +360,29 @@ fn plan(
     if guessed.is_empty() {
         return None;
     }
-    Some(native_copy(def, receiver, annotations, guessed, &snapshots, keep_builtins, qualname))
+    let (mut clone, spec) = native_copy(def, receiver, annotations, guessed, &snapshots, keep_builtins, qualname);
+    let natives: Vec<(String, &'static str)> =
+        spec.params.iter().filter(|(param, _)| !param.contains('.')).cloned().collect();
+    let rebinding = natives
+        .iter()
+        .filter(|(param, _)| bound.contains(param))
+        .map(|(param, _)| param.clone())
+        .collect();
+    let objects = escapes::keep_objects(&mut clone.body, &natives, &rebinding, &shadowed);
+    add_objects(&mut clone, &objects, def.name.range());
+    Some((clone, spec, objects))
+}
+
+/// Appends a parameter taking the original object of each of `objects` to
+/// the native copy `clone` (`escapes`), after its attribute snapshots.
+fn add_objects(clone: &mut StmtFunctionDef, objects: &[String], range: TextRange) {
+    for param in objects {
+        let mut object = clone.parameters.args[0].clone();
+        object.parameter.name = Identifier::new(format!("{}{param}", escapes::OBJECT_PREFIX), range);
+        object.parameter.annotation = Some(Box::new(name("object", ExprContext::Load, range)));
+        object.default = None;
+        clone.parameters.args.push(object);
+    }
 }
 
 /// The native copy of `def` (a method when `receiver` is its first
@@ -520,14 +564,8 @@ fn plan_observed(
     let mut shadowed = shadowed.clone();
     shadowed.extend(p.iter().map(|param| param.name().as_str()));
     shadowed.extend(bound.iter().map(String::as_str));
-    let objects = escapes::keep_objects(&mut clone.body, &spec.params, &shadowed);
-    for param in &objects {
-        let mut object = clone.parameters.args[0].clone();
-        object.parameter.name = Identifier::new(format!("{}{param}", escapes::OBJECT_PREFIX), def.name.range());
-        object.parameter.annotation = Some(Box::new(name("object", ExprContext::Load, def.name.range())));
-        object.default = None;
-        clone.parameters.args.push(object);
-    }
+    let objects = escapes::keep_objects(&mut clone.body, &spec.params, &Default::default(), &shadowed);
+    add_objects(&mut clone, &objects, def.name.range());
     Some((clone, spec, objects))
 }
 
@@ -658,7 +696,13 @@ fn add_guard(def: &mut StmtFunctionDef, class: Option<&str>, spec: &Specialized,
     let (callee, args) = match class {
         Some(_) => (
             format!("{}.{NATIVE_PREFIX}{}", names[0], def.name),
-            names[1..].iter().map(String::as_str).chain(snapshots.iter().copied()).collect::<Vec<_>>().join(", "),
+            names[1..]
+                .iter()
+                .map(String::as_str)
+                .chain(snapshots.iter().copied())
+                .chain(objects.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(", "),
         ),
         None => (
             format!("{NATIVE_PREFIX}{}", def.name),
