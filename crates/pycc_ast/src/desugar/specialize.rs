@@ -148,7 +148,7 @@ pub fn specialize_untyped(
                 }
                 match planned {
                     Some((clone, spec)) => {
-                        add_guard(&mut def, None, &spec);
+                        add_guard(&mut def, None, &spec, &[]);
                         body.push(Stmt::FunctionDef(def));
                         body.push(Stmt::FunctionDef(clone));
                         out.push(spec);
@@ -173,7 +173,7 @@ pub fn specialize_untyped(
                                 &call_sites,
                             ) {
                                 Some((clone, spec)) => {
-                                    add_guard(&mut def, Some(&class_name), &spec);
+                                    add_guard(&mut def, Some(&class_name), &spec, &[]);
                                     members.push(Stmt::FunctionDef(def));
                                     members.push(Stmt::FunctionDef(clone));
                                     out.push(spec);
@@ -408,20 +408,28 @@ pub type Observed = (String, Vec<(String, &'static str)>);
 /// its parameters' types; its other parameters keep their annotations. As
 /// for a guess, only a function that loops is specialized, and the copies
 /// of those `keep_builtins` names (by report name) keep calling builtins
-/// as their originals do. Returns what was specialized, by report name.
+/// as their originals do. A parameter the body may bind again is not
+/// specialized, and a use of a specialized one that may let its value out
+/// reads its original object (`escapes`). Returns what was specialized,
+/// by report name, and why an observed parameter was not, by report name.
 pub fn specialize_observed(
     module: &mut ModModule,
     observed: &dyn Fn(&str) -> Option<Observed>,
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
-) -> Vec<Specialized> {
+) -> (Vec<Specialized>, Vec<(String, String)>) {
     if ["type", "str", "int", "float", "bytearray"]
         .iter()
         .any(|builtin| binds_at_module_level(&module.body, builtin))
     {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
+    let shadowed: std::collections::BTreeSet<&str> = escapes::CONSUMING_BUILTINS
+        .into_iter()
+        .filter(|builtin| binds_at_module_level(&module.body, builtin))
+        .collect();
     let mut out = Vec::new();
+    let mut excluded = Vec::new();
     let old = std::mem::take(&mut module.body);
     let mut body = Vec::with_capacity(old.len());
     for stmt in old {
@@ -431,10 +439,12 @@ pub fn specialize_observed(
         };
         let planned = observed(def.name.as_str())
             .filter(|(report, _)| !skip(report))
-            .and_then(|(report, types)| plan_observed(&def, report, &types, keep_builtins));
+            .and_then(|(report, types)| {
+                plan_observed(&def, report, &types, keep_builtins, &shadowed, &mut excluded)
+            });
         match planned {
-            Some((clone, spec)) => {
-                add_guard(&mut def, None, &spec);
+            Some((clone, spec, objects)) => {
+                add_guard(&mut def, None, &spec, &objects);
                 body.push(Stmt::FunctionDef(def));
                 body.push(Stmt::FunctionDef(clone));
                 out.push(spec);
@@ -446,17 +456,21 @@ pub fn specialize_observed(
         insert_guard_types(&mut body, &OBSERVED_TYPES);
     }
     module.body = body.into();
-    out
+    (out, excluded)
 }
 
 /// [`specialize_observed`]'s copy of `def`, reported as `report`, with
-/// `types` for its parameters.
+/// `types` for its parameters, and the parameters whose original objects
+/// it also takes (`escapes`), last and in that order; a parameter left out
+/// because the body may bind it again is added to `excluded`.
 fn plan_observed(
     def: &StmtFunctionDef,
     report: String,
     types: &[(String, &'static str)],
     keep_builtins: &dyn Fn(&str) -> bool,
-) -> Option<(StmtFunctionDef, Specialized)> {
+    shadowed: &std::collections::BTreeSet<&str>,
+    excluded: &mut Vec<(String, String)>,
+) -> Option<(StmtFunctionDef, Specialized, Vec<String>)> {
     let p = &def.parameters;
     if def.is_async
         || !def.decorator_list.is_empty()
@@ -475,10 +489,19 @@ fn plan_observed(
     let mut annotations = Vec::with_capacity(p.args.len());
     for param in &p.args {
         let param_name = param.parameter.name.as_str();
-        let observed = types
+        let mut observed = types
             .iter()
             .find(|(name, ty)| name == param_name && OBSERVED_TYPES.contains(ty))
             .map(|(_, ty)| *ty);
+        if let Some(ty) = observed
+            && escapes::rebound(&def.body, param_name)
+        {
+            excluded.push((
+                report.clone(),
+                format!("parameter `{param_name}` (observed `{ty}`) may be bound again in the body"),
+            ));
+            observed = None;
+        }
         let annotation = match observed {
             Some(ty) => {
                 guessed.push((param_name.to_string(), ty));
@@ -495,7 +518,16 @@ fn plan_observed(
     if guessed.is_empty() {
         return None;
     }
-    Some(native_copy(def, None, annotations, guessed, &[], keep_builtins, report))
+    let (mut clone, spec) = native_copy(def, None, annotations, guessed, &[], keep_builtins, report);
+    let objects = escapes::keep_objects(&mut clone.body, &spec.params, shadowed);
+    for param in &objects {
+        let mut object = clone.parameters.args[0].clone();
+        object.parameter.name = Identifier::new(format!("{}{param}", escapes::OBJECT_PREFIX), def.name.range());
+        object.parameter.annotation = Some(Box::new(name("object", ExprContext::Load, def.name.range())));
+        object.default = None;
+        clone.parameters.args.push(object);
+    }
+    Some((clone, spec, objects))
 }
 
 /// Turns each `FALLBACK_BUILTINS.f(...)` call of `body` back into `f(...)`
@@ -608,7 +640,7 @@ fn plan_iterable(
 
 /// Puts the guard calling `spec`'s specialization at the top of `def`
 /// (after its docstring).
-fn add_guard(def: &mut StmtFunctionDef, class: Option<&str>, spec: &Specialized) {
+fn add_guard(def: &mut StmtFunctionDef, class: Option<&str>, spec: &Specialized, objects: &[String]) {
     let names: Vec<String> = def
         .parameters
         .args
@@ -627,7 +659,10 @@ fn add_guard(def: &mut StmtFunctionDef, class: Option<&str>, spec: &Specialized)
             format!("{}.{NATIVE_PREFIX}{}", names[0], def.name),
             names[1..].iter().map(String::as_str).chain(snapshots.iter().copied()).collect::<Vec<_>>().join(", "),
         ),
-        None => (format!("{NATIVE_PREFIX}{}", def.name), names.join(", ")),
+        None => (
+            format!("{NATIVE_PREFIX}{}", def.name),
+            names.iter().chain(objects).map(String::as_str).collect::<Vec<_>>().join(", "),
+        ),
     };
     let test = spec
         .params
@@ -674,6 +709,7 @@ fn loops(body: &[Stmt]) -> bool {
 
 mod attrs;
 mod call_sites;
+mod escapes;
 mod evidence;
 use evidence::Evidence;
 

@@ -391,15 +391,34 @@ reasons:
 
 None of those apply to a lift: it is module-level, generated, and annotated `object`
 only as a placeholder. So lifts are told apart by the selection's flag, never by their
-names or annotations. `tests/select_observed_types.rs` checks both paths against
-CPython: the observed `str`s; a list, a tuple, an `int` or `None`; and `str` subclasses
-that change indexing or `len`.
+names or annotations.
+
+A native parameter is a converted copy of its argument, so two rules keep the copy the
+function it copies (`specialize/escapes.rs`):
+- **The argument stays the argument.** The copy also takes each specialized `int`,
+  `float` or `str` parameter's original object, and every use that may let the value out
+  reads that object: a return, an assignment, a call or container argument, `is`, and,
+  for a `float`, a key or the item `in` looks for (compared by identity first, so
+  `[f(nan)] == [nan]` holds). Uses that consume the value (arithmetic, an index, `len()`,
+  a loop's iterable, a `str` method) read the native value. A `bytearray`'s native form
+  is the object itself.
+- **A parameter the body may bind again is not specialized.** The observed type is the
+  argument's, not that of later values (`for item in xs: n = item`). Any assignment,
+  augmented assignment, `for`/`with`/comprehension target, walrus, `del`, `except ... as`
+  or `case` capture, `global`/`nonlocal`, or nested scope binding the name counts;
+  `--report-fallbacks` says `not specialized: ... may be bound again in the body`.
+
+`tests/select_observed_types.rs` checks both paths against CPython: the observed `str`s;
+a list, a tuple, an `int` or `None`; `str` subclasses that change indexing or `len`; a
+NaN, a large `int` and a `str` that leave unchanged; and a rebound parameter.
 
 Measured locally on CPython 3.15:
 - **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
   0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for
   `text1: str, text2: str` (2,763 ms against 2,814 ms for its 30-function region). Before:
-  2.75x. **The checkpoint's diff_main bar (>= 6x) is met.**
+  2.75x. **The checkpoint's diff_main bar (>= 6x) is met.** With the two rules above
+  (objects for escaping uses, no rebound parameters) it measured 6.98x (CPython 6.394 s,
+  compiled 0.916 s): `diff_bisect` lets `text1` and `text2` out only once, at its end.
 - **pydantic `model_json_schema()`: 0.99x** (14.41 ms against 14.32 ms, 31 rounds). Pass
   3 keeps none of 55 candidates. **The checkpoint's schema bar (>= 1.05x) is missed.**
 

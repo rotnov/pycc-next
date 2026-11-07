@@ -270,7 +270,7 @@ fn observed_plan(source: &str, observed: &[Seen<'_>]) -> (ModModule, Vec<Special
             (report.to_string(), types.iter().map(|(p, t)| (p.to_string(), *t)).collect::<Vec<_>>())
         })
     };
-    let planned = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    let (planned, _) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
     (module, planned)
 }
 
@@ -314,4 +314,181 @@ fn an_observed_function_without_a_loop_or_a_native_type_is_left_alone() {
     assert_eq!(observed_plan(looped, &[("f", "f", &[("s", "str")])]).1.len(), 1);
     let bound = format!("str = bytes\n{looped}");
     assert!(observed_plan(&bound, &[("f", "f", &[("s", "str")])]).1.is_empty());
+}
+
+/// Every way a body may bind a parameter again keeps the parameter out of
+/// an observed-type specialization; reading it does not.
+#[test]
+fn a_parameter_bound_again_anywhere_in_the_body_is_rebound() {
+    let rebinding = [
+        "n = 1",
+        "n += 1",
+        "n: int = 1",
+        "for n in xs: pass",
+        "with f() as n: pass",
+        "(n := 1)",
+        "del n",
+        "[0 for n in xs]",
+        "try:\n    pass\nexcept E as n:\n    pass",
+        "match xs:\n    case [*n]: pass",
+        "match xs:\n    case {**n}: pass",
+        "match xs:\n    case n: pass",
+        "def g():\n    nonlocal n\n    n = 1",
+        "def g():\n    global n",
+        "def g(n): pass",
+        "lambda n: n",
+        "class C:\n    n = 1",
+        "import n",
+    ];
+    for body in rebinding {
+        assert!(escapes::rebound(&parse(body).body, "n"), "{body}");
+    }
+    let reading = "m = n + 1\nfor i in range(n): print(n, i)\ndef g():\n    return n\nlambda: n\n";
+    assert!(!escapes::rebound(&parse(reading).body, "n"));
+}
+
+/// The loads of `_pycc_object_` names in `body`.
+fn objects_read(body: &[Stmt]) -> Vec<String> {
+    struct Names(Vec<String>);
+    impl<'a> Visitor<'a> for Names {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if let Expr::Name(n) = expr
+                && n.id.as_str().starts_with("_pycc_object_")
+            {
+                self.0.push(n.id.to_string());
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut names = Names(Vec::new());
+    for stmt in body {
+        names.visit_stmt(stmt);
+    }
+    names.0
+}
+
+/// A use of a specialized parameter that may let its value out reads the
+/// original object; one that consumes the value reads the native one. A
+/// float is compared by identity first as a key and as the item `in` looks
+/// for, so those uses read its object too.
+#[test]
+fn a_specialized_parameter_that_may_escape_reads_its_original_object() {
+    let params = [("x".to_string(), "float"), ("s".to_string(), "str"), ("b".to_string(), "bytearray")];
+    let none = std::collections::BTreeSet::new();
+    let escaping = [
+        "return x",
+        "y = x",
+        "ys.append(x)",
+        "f(x)",
+        "[x]",
+        "(x, 1)",
+        "{x: 1}",
+        "x is y",
+        "y is not x",
+        "x in ys",
+        "d[x]",
+        "x or y",
+        "min(x, y)",
+        "yield x",
+        "lambda: x",
+        "return s",
+        "f(k=s)",
+        "s is t",
+        "len(x, k=1)",
+        "y = t.find(s)",
+        "y = x.real",
+    ];
+    for source in escaping {
+        let mut body = parse(source).body.to_vec();
+        let used = escapes::keep_objects(&mut body, &params, &none);
+        assert!(!used.is_empty(), "{source}");
+        assert!(!objects_read(&body).is_empty(), "{source}");
+    }
+    let consumed = [
+        "y = x + 1",
+        "y = -x",
+        "if x: pass",
+        "while x < 1: pass",
+        "y = x == z",
+        "y = 1.0 if x else 2.0",
+        "for c in s: pass",
+        "[c for c in s if x]",
+        "y = s[x:]",
+        "y = s[0]",
+        "y = 'a' in s",
+        "y = len(s)",
+        "y = ord(s[0])",
+        "y = s.find(t)",
+        "y = 'sep'.join(s)",
+        "assert x, 'msg'",
+        "return b",
+        "f(b)",
+        "y = s.upper()",
+        "t += x",
+    ];
+    for source in consumed {
+        let mut body = parse(source).body.to_vec();
+        let used = escapes::keep_objects(&mut body, &params, &none);
+        assert!(used.is_empty(), "{source}");
+    }
+    // A builtin the module or the body binds is not taken to consume.
+    let shadowed = std::collections::BTreeSet::from(["len"]);
+    let mut body = parse("y = len(s)").body.to_vec();
+    assert_eq!(escapes::keep_objects(&mut body, &params, &shadowed), ["s"]);
+    let mut body = parse("def ord(c): return c\ny = ord(s)").body.to_vec();
+    assert_eq!(escapes::keep_objects(&mut body, &params, &none), ["s"]);
+}
+
+/// A specialization that reads a parameter's object takes it as a last
+/// parameter, which the guard passes; a parameter bound again is left out,
+/// and says why.
+#[test]
+fn an_observed_specialization_takes_the_objects_it_reads_and_skips_rebound_parameters() {
+    let source = "\
+def f(x: object, n: object, xs: object) -> object:
+    for item in xs:
+        n = item
+    t = 0.0
+    for _ in range(3):
+        t += x
+    return x
+";
+    let mut module = parse(source);
+    let lookup = |name: &str| {
+        (name == "f").then(|| ("f".to_string(), vec![("x".to_string(), "float"), ("n".to_string(), "int")]))
+    };
+    let (planned, excluded) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].params, [("x".to_string(), "float")]);
+    assert_eq!(
+        excluded,
+        [("f".to_string(), "parameter `n` (observed `int`) may be bound again in the body".to_string())]
+    );
+    let native = module
+        .body
+        .iter()
+        .find_map(|stmt| match stmt {
+            Stmt::FunctionDef(def) if def.name.as_str() == format!("{NATIVE_PREFIX}f") => Some(def),
+            _ => None,
+        })
+        .expect("the native copy");
+    let names: Vec<&str> = native.parameters.args.iter().map(|a| a.parameter.name.as_str()).collect();
+    assert_eq!(names, ["x", "n", "xs", "_pycc_object_x"]);
+    assert_eq!(objects_read(&native.body), ["_pycc_object_x"]);
+    let Stmt::FunctionDef(original) = &module.body.iter().find(|s| matches!(s, Stmt::FunctionDef(d) if d.name.as_str() == "f")).unwrap() else {
+        unreachable!()
+    };
+    let Stmt::If(guard) = &original.body[0] else { panic!("the guard") };
+    let Stmt::Return(ret) = &guard.body[0] else { panic!("the guard's call") };
+    let Some(Expr::Call(call)) = ret.value.as_deref() else { panic!("a call") };
+    let args: Vec<&str> = call
+        .arguments
+        .args
+        .iter()
+        .map(|a| match a {
+            Expr::Name(n) => n.id.as_str(),
+            _ => "?",
+        })
+        .collect();
+    assert_eq!(args, ["x", "n", "xs", "x"]);
 }

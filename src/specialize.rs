@@ -49,6 +49,9 @@ thread_local! {
     /// specializations from observed types ([`specialize_entry`]).
     static LIFTS: RefCell<BTreeMap<String, pycc_ast::Observed>> =
         const { RefCell::new(BTreeMap::new()) };
+    /// Why an observed parameter of a lift was not specialized, by the
+    /// lift's report name, in the current attempt.
+    static UNOBSERVED: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Records the lifts of the selected functions with observed types, for
@@ -78,6 +81,7 @@ pub(crate) fn reset() {
     KEEP_BUILTINS.with(|keep| keep.borrow_mut().clear());
     PLANNED.with(|planned| planned.borrow_mut().clear());
     PASSED.with(|passed| passed.borrow_mut().clear());
+    UNOBSERVED.with(|unobserved| unobserved.borrow_mut().clear());
 }
 
 /// Adds the specializations of the entry module `parsed`, when the current
@@ -98,12 +102,14 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
             if lifts.is_empty() {
                 return Vec::new();
             }
-            pycc_ast::specialize_observed(
+            let (planned, unobserved) = pycc_ast::specialize_observed(
                 parsed,
                 &|name| lifts.get(name).cloned(),
                 &skip,
                 &|qualname| keep.contains(qualname),
-            )
+            );
+            UNOBSERVED.with(|cell| *cell.borrow_mut() = unobserved);
+            planned
         });
         planned.extend(pycc_ast::specialize_untyped(parsed, &skip, &|qualname| keep.contains(qualname)));
         planned
@@ -409,6 +415,9 @@ pub(crate) fn report() {
         );
     }
     for (qualname, reason) in DROPPED.with(|dropped| dropped.borrow().clone()) {
+        eprintln!("not specialized: `{qualname}`: {reason}");
+    }
+    for (qualname, reason) in UNOBSERVED.with(|unobserved| unobserved.borrow().clone()) {
         eprintln!("not specialized: `{qualname}`: {reason}");
     }
 }

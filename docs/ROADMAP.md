@@ -95,8 +95,9 @@ Accept (carried over from v0.11, not met there):
    >= 6x on `diff_main`, schema >= 1.05x), then direct calls (PR 7) if they measure.
    **Status (PR 8, first part: observed-type specialization):** a selected function's
    compiled body gets a native copy typed with the exact types the profile observed for
-   its parameters, behind an exact-type guard. `diff_main` in profile mode runs 6.88x
-   CPython (`diff_bisect` alone, with `text1: str, text2: str`), so **the diff_main bar is
+   its parameters, behind an exact-type guard; a parameter that escapes is the argument
+   object itself, and one the body binds again is not specialized. `diff_main` in profile
+   mode runs 6.98x CPython (`diff_bisect` alone, with `text1: str, text2: str`), so **the diff_main bar is
    met**. pydantic schema stays at 0.99x and **the schema bar (>= 1.05x) is missed**:
    pydantic's hot parameters each take many types, so whole-body specialization does
    not apply. Per-operation specialization (the design's section 2.5) is the remaining
