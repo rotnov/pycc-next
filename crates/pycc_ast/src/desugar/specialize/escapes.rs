@@ -24,12 +24,14 @@
 //!   `format`.
 //!
 //! CPython returns the operand itself from some of these: `+x` of an exact
-//! `int` or `float`, the full slice `s[:]`, `s + ''`, `s * 1`, a `str`
+//! `int` or `float`, the full slice `s[:]`, `s + ''`, `s * 1`, `s % ()`, a `str`
 //! method with nothing to change (`s.strip()`, `s.split()`'s one item). So
 //! where the result of such an operation may itself leave the function,
 //! its operands read their objects too ([`Objects::visit_in`]); only an
 //! operation whose result is a new value (a comparison, `-x`, `len`, an
-//! item, `s.find(t)`) consumes its operands whatever becomes of the result.
+//! item, `s.find(t)`, arithmetic on numbers, which in CPython 3.15 never
+//! gives an operand back) consumes its operands whatever becomes of the
+//! result.
 //! An item of a `str` is at most a one-character string CPython caches,
 //! which boxing the native item gives as well.
 //!
@@ -55,24 +57,19 @@ pub(super) const OBJECT_PREFIX: &str = "_pycc_object_";
 /// Makes every use of a `params` parameter in `body` read its original
 /// object unless the use provably cannot let the value out (module doc),
 /// and returns the parameters whose object it reads, in `params` order.
-/// `bytearray` parameters keep their native form everywhere. A builtin
-/// counts as one only if `shadowed` (every name the module's scope, the
-/// function's formal parameters or any binding in its body binds) does
-/// not name it.
+/// `bytearray` parameters keep their native form everywhere, and so do the
+/// `rebinding` ones, which the body binds again and so have no object to
+/// read ([`escaping_rebound`] keeps only those with no escaping use). A
+/// builtin counts as one only if `shadowed` (every name the module's
+/// scope, the function's formal parameters or any binding in its body
+/// binds) does not name it.
 pub(super) fn keep_objects(
     body: &mut [Stmt],
     params: &[(String, &'static str)],
+    rebinding: &BTreeSet<String>,
     shadowed: &BTreeSet<&str>,
 ) -> Vec<String> {
-    let builtins = PROVEN_BUILTINS
-        .into_iter()
-        .filter(|f| !shadowed.contains(f))
-        .collect();
-    let objects = Objects {
-        builtins,
-        params: params.to_vec(),
-        used: RefCell::new(BTreeSet::new()),
-    };
+    let objects = Objects::new(params, rebinding, shadowed);
     for stmt in body.iter_mut() {
         objects.visit_stmt(stmt);
     }
@@ -80,7 +77,7 @@ pub(super) fn keep_objects(
     params
         .iter()
         .map(|(param, _)| param)
-        .filter(|param| used.contains(param.as_str()))
+        .filter(|param| used.contains(param.as_str()) && !rebinding.contains(param.as_str()))
         .cloned()
         .collect()
 }
@@ -107,10 +104,58 @@ struct Objects {
     builtins: Vec<&'static str>,
     /// The specialized parameters and their types.
     params: Vec<(String, &'static str)>,
+    /// The specialized parameters the body binds again: a use of one that
+    /// may let its value out is recorded in `used`, never rewritten.
+    rebinding: BTreeSet<String>,
+    /// The parameters a use that may let the value out reads.
     used: RefCell<BTreeSet<String>>,
 }
 
 impl Objects {
+    fn new(params: &[(String, &'static str)], rebinding: &BTreeSet<String>, shadowed: &BTreeSet<&str>) -> Self {
+        Self {
+            builtins: PROVEN_BUILTINS.into_iter().filter(|f| !shadowed.contains(f)).collect(),
+            params: params.to_vec(),
+            rebinding: rebinding.clone(),
+            used: RefCell::new(BTreeSet::new()),
+        }
+    }
+
+    /// The exact type `expr` provably has, of the native ones: a parameter's,
+    /// a literal's, an item or slice of a native sequence, `len` or `ord`,
+    /// or arithmetic on such values whose result type is certain.
+    fn native_type(&self, expr: &Expr) -> Option<&'static str> {
+        use ruff_python_ast::{Number, UnaryOp as U};
+        match expr {
+            Expr::NumberLiteral(n) => match n.value {
+                Number::Int(_) => Some("int"),
+                Number::Float(_) => Some("float"),
+                Number::Complex { .. } => None,
+            },
+            Expr::StringLiteral(_) => Some("str"),
+            Expr::Subscript(e) => match (self.native_type(&e.value)?, e.slice.as_ref()) {
+                ("str", _) => Some("str"),
+                ("bytearray", Expr::Slice(_)) => Some("bytearray"),
+                ("bytearray", _) => Some("int"),
+                _ => None,
+            },
+            Expr::Call(call) if self.proven_call(call) => match call.func.as_ref() {
+                Expr::Name(f) if matches!(f.id.as_str(), "len" | "ord") => Some("int"),
+                _ => None,
+            },
+            Expr::UnaryOp(e) => match (e.op, self.native_type(&e.operand)?) {
+                (U::USub | U::UAdd | U::Invert, "int") => Some("int"),
+                (U::USub | U::UAdd, "float") => Some("float"),
+                _ => None,
+            },
+            Expr::BinOp(e) => {
+                let (left, right) = (self.native_type(&e.left)?, self.native_type(&e.right)?);
+                binop_type(e.op, left, right)
+            }
+            _ => self.param(expr),
+        }
+    }
+
     /// The type of the specialized parameter `expr` reads, if it reads one.
     fn param(&self, expr: &Expr) -> Option<&'static str> {
         let Expr::Name(n) = expr else {
@@ -193,9 +238,13 @@ impl Objects {
         }
         match expr {
             Expr::BinOp(e) if self.is_native(&e.left) && self.is_native(&e.right) => {
-                // `s + ''`, `s * 1`, `x + 0` may be the operand itself.
-                self.visit_in(&mut e.left, escapes);
-                self.visit_in(&mut e.right, escapes);
+                // `s + ''`, `s * 1` and `s % ()` are `s` itself; arithmetic
+                // on numbers never gives an operand back (CPython 3.15).
+                let numbers = [&e.left, &e.right]
+                    .iter()
+                    .all(|operand| matches!(self.native_type(operand), Some("int" | "float")));
+                self.visit_in(&mut e.left, escapes && !numbers);
+                self.visit_in(&mut e.right, escapes && !numbers);
             }
             Expr::UnaryOp(e) if self.is_native(&e.operand) => {
                 // `+x` is an exact `int` or `float` `x` itself; `-x`, `~x`
@@ -298,6 +347,18 @@ impl Transformer for Objects {
                 self.visit_body(&mut s.body);
                 self.visit_body(&mut s.orelse);
             }
+            // A rebinding of a parameter that stays native keeps the value
+            // in the native slot ([`escaping_rebound`] checks its type).
+            Stmt::Assign(s)
+                if matches!(&s.targets[..], [Expr::Name(t)] if self.rebinding.contains(t.id.as_str())) =>
+            {
+                self.visit_in(&mut s.value, false);
+            }
+            Stmt::AugAssign(s)
+                if matches!(s.target.as_ref(), Expr::Name(t) if self.rebinding.contains(t.id.as_str())) =>
+            {
+                self.visit_in(&mut s.value, false);
+            }
             Stmt::Assert(s) => {
                 self.visit_in(&mut s.test, false);
                 if let Some(msg) = &mut s.msg {
@@ -325,12 +386,124 @@ impl Transformer for Objects {
                 .any(|(param, ty)| param == n.id.as_str() && *ty != "bytearray")
         {
             self.used.borrow_mut().insert(n.id.to_string());
-            n.id = format!("{OBJECT_PREFIX}{}", n.id).into();
+            if !self.rebinding.contains(n.id.as_str()) {
+                n.id = format!("{OBJECT_PREFIX}{}", n.id).into();
+            }
             return;
         }
         if self.param(expr).is_some() {
             return;
         }
         self.visit_in(expr, true);
+    }
+}
+
+/// The exact type of `left op right` for native operands, when certain.
+fn binop_type(op: ruff_python_ast::Operator, left: &'static str, right: &'static str) -> Option<&'static str> {
+    use ruff_python_ast::Operator as O;
+    let numeric = |t: &str| matches!(t, "int" | "float");
+    match (op, left, right) {
+        (O::Pow, _, _) => None,
+        (O::Div, l, r) if numeric(l) && numeric(r) => Some("float"),
+        (_, "int", "int") => Some("int"),
+        (O::Add | O::Sub | O::Mult | O::FloorDiv | O::Mod, l, r) if numeric(l) && numeric(r) => Some("float"),
+        (O::Add, "str", "str") => Some("str"),
+        (O::Mult, "str", "int") | (O::Mult, "int", "str") => Some("str"),
+        _ => None,
+    }
+}
+
+/// Of the specialized `params`, those the body binds again that must not
+/// stay native: a parameter keeps its native value through a rebinding
+/// only when every binding of it is `p = e` or `p op= e` in the function's
+/// own scope with `e` (or `p op e`) provably of its type, so the native
+/// slot never refuses a value; and when no use of it, or of a value
+/// derived from it by an operation that may return its operand, may let
+/// the value out (it has no original object to read once rebound).
+/// Dropping one may make others' uses non-native, so this runs to a fixed
+/// point.
+pub(super) fn escaping_rebound(
+    body: &[Stmt],
+    params: &[(String, &'static str)],
+    shadowed: &BTreeSet<&str>,
+) -> BTreeSet<String> {
+    let bound = crate::namespace::bound_anywhere(body);
+    let mut dropped = BTreeSet::new();
+    loop {
+        let natives: Vec<(String, &'static str)> =
+            params.iter().filter(|(p, _)| !dropped.contains(p)).cloned().collect();
+        let rebinding: BTreeSet<String> = natives
+            .iter()
+            .filter(|(p, _)| bound.contains(p))
+            .map(|(p, _)| p.clone())
+            .collect();
+        let objects = Objects::new(&natives, &rebinding, shadowed);
+        let mut newly: BTreeSet<String> = natives
+            .iter()
+            .filter(|(p, ty)| rebinding.contains(p) && !objects.binds_only_natively(body, p, ty))
+            .map(|(p, _)| p.clone())
+            .collect();
+        if newly.is_empty() {
+            let mut scratch = body.to_vec();
+            for stmt in scratch.iter_mut() {
+                objects.visit_stmt(stmt);
+            }
+            newly = objects.used.into_inner().intersection(&rebinding).cloned().collect();
+        }
+        if newly.is_empty() {
+            return dropped;
+        }
+        dropped.extend(newly);
+    }
+}
+
+impl Objects {
+    /// Whether every binding of `param` in `body` is `param = e` or
+    /// `param op= e` in the function's own scope, with a result of type `ty`.
+    fn binds_only_natively(&self, body: &[Stmt], param: &str, ty: &'static str) -> bool {
+        struct Drop<'o> {
+            objects: &'o Objects,
+            param: &'o str,
+            ty: &'static str,
+        }
+        impl Transformer for Drop<'_> {
+            fn visit_stmt(&self, stmt: &mut Stmt) {
+                let native = match stmt {
+                    Stmt::FunctionDef(_) | Stmt::ClassDef(_) => return,
+                    Stmt::Assign(s) => {
+                        matches!(&s.targets[..], [Expr::Name(t)] if t.id.as_str() == self.param)
+                            && self.objects.native_type(&s.value) == Some(self.ty)
+                    }
+                    Stmt::AugAssign(s) => {
+                        matches!(s.target.as_ref(), Expr::Name(t) if t.id.as_str() == self.param)
+                            && self
+                                .objects
+                                .native_type(&s.value)
+                                .and_then(|right| binop_type(s.op, self.ty, right))
+                                == Some(self.ty)
+                    }
+                    _ => false,
+                };
+                if native {
+                    let range = ruff_text_size::Ranged::range(stmt);
+                    *stmt = Stmt::Pass(ruff_python_ast::StmtPass {
+                        node_index: Default::default(),
+                        range,
+                    });
+                } else {
+                    transformer::walk_stmt(self, stmt);
+                }
+            }
+        }
+        let drop = Drop {
+            objects: self,
+            param,
+            ty,
+        };
+        let mut scratch = body.to_vec();
+        for stmt in scratch.iter_mut() {
+            drop.visit_stmt(stmt);
+        }
+        !crate::namespace::bound_anywhere(&scratch).contains(param)
     }
 }
