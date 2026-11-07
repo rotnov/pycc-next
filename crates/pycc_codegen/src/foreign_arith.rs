@@ -150,6 +150,74 @@ pub(super) fn emit_binop<'ctx>(
     left: &MirExpr,
     right: &MirExpr,
 ) -> Scalar<'ctx> {
+    emit_binop_reusing(context, builder, module, rt, user_functions, locals, op, in_place, left, right, None)
+}
+
+/// Emits `x = x op right` (or `x op= right`) for an object local `x`
+/// whose slot owns its reference, where `left` is the read of `x`: when
+/// `x` and `right` take the compact-`int` fast path and `x`'s `int` is
+/// referenced by that slot alone, the result is written into it
+/// ([`crate::fast_ops::Fast::int_in_place`]), as if a new `int` had
+/// replaced it, and the returned flag (an `i8`) reads 1. The slot then
+/// still holds its one reference, so the caller stores nothing and
+/// releases nothing. Otherwise the flag reads 0 and the result is a new
+/// reference, as from [`emit_binop`].
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_rebinding_binop<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    op: BinOpKind,
+    in_place: bool,
+    left: &MirExpr,
+    right: &MirExpr,
+) -> (Scalar<'ctx>, IntValue<'ctx>) {
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("a rebinding is emitted inside a function body");
+    let i8_type = context.i8_type();
+    let flag = crate::entry_slots::build_at_entry_block(builder, function, |b| {
+        b.build_alloca(i8_type, "reused_int").expect("build_alloca should not fail")
+    });
+    builder.build_store(flag, i8_type.const_zero()).expect("store");
+    let result = emit_binop_reusing(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        op,
+        in_place,
+        left,
+        right,
+        Some(flag),
+    );
+    let reused = builder
+        .build_load(i8_type, flag, "reused_int")
+        .expect("load")
+        .into_int_value();
+    (result, reused)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_binop_reusing<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    op: BinOpKind,
+    in_place: bool,
+    left: &MirExpr,
+    right: &MirExpr,
+    reuse: Option<PointerValue<'ctx>>,
+) -> Scalar<'ctx> {
     with_two_operands(
         context,
         builder,
@@ -218,7 +286,10 @@ pub(super) fn emit_binop<'ctx>(
                             _ => builder.build_xor(a, b, "fast_xor"),
                         }
                         .expect("an operation of two i64");
-                        fast.int_object(value, "fast_int").into()
+                        match (reuse, l) {
+                            (Some(flag), Scalar::Object(old)) => reuse_or_make(context, builder, fast, flag, old, value),
+                            _ => fast.int_object(value, "fast_int").into(),
+                        }
                     },
                     call,
                 )
@@ -230,6 +301,47 @@ pub(super) fn emit_binop<'ctx>(
             Scalar::Object(result)
         },
     )
+}
+
+/// On `fast`'s path, `old` (the rebound local's compact `int`) given
+/// `value` in place when [`crate::fast_ops::Fast::int_in_place`] allows it,
+/// with `flag` set; otherwise a new `int` for `value`.
+fn reuse_or_make<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    fast: &crate::fast_ops::Fast<'_, 'ctx>,
+    flag: PointerValue<'ctx>,
+    old: PointerValue<'ctx>,
+    value: IntValue<'ctx>,
+) -> inkwell::values::BasicValueEnum<'ctx> {
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("positioned in a function");
+    let reuse = context.append_basic_block(function, "int_reuse");
+    let make = context.append_basic_block(function, "int_make");
+    let done = context.append_basic_block(function, "int_rebound");
+    let allowed = fast.int_in_place(old, value, "int_reuse");
+    let branch = builder
+        .build_conditional_branch(allowed, reuse, make)
+        .expect("build_conditional_branch should not fail for an i1");
+    crate::int_fast::weight_branch(context, branch, true);
+    builder.position_at_end(reuse);
+    fast.store_int(old, value, "int_reuse");
+    builder
+        .build_store(flag, context.i8_type().const_int(1, false))
+        .expect("store");
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(make);
+    let made = fast.int_object(value, "fast_int");
+    let make_end = builder.get_insert_block().expect("positioned");
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(done);
+    let phi = builder
+        .build_phi(context.ptr_type(inkwell::AddressSpace::default()), "int_rebound")
+        .expect("build_phi should not fail");
+    phi.add_incoming(&[(&old, reuse), (&made, make_end)]);
+    phi.as_basic_value()
 }
 
 /// Whether `operand` can take an `int` fast path: an object, or a native

@@ -7,7 +7,8 @@ subclasses, non-ASCII text, out-of-range indexes, unhashable items, and
 globals rebound between reads. A one-character `str` in a `frozenset` is a
 bit test against the set's cached ASCII mask, which must answer as the set
 does for members of other types, with an `__eq__` CPython calls, beyond the
-mask's size limit, and after its cache entries are evicted.
+mask's size limit, after its cache entries are evicted, and when releasing
+an evicted set runs a weakref callback that refills the cache.
 """
 
 import sys
@@ -211,6 +212,56 @@ def count_members(sets):
     return found
 
 
+def rebind_shared(n):
+    # `i += 1` may update `i`'s `int` in place only while nothing else holds
+    # it: a list, another local, a dict and a default all keep their value.
+    i = n
+    held = [i]
+    i += 1
+    other = i
+    i += 1
+    table = {"k": i}
+    i -= 7
+    return i, held, other, table
+
+
+def rebind_default(x=100000):
+    x += 1
+    x += 1
+    return x
+
+
+def rebind_ranges(start, step, count):
+    # Through CPython's small ints, across zero, and past one 30-bit digit.
+    out = []
+    v = start
+    for _ in range(count):
+        v += step
+        out.append(v)
+    return out
+
+
+def rebind_bits(v):
+    v |= 1 << 20
+    v &= 0xFFFFF0
+    v ^= 0x5555
+    return v
+
+
+def rebind_kinds(v):
+    v += 1000
+    return v
+
+
+def same_object(n):
+    # The probe's: with the fast paths on, the loop keeps one `int`.
+    i = n + 1000
+    first = id(i)
+    for _ in range(n):
+        i += 1
+    return id(i) == first
+
+
 def main():
     big = 2**40
     for a, b in [(1, 2), (-5, 3), (2**30 - 1, 1), (-(2**30), -1), (big, 1), (1, big),
@@ -269,6 +320,12 @@ def main():
     LIMIT = 3
     print(read_limit(), read_print() is len)
     print(count_in("abcabcxyz" * 30))
+    print(rebind_shared(1000), rebind_shared(250), rebind_shared(2**40))
+    print(rebind_default(), rebind_default(), rebind_default(5))
+    print(rebind_ranges(270, -7, 80))
+    print(rebind_ranges(2**30 - 40, 9, 10), rebind_ranges(-(2**30) + 40, -9, 10))
+    print(rebind_bits(300), rebind_bits(-300000), rebind_bits(True))
+    print(rebind_kinds(True), rebind_kinds(MyInt(5)), rebind_kinds(2.5), rebind_kinds(2**62))
     masks()
 
 

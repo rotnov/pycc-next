@@ -413,7 +413,9 @@ members from a two-way cache of 64 sets keyed by the set's address
 to each set whose mask it keeps, so an address cannot be reused while its entry lives. A
 set with more than 256 members, or with any member that is not an exact `str`, gets an
 entry marked unusable, without a reference, and takes `PySet_Contains`: a member of
-another type could compare equal to a one-character string. tomli's `c in
+another type could compare equal to a one-character string. Releasing an evicted set can run
+a weakref callback that refills the cache, so a miss answers from the entry it has just
+computed, not from the cache. tomli's `c in
 BARE_KEY_CHARS`-style loops made the lookup its largest helper; the mask took tomli's
 `loads()` from 31.6M to 29.8M instructions.
 
@@ -459,6 +461,24 @@ Local callgrind on CPython 3.15.2, `--select all`, before (PR 8) → after:
 Wall time of `_sort_recursive`, best of 9: 184.8 us against CPython's 189.3 us (PR 8:
 230.9 us). mistune's `.text` grows from 1.79 MB to 1.87 MB (+4.5%), and its build from 6.0 s
 to 6.4 s.
+
+**Rebinding an `int` in place.** In a scanning loop (`pos += 1`, `i -= 1`), every step
+made a new `int` and freed the old one: `PyLong_FromLongLong`, then the release and
+`long_dealloc`. CPython pays the same, through its free list. A statement `x = x op y`
+(or `x op= y`) on an object local whose slot owns its reference, where `op` is `+`,
+`-`, `&`, `|` or `^`, now checks one more thing on its compact-`int` fast path: if the
+slot holds the only reference to `x`'s `int` (its reference count reads 1) and the result
+is compact and outside the small-`int` cache (`-5..=256`), the result is written into
+that `int` (its tag and digit), and nothing is stored, made or freed
+(`foreign_arith::emit_rebinding_binop`, `Fast::int_in_place`). No other reference can
+see the change, since the count proves there is none. An `int`'s value is therefore no
+longer read with `!invariant.load`; its type still is. `fast_ops.c` checks at module
+exec that a new `int`'s count reads 1 where the generated code reads it.
+
+The alternative was a second, unboxed representation for such locals, boxed where the
+value escapes. It would touch every reader of a local slot (frames, cells, releases,
+exception cleanup) for the same saving in these loops. tomli `loads()`: 31.8M → 28.8M
+instructions; the others move by less than 1% (pypng +0.6%, from the plain loads).
 
 `specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
 reasons:

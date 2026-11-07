@@ -10,7 +10,8 @@
  * The code reads the layouts of CPython 3.13 to 3.15 for a 64-bit GIL
  * build, which the limited API does not promise:
  *
- * - every object: `ob_type` at offset 8;
+ * - every object: the low 32 bits of its reference count at offset 0,
+ *   `ob_type` at 8;
  * - `int` (`PyLongObject`): `lv_tag` at 16, the first 30-bit digit (a
  *   `uint32_t`) at 24; a value is compact (one digit or none) when
  *   `lv_tag < 16`, and its value is `(1 - (lv_tag & 3)) * digit`;
@@ -45,6 +46,7 @@ typedef struct {
 static PyccExtFast pycc_ext_fast;
 
 /* `ob_type`, read where the generated code reads it. */
+#define PYCC_FAST_REFCNT(o) (*(uint32_t *)(o))
 #define PYCC_FAST_TYPE(o) (*(PyTypeObject **)((char *)(o) + 8))
 #define PYCC_FAST_INT_TAG(o) (*(uintptr_t *)((char *)(o) + 16))
 #define PYCC_FAST_INT_DIGIT(o) (*(uint32_t *)((char *)(o) + 24))
@@ -111,6 +113,13 @@ static void pycc_ext_fast_init(void)
     if (ok) {
         o = PyLong_FromLongLong(1LL << 30);
         ok = pycc_ext_fast_int_reads(o, 0, 0);
+        Py_XDECREF(o);
+    }
+    if (ok) {
+        /* A rebinding updates an `int` in place only when the low 32 bits of
+         * its reference count read 1 (`Fast::int_in_place`). */
+        o = PyLong_FromLongLong(123456);
+        ok = o != NULL && PYCC_FAST_REFCNT(o) == 1;
         Py_XDECREF(o);
     }
     if (ok) {

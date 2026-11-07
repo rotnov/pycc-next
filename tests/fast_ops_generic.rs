@@ -33,7 +33,7 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
         .expect("pycc should spawn");
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    for name in ["add", "bump", "less", "equal", "index", "first_chars", "is_quote", "member", "kinds", "read_limit", "count_in", "bits", "undo_sub", "store", "count_members"] {
+    for name in ["add", "bump", "less", "equal", "index", "first_chars", "is_quote", "member", "kinds", "read_limit", "count_in", "bits", "undo_sub", "store", "count_members", "rebind_shared", "rebind_ranges", "same_object"] {
         assert!(report.contains(&format!("compiled: {module}:{name}\n")), "{name}\n{report}");
     }
     // The extension runs without its source beside it, so the module's
@@ -48,7 +48,8 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
          lib = ctypes.CDLL({module}.__file__)\n\
          print('FAST', lib.pycc_ext_fast_ops_enabled(), file=sys.stderr)\n\
          lib.pycc_ext_ascii_mask_fill_count.restype = ctypes.c_longlong\n\
-         print('MASKS', lib.pycc_ext_ascii_mask_fill_count() > 0, file=sys.stderr)\n"
+         print('MASKS', lib.pycc_ext_ascii_mask_fill_count() > 0, file=sys.stderr)\n\
+         print('SAME', {module}.same_object(301), file=sys.stderr)\n"
     );
     for off in [false, true] {
         let mut run = python();
@@ -71,5 +72,12 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
         // The masks are computed only on the fast path.
         let expected = if off { "MASKS False" } else { "MASKS True" };
         assert!(stderr.lines().any(|line| line == expected), "{expected}\n{stderr}");
+        // `i += 1` on the only reference to an `int` updates that `int` in
+        // place with the fast paths on, so the loop ends on the object it
+        // began with. (With them off each step makes a new one, whose
+        // address CPython's free list may or may not reuse.)
+        if !off {
+            assert!(stderr.lines().any(|line| line == "SAME True"), "{stderr}");
+        }
     }
 }

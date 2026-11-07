@@ -184,6 +184,82 @@ fn emit_int_self_update<'ctx>(
     true
 }
 
+/// `x = x op y` (or `x op= y`) for an object local `x` that owns its
+/// reference, `op` one with a compact-`int` fast path: when the fast path
+/// gives `x`'s own `int` the result in place
+/// (`foreign_arith::emit_rebinding_binop`), the slot keeps that reference
+/// and nothing is stored or released; otherwise the result is stored as
+/// any other assignment stores it. `pos += 1` in a scanning loop then
+/// makes no `int` per step, as a native `int` local would not.
+#[allow(clippy::too_many_arguments)]
+fn emit_object_int_rebinding<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &mut HashMap<String, StorageSlot<'ctx>>,
+    target: &str,
+    value: &MirExpr,
+) -> bool {
+    let MirExpr::ObjBinOp {
+        op,
+        in_place,
+        left,
+        right,
+    } = value
+    else {
+        return false;
+    };
+    if !matches!(left.as_ref(), MirExpr::Name { name, .. } if name == target)
+        || !matches!(
+            op,
+            pycc_mir::BinOpKind::Add
+                | pycc_mir::BinOpKind::Sub
+                | pycc_mir::BinOpKind::BitAnd
+                | pycc_mir::BinOpKind::BitOr
+                | pycc_mir::BinOpKind::BitXor
+        )
+        || rt.borrowed_locals.borrow().contains(target)
+    {
+        return false;
+    }
+    let Some(slot) = locals.get(target).filter(|slot| slot.ty == pycc_mir::Ty::Object).cloned() else {
+        return false;
+    };
+    let (scalar, reused) = crate::foreign_arith::emit_rebinding_binop(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        *op,
+        *in_place,
+        left,
+        right,
+    );
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an assignment is emitted inside a function body");
+    let store = context.append_basic_block(function, "rebind_store");
+    let done = context.append_basic_block(function, "rebind_done");
+    let kept = builder
+        .build_int_compare(inkwell::IntPredicate::NE, reused, context.i8_type().const_zero(), "rebind_kept")
+        .expect("icmp");
+    builder
+        .build_conditional_branch(kept, done, store)
+        .expect("build_conditional_branch should not fail for an i1");
+    builder.position_at_end(store);
+    let old = heap_rc::take_slot_old(context, builder, rt, &slot.ty, slot.ptr);
+    emit_assign(context, builder, rt, locals, target, scalar);
+    heap_rc::release_old(context, builder, rt, old);
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(done);
+    true
+}
+
 pub(crate) fn emit_assign_stmt<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -197,6 +273,9 @@ pub(crate) fn emit_assign_stmt<'ctx>(
         unreachable!()
     };
     if emit_int_self_update(context, builder, module, rt, user_functions, locals, target, value) {
+        return Ok(());
+    }
+    if emit_object_int_rebinding(context, builder, module, rt, user_functions, locals, target, value) {
         return Ok(());
     }
     // Non-strict mode: an object rebinding an `int`, `float` or `bool`
