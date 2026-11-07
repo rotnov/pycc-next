@@ -256,3 +256,62 @@ fn a_parameter_every_call_passes_a_bytearray_is_one() {
     let function = "def d(raw):\n    t = 0\n    for i in range(len(raw)):\n        t += len(raw[i:])\n    return t\nclass C:\n    def m(self, it):\n        return self.d(it)\ndef g(it):\n    return d(bytearray(it))\n";
     assert_eq!(guesses(function), vec![("d".to_string(), vec![("raw".to_string(), "bytearray")])]);
 }
+
+/// What [`specialize_observed`] does to `source` given `observed` (by
+/// function name: its report name and its parameters' observed types).
+/// One function's observed types in a test: its name, report name and
+/// parameters' types.
+type Seen<'a> = (&'a str, &'a str, &'a [(&'a str, &'static str)]);
+
+fn observed_plan(source: &str, observed: &[Seen<'_>]) -> (ModModule, Vec<Specialized>) {
+    let mut module = parse(source);
+    let lookup = |name: &str| {
+        observed.iter().find(|(n, _, _)| *n == name).map(|(_, report, types)| {
+            (report.to_string(), types.iter().map(|(p, t)| (p.to_string(), *t)).collect::<Vec<_>>())
+        })
+    };
+    let planned = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    (module, planned)
+}
+
+/// A selected function's lift is specialized for the types the profile
+/// observed: its dunder-shaped name and its `object` annotations do not
+/// keep it out, since the selection names it. An observed type no native
+/// body takes, or a parameter not observed, keeps its annotation.
+#[test]
+fn a_flagged_lift_is_specialized_for_its_observed_types() {
+    let source = "\
+def __pycc_lift0_count__(self: object, s: object, c: object, d: object) -> object:
+    n = 0
+    for i in range(len(s)):
+        if s[i] == c:
+            n += 1
+    return n
+";
+    let (module, planned) = observed_plan(
+        source,
+        &[("__pycc_lift0_count__", "C.count", &[("s", "str"), ("c", "str"), ("d", "dict")])],
+    );
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].qualname, "C.count");
+    assert_eq!(planned[0].params, [("s".to_string(), "str"), ("c".to_string(), "str")]);
+    assert!(def_names(&module.body).contains(&format!("{NATIVE_PREFIX}__pycc_lift0_count__")));
+    // A function the selection does not name is never specialized here,
+    // whatever its name.
+    let (_, none) = observed_plan(source, &[]);
+    assert!(none.is_empty());
+}
+
+/// As for a guess: a function that does not loop, an observed type no
+/// native body takes, or a module that binds a guard's type name is left
+/// alone.
+#[test]
+fn an_observed_function_without_a_loop_or_a_native_type_is_left_alone() {
+    let flat = "def f(s: object) -> object:\n    return s[0]\n";
+    assert!(observed_plan(flat, &[("f", "f", &[("s", "str")])]).1.is_empty());
+    let looped = "def f(s: object) -> object:\n    for c in s:\n        pass\n    return s\n";
+    assert!(observed_plan(looped, &[("f", "f", &[("s", "dict")])]).1.is_empty());
+    assert_eq!(observed_plan(looped, &[("f", "f", &[("s", "str")])]).1.len(), 1);
+    let bound = format!("str = bytes\n{looped}");
+    assert!(observed_plan(&bound, &[("f", "f", &[("s", "str")])]).1.is_empty());
+}

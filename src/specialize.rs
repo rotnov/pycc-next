@@ -47,7 +47,7 @@ thread_local! {
     /// lift's name, its report name and those types. Only these, flagged
     /// here by the selection and never by their names or annotations, get
     /// specializations from observed types ([`specialize_entry`]).
-    static LIFTS: RefCell<BTreeMap<String, (String, Vec<(String, &'static str)>)>> =
+    static LIFTS: RefCell<BTreeMap<String, pycc_ast::Observed>> =
         const { RefCell::new(BTreeMap::new()) };
 }
 

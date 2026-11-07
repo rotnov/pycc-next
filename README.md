@@ -235,7 +235,10 @@ workload with them compiled against the sources, interleaved in fresh processes
 (`--verify-rounds`, default 7). The selection is the one set it measured as a whole that
 won, recorded with its members' source hashes, the `--exclude` list and the Python
 version: if a member changed, the Python version differs or a whole-package build's
-`--exclude` list does, the build selects nothing and asks for a new profile. A function measured slower stays rejected while its source is unchanged
+`--exclude` list does, the build selects nothing and asks for a new profile. A selected
+function whose parameters the profile saw holding one exact `int`, `float`, `str` or
+`bytearray` is compiled with a native copy typed with them, behind an exact-type guard
+(`specialized:` in `--report-fallbacks`). A function measured slower stays rejected while its source is unchanged
 (`--no-verify` skips this; `--verify-instructions` adds callgrind instruction counts as
 evidence).
 `pycc profile pkg -o pycc.profile.json --check -- python3` reads a profile against the

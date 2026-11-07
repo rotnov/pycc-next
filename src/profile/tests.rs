@@ -434,3 +434,18 @@ fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
         "pass 3's winning set is not valid (its member m:a (line 1) changed or is gone)"
     )), "{decided:?}");
 }
+
+/// The types a body is specialized for: a parameter's one exact type in
+/// every sampled call, when a native body takes it; nothing for a
+/// function pass 2 did not sample.
+#[test]
+fn observed_types_are_a_parameters_one_native_exact_type() {
+    let mut e = entry("m", "f", 1, "s", 10, 10);
+    e.arg_types.insert("s".into(), [("str".to_string(), 9)].into());
+    e.arg_types.insert("n".into(), [("int".to_string(), 5), ("float".to_string(), 4)].into());
+    e.arg_types.insert("d".into(), [("dict".to_string(), 9)].into());
+    e.arg_types.insert("x".into(), [("float".to_string(), 9)].into());
+    assert_eq!(e.observed_types(), [("s".to_string(), "str".to_string()), ("x".to_string(), "float".to_string())]);
+    e.sampled = false;
+    assert!(e.observed_types().is_empty());
+}

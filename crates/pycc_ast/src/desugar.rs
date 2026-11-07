@@ -131,7 +131,8 @@ pub use object_except::object_except_handlers;
 pub use aug_target::desugar_computed_aug_target;
 pub use with_stmt::desugar_with;
 pub use specialize::{
-    BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, OBSERVED_TYPES, Specialized, specialize_observed, specialize_untyped,
+    BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, OBSERVED_TYPES, Observed, Specialized, specialize_observed,
+    specialize_untyped,
 };
 pub use ext_signatures::{
     ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_name, ext_entry_target, ext_signatures,

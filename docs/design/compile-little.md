@@ -369,6 +369,75 @@ Each operation in a selected body is lowered for the types it is expected to mee
 
 This replaces the guessed specializations of `src/specialize.rs` (section 7).
 
+**PR 8, first part: bodies specialized for observed types.** A selected function gets
+the parameter types pass 2 observed. Only parameters that held one exact type in every
+sampled call count, and only for `int`, `float`, `str` and `bytearray`
+(`Entry::observed_types`). Those types travel with the selection:
+- `Selection.types`;
+- the member `--select-functions` file, as ` param:type` after the qualified name;
+- for pass 3's builds, `--types-profile`, so pass 3 times the same typed bodies a build
+  compiles.
+
+The selection marks each such function's lift explicitly
+(`crate::specialize::set_lifts`). `pycc_ast::specialize_observed` then gives the lift a
+native copy with those parameters typed, and an exact-type guard in front that calls it
+(`type(s) is str`). Any other argument, a subclass included, runs the generic lift.
+
+`specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
+reasons:
+- a dunder runs through a slot;
+- a class-private `__x` is name-mangled in its class body;
+- an annotation is the user's type.
+
+None of those apply to a lift: it is module-level, generated, and annotated `object`
+only as a placeholder. So lifts are told apart by the selection's flag, never by their
+names or annotations. `tests/select_observed_types.rs` checks both paths against
+CPython: the observed `str`s; a list, a tuple, an `int` or `None`; and `str` subclasses
+that change indexing or `len`.
+
+Measured locally on CPython 3.15:
+- **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
+  0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for
+  `text1: str, text2: str` (2,763 ms against 2,814 ms for its 30-function region). Before:
+  2.75x. **The checkpoint's diff_main bar (>= 6x) is met.**
+- **pydantic `model_json_schema()`: 0.99x** (14.41 ms against 14.32 ms, 31 rounds). Pass
+  3 keeps none of 55 candidates. **The checkpoint's schema bar (>= 1.05x) is missed.**
+
+Observed types do not help polymorphic library code. In pydantic's training profile,
+the hot functions' parameters each hold many exact types:
+- `_make_json_hashable(value)`: `str` 536, `dict` 308, `list` 88, `int` 42, `NoneType`
+  12, `float` 8, `bool` 6 (of 1,000 sampled calls);
+- `_DefinitionsRemapping.remap_json_schema(schema)`: `str` 512, `dict` 327, `list` 85,
+  `int` 49, `NoneType` 13, `bool` 10, `float` 4;
+- `GenerateJsonSchema._sort_recursive(value, parent_key)`: `value` `str` 529, `dict`
+  318, `list` 80, `int` 47, `NoneType` 13, `bool` 10, `float` 3; `parent_key` always
+  `str`.
+
+The only parameter with one type among the top functions is `parent_key`, plus
+`ConfigWrapper.__getattr__`'s `name`, which is not specialized because that body has no
+loop. Whole-body specialization therefore has nothing to specialize. pydantic needs
+this section's per-operation specialization: an inline exact-type path at each
+`isinstance` and dict/list operation, with the generic helper cold.
+
+Generic bodies are slower than the interpreter. A generic lift costs 2-7% on whole
+pydantic phases (section 1's whole-module numbers and PR 4's candidates). Per top-level
+call it can cost much more. The table below replays the top-level calls each function
+received during define and schema (5 repetitions), on fresh deep copies, giving ns per
+call (medians of 5 processes of 15 passes each):
+
+| function | calls | CPython | generic lift | typed (observed) | ideal C |
+|---|---|---|---|---|---|
+| `_make_json_hashable` | 2,580 | 5,961 | 5,499 (1.08x) | n/a: no single-type parameter | 1,601 (3.7x) |
+| `_DefinitionsRemapping.remap_json_schema` | 120 | 25,834 | 29,054 (0.89x) | n/a: no single-type parameter | not written |
+| `GenerateJsonSchema._sort_recursive` | 170 | 6,661 | 10,306 (0.65x) | 12,864 (0.52x; `parent_key: str`) | not written |
+
+The ideal C is `bench/headroom/hrfast.c` (section 1). Typing the one `str` parameter of
+`_sort_recursive` makes it slower: its recursive calls still go through the object
+protocol, and the guard adds a test per call. Pass 3 rejects such a set, since it loses.
+The fix is either of:
+- compile a body only when it is typed where it matters;
+- prove per function that the generic lift pays, as pass 3 already does per set.
+
 ### 2.6 Idiom lowering
 
 Patterns that make intermediate objects are compiled to code that builds the result

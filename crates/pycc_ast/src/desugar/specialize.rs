@@ -71,7 +71,7 @@ const BUILTINS: &str = "__pycc_specialize_builtins";
 
 /// The types a guard tests for, and the prefix of the module globals that
 /// hold them (`__pycc_specialize_int = builtins.int`).
-const GUARD_TYPES: [&str; 4] = ["int", "float", "str", "bytearray"];
+const GUARD_TYPES: [&str; 3] = ["int", "str", "bytearray"];
 
 /// The exact types a profile may observe for a parameter that
 /// [`specialize_observed`] specializes it to.
@@ -191,15 +191,15 @@ pub fn specialize_untyped(
         }
     }
     if !out.is_empty() {
-        insert_guard_types(&mut body);
+        insert_guard_types(&mut body, &GUARD_TYPES);
     }
     module.body = body.into();
     out
 }
 
-/// Inserts the globals the guards read their types from into `body` (a
+/// Inserts the globals the guards read `types` from into `body` (a
 /// module's statements), after its docstring and `__future__` imports.
-fn insert_guard_types(body: &mut Vec<Stmt>) {
+fn insert_guard_types(body: &mut Vec<Stmt>, types: &[&str]) {
     let mut at = usize::from(matches!(body.first(), Some(Stmt::Expr(e))
         if e.value.is_string_literal_expr()));
     while matches!(body.get(at), Some(Stmt::ImportFrom(import))
@@ -211,7 +211,7 @@ fn insert_guard_types(body: &mut Vec<Stmt>) {
     // attribute of the `builtins` module read at every call cost more
     // than the rest of the guard.
     let mut source = format!("import builtins as {BUILTINS}\n");
-    for ty in GUARD_TYPES {
+    for ty in types {
         source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
     }
     let import = super::signatures::parse_helper(&source, TextRange::default());
@@ -394,6 +394,10 @@ fn native_copy(
     )
 }
 
+/// What [`specialize_observed`] knows of one function: the name a report
+/// gives it, and its parameters' observed types.
+pub type Observed = (String, Vec<(String, &'static str)>);
+
 /// Adds the guarded specializations of `module`'s top-level functions that
 /// `observed` names: each such function (a selected function's compiled
 /// lift, docs/design/compile-little.md, section 2.5) gets a native copy
@@ -407,7 +411,7 @@ fn native_copy(
 /// as their originals do. Returns what was specialized, by report name.
 pub fn specialize_observed(
     module: &mut ModModule,
-    observed: &dyn Fn(&str) -> Option<(String, Vec<(String, &'static str)>)>,
+    observed: &dyn Fn(&str) -> Option<Observed>,
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
 ) -> Vec<Specialized> {
@@ -439,7 +443,7 @@ pub fn specialize_observed(
         }
     }
     if !out.is_empty() {
-        insert_guard_types(&mut body);
+        insert_guard_types(&mut body, &OBSERVED_TYPES);
     }
     module.body = body.into();
     out
