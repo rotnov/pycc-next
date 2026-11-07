@@ -140,9 +140,11 @@ extern void pycc_rt_str_set_foreign(void *s, void *object);
 /* Whether a native `str` is immortal (a literal or a shared one-character
  * string, `pycc_rt::str_index::retain_immortal`). */
 extern int pycc_rt_str_is_immortal(void *s);
-/* A native `str` of an exact CPython `str`'s UTF-8 text, adopting the
- * reference passed (`pycc_rt_str_adopt_foreign`): no text is copied. */
-extern void *pycc_rt_str_adopt_foreign(const unsigned char *ptr, long long len, void *object);
+/* A native `str` of an exact CPython `str`'s UTF-8 text and code-point
+ * count, adopting the reference passed (`pycc_rt_str_adopt_foreign`): no
+ * text is copied, and the count is not taken again. */
+extern void *pycc_rt_str_adopt_foreign(const unsigned char *ptr, long long len,
+                                       long long chars, void *object);
 /* The same for a frozenset (`PySetObj::foreign`). */
 extern void *pycc_rt_set_foreign(void *s);
 extern void pycc_rt_set_set_foreign(void *s, void *object);

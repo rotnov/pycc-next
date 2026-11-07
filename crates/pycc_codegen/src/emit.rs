@@ -73,8 +73,11 @@ pub(crate) fn optimize_and_emit(
         pre.push(".pre.ll");
         let _ = module.print_to_file(std::path::Path::new(&pre));
     }
-    // `--release` counts CPython objects inline (`crate::object_rc`).
+    // `--release` counts CPython objects inline (`crate::object_rc`) and
+    // takes native `str` indexing, comparison and counting's common cases
+    // inline (`crate::str_inline`).
     if release {
+        crate::str_inline::inline_str_ops(module, &target_machine.get_target_data());
         crate::object_rc::inline_object_rc(module, &target_machine.get_target_data());
     }
     let optimizing = std::time::Instant::now();

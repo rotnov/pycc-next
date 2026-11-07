@@ -116,7 +116,14 @@ impl PyStrObj {
 /// never freed.
 pub(crate) const IMMORTAL: u32 = 1 << 30;
 
-static ASCII_CHARS: [AtomicPtr<PyStrObj>; 128] = [const { AtomicPtr::new(std::ptr::null_mut()) }; 128];
+/// The shared one-character `str`s of the 128 ASCII characters, each made
+/// on first use. Exported: compiled code reads a filled slot to answer
+/// `s[i]` inline (`pycc_codegen::str_inline`), and calls
+/// `pycc_rt_str_getitem` while it is still null.
+#[unsafe(no_mangle)]
+pub static pycc_rt_ascii_chars: [AtomicPtr<PyStrObj>; 128] =
+    [const { AtomicPtr::new(std::ptr::null_mut()) }; 128];
+use pycc_rt_ascii_chars as ASCII_CHARS;
 
 /// A new reference to the shared one-character `str` of ASCII `byte`.
 ///

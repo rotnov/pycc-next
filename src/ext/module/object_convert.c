@@ -289,7 +289,7 @@ static int pycc_ext_obj_text(PyObject *o, void **out, int repr)
     if (PyUnicode_CheckExact(converted)) {
         /* Adopts the reference: the text is not copied. */
         copied = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size,
-                                           converted);
+                                           (long long)PyUnicode_GetLength(converted), converted);
     } else {
         copied = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
         Py_DECREF(converted);
@@ -396,7 +396,8 @@ int pycc_ext_obj_unbox_str(PyObject *o, void **out)
     if (PyUnicode_CheckExact(o)) {
         /* Shares `o` and its UTF-8 text: nothing is copied. */
         Py_INCREF(o);
-        *out = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size, o);
+        *out = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size,
+                                         (long long)PyUnicode_GetLength(o), o);
     } else {
         *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
     }
@@ -446,7 +447,7 @@ int pycc_ext_obj_format(PyObject *o, void **out)
     if (PyUnicode_CheckExact(formatted)) {
         /* Adopts the reference: the text is not copied. */
         copied = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size,
-                                           formatted);
+                                           (long long)PyUnicode_GetLength(formatted), formatted);
     } else {
         copied = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
         Py_DECREF(formatted);
