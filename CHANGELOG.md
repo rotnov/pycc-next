@@ -166,6 +166,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- A non-strict `--ext` build no longer fails on a selected function whose comprehension
+  holds a walrus (`[y for x in xs if (y := f(x))]`, in pydantic's `_fields.py` and
+  `networks.py`): the walrus target is the function's own local (PEP 572), not a module
+  global to read through the namespace, which the build had rewritten into a subscript
+  and then failed to parse. The function stays bytecode (`C0001`).
 - A module-level function of a non-strict `--ext` module used as a value that crosses
   into CPython (in a dict or tuple display, returned) is the function the module binds
   under its name, as CPython code reads it, not a positional-only wrapper: calls with
