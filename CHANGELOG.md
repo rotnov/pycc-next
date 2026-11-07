@@ -28,6 +28,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- A `str` that crosses from CPython into compiled code (an `--ext` argument, a value
+  unboxed from an object) starts with its code-point count, which CPython keeps, so
+  `len(s)`, `s[i]` and the ASCII test on it no longer count the text once per crossing:
+  a function taking a long `str` was O(n) per call before its first index. Native `str`
+  indexing with a small index into ASCII text, comparison of the same object or of two
+  one-byte texts, a counted `len`, and the counts of immortal strings run inline in a
+  `--release` build
+  (`crates/pycc_codegen/src/str_inline.rs`) instead of calling the runtime; `PyStrObj` is
+  `repr(C)` with its text pointer, byte length and code-point count at fixed offsets.
 - Generic bodies (non-strict `--ext`, every value a CPython object) run inline paths for
   exact `int`s and `str`s at their operations, as CPython's specializing interpreter does:
   compact-`int` `+`, `-`, `&`, `|`, `^` and comparisons, `str[int]` through the cached

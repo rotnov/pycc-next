@@ -449,7 +449,8 @@ static int pycc_ext_unpack_str(PyObject *obj, const char *fn_name, Py_ssize_t in
     }
     if (PyUnicode_CheckExact(obj)) {
         Py_INCREF(obj);
-        *out = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size, obj);
+        *out = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size,
+                                         (long long)PyUnicode_GetLength(obj), obj);
     } else {
         *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
     }

@@ -32,17 +32,26 @@ pub(crate) enum PyStrPayload {
 // through these functions -- the "opaque pointer" contract this file's own
 // doc comments describe is a privacy-of-fields property, not a
 // privacy-of-the-type-name one.
+#[repr(C)]
 pub struct PyStrObj {
     pub(crate) rc: Cell<u32>,
+    /// The text's first byte, wherever `payload` keeps it: compiled code
+    /// reads `data`, `len` and `chars` at fixed offsets ([`STR_DATA_OFFSET`]
+    /// and the two after it) to index and compare a `str` inline
+    /// (`pycc_codegen::str_inline`). Set once at construction; an inline
+    /// payload's pointer is into this same block, which never moves.
+    pub(crate) data: *const u8,
+    /// The text's length in bytes.
+    pub(crate) len: usize,
+    /// The number of code points once counted, `-1` before
+    /// (`crate::str_index`): `len(s)`, and whether `s` is all ASCII, are
+    /// then O(1).
+    pub(crate) chars: Cell<i64>,
     pub(crate) payload: PyStrPayload,
     /// `hash(s)` once computed (a `str` is immutable), `-1` before: CPython
     /// caches it the same way, so a dict or set keyed by `str` hashes each
     /// key object once.
     pub(crate) hash: Cell<i64>,
-    /// The number of code points once counted, `-1` before
-    /// (`crate::str_index`): `len(s)`, and whether `s` is all ASCII, are
-    /// then O(1).
-    pub(crate) chars: Cell<i64>,
     /// For a non-ASCII `str`, the byte offset of every
     /// `crate::str_index::STRIDE`-th code point, built on the first index
     /// or slice, so `s[i]` and `s[i:j]` stay O(1) in the string's length.
@@ -54,6 +63,16 @@ pub struct PyStrObj {
     /// the text again (`pycc_ext_obj_pack_str`).
     pub(crate) foreign: Cell<*mut std::ffi::c_void>,
 }
+
+/// The offsets compiled code reads (`PyStrObj` is `repr(C)`): the
+/// reference count, the text's first byte, its length in bytes and its
+/// cached code-point count (`-1` before counted).
+pub const STR_RC_OFFSET: usize = std::mem::offset_of!(PyStrObj, rc);
+pub const STR_DATA_OFFSET: usize = std::mem::offset_of!(PyStrObj, data);
+pub const STR_LEN_OFFSET: usize = std::mem::offset_of!(PyStrObj, len);
+pub const STR_CHARS_OFFSET: usize = std::mem::offset_of!(PyStrObj, chars);
+// `pycc_codegen::str_inline` hardcodes these four.
+const _: () = assert!(STR_RC_OFFSET == 0 && STR_DATA_OFFSET == 8 && STR_LEN_OFFSET == 16 && STR_CHARS_OFFSET == 24);
 
 impl Drop for PyStrObj {
     fn drop(&mut self) {
@@ -107,11 +126,17 @@ pub unsafe extern "C" fn pycc_rt_str_set_foreign(s: *mut PyStrObj, object: *mut 
 
 impl PyStrObj {
     pub(crate) fn bytes(&self) -> &[u8] {
+        // SAFETY: `data[..len]` is the payload's text (`PyStrObj::data`),
+        // which lives as long as `self`.
+        unsafe { std::slice::from_raw_parts(self.data, self.len) }
+    }
+
+    /// The payload's text, from which `data` and `len` are set.
+    fn payload_bytes(&self) -> (*const u8, usize) {
         match &self.payload {
-            PyStrPayload::Inline(buf, len) => &buf[..*len as usize],
-            PyStrPayload::Heap(b) => b,
-            // SAFETY: the buffer belongs to `foreign`, held as long as `self`.
-            PyStrPayload::Borrowed(ptr, len) => unsafe { std::slice::from_raw_parts(*ptr, *len) },
+            PyStrPayload::Inline(buf, len) => (buf.as_ptr(), *len as usize),
+            PyStrPayload::Heap(b) => (b.as_ptr(), b.len()),
+            PyStrPayload::Borrowed(ptr, len) => (*ptr, *len),
         }
     }
 }
@@ -177,14 +202,28 @@ fn new_pystr_with(payload: PyStrPayload) -> *mut PyStrObj {
     unsafe {
         block.write(PyStrObj {
             rc: Cell::new(1),
+            data: std::ptr::null(),
+            len: 0,
+            chars: Cell::new(-1),
             payload,
             hash: Cell::new(-1),
-            chars: Cell::new(-1),
             offsets: std::cell::OnceCell::new(),
             foreign: Cell::new(std::ptr::null_mut()),
         })
     };
+    set_text(block);
     block
+}
+
+/// Points a freshly written `str`'s `data` and `len` at its payload, once
+/// the block holds it (an inline payload's bytes are in the block).
+fn set_text(block: *mut PyStrObj) {
+    // SAFETY: `block` is a fully written `PyStrObj` no one else sees yet.
+    unsafe {
+        let (data, len) = (*block).payload_bytes();
+        (*block).data = data;
+        (*block).len = len;
+    }
 }
 
 /// A `str` of the UTF-8 text `ptr[..len]` of the CPython `str` `object`,
@@ -194,14 +233,21 @@ fn new_pystr_with(payload: PyStrPayload) -> *mut PyStrObj {
 /// stays alive with the new `str`); a short one is copied inline, as any
 /// `str` of its length is.
 ///
+/// `chars` is `object`'s length in code points, which CPython keeps (O(1)
+/// `PyUnicode_GetLength`): the new `str` starts with it cached
+/// (`PyStrObj::chars`), so `len(s)`, `s[i]` and the ASCII test on it never
+/// count the text. A negative `chars` leaves it to be counted on first use.
+///
 /// # Safety
 /// `ptr[..len]` must be valid UTF-8 that stays valid while `object` lives
-/// (what `PyUnicode_AsUTF8AndSize` returns for it), and `object` a `str`
-/// whose reference the caller hands over.
+/// (what `PyUnicode_AsUTF8AndSize` returns for it), `object` a `str` whose
+/// reference the caller hands over, and a non-negative `chars` the number
+/// of code points in that text.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_str_adopt_foreign(
     ptr: *const u8,
     len: i64,
+    chars: i64,
     object: *mut std::ffi::c_void,
 ) -> *mut PyStrObj {
     let len = len as usize;
@@ -214,9 +260,11 @@ pub unsafe extern "C" fn pycc_rt_str_adopt_foreign(
         unsafe {
             block.write(PyStrObj {
                 rc: Cell::new(1),
+                data: ptr,
+                len,
+                chars: Cell::new(-1),
                 payload: PyStrPayload::Borrowed(ptr, len),
                 hash: Cell::new(-1),
-                chars: Cell::new(-1),
                 offsets: std::cell::OnceCell::new(),
                 foreign: Cell::new(std::ptr::null_mut()),
             })
@@ -224,6 +272,9 @@ pub unsafe extern "C" fn pycc_rt_str_adopt_foreign(
         block
     };
     unsafe { &*s }.foreign.set(object);
+    if chars >= 0 {
+        unsafe { &*s }.chars.set(chars);
+    }
     s
 }
 
