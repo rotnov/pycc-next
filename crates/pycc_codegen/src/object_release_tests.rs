@@ -601,7 +601,7 @@ fn every_consumer_releases_its_produced_operands() {
                 names: vec!["k".to_string()],
                 values: vec![attr("c")],
             }))),
-            16,
+            22,
         ),
         (
             "keyword_direct_call",
@@ -750,8 +750,8 @@ fn z() -> MirExpr {
 /// which releases the held bound method -- and every produced argument
 /// evaluated before it -- before the branch to the exception target. The
 /// call's own failure edge still releases only the produced arguments: the
-/// call consumed the bound method. The keyword path holds the bound method
-/// across its keyword values the same way.
+/// call consumed the bound method. The keyword path holds the loaded
+/// method and its receiver across its keyword values the same way.
 #[test]
 fn a_native_raise_in_an_argument_releases_the_bound_method() {
     let method_call = |args: Vec<MirExpr>| MirExpr::ObjMethodCall {
@@ -767,8 +767,8 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
         }))
     };
     // (label, call, unwind guards, releases on the native unwind, on the
-    // call's failure). A positional call holds the loaded method and its
-    // receiver; a keyword call, the bound method.
+    // call's failure). A call holds the loaded method and its receiver,
+    // with keywords or without.
     let cases = [
         (
             "release_native_arg",
@@ -784,12 +784,12 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
             3,
             1,
         ),
-        ("release_native_keyword", keyword_call(Vec::new()), 1, 1, 0),
+        ("release_native_keyword", keyword_call(Vec::new()), 1, 2, 0),
         (
             "release_native_keyword_after_arg",
             keyword_call(vec![attr("a")]),
             2,
-            2,
+            3,
             1,
         ),
     ];

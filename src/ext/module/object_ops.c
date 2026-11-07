@@ -727,6 +727,61 @@ PyObject *pycc_ext_obj_call_kw_borrowed(PyObject *callable, PyObject **args,
 }
 
 /*
+ * `obj.name(args, kw=value, ...)` once `pycc_ext_obj_load_method` has loaded
+ * the method (`EXT_OBJ_CALL_LOADED_KW_SYMBOL`): `pycc_ext_obj_call_loaded`
+ * with the last `nkw` of `stack[1..nargs + nkw]` passed as the keywords
+ * `names` (no unpacking marker among them: such a call binds its arguments
+ * at run time, `pycc_ext_obj_call_kw`). With a receiver, the call passes it
+ * first, so no bound method is made, as CPython's `LOAD_ATTR`/`CALL_KW`
+ * pair makes none; a compiled method's forwarder the site's cache holds is
+ * called through its slot (`pycc_fwd_direct`), straight to the compiled
+ * body when the keywords name the parameters in order. `site_kwnames` is the
+ * site's own static slot for the `names` tuple, filled at its first call.
+ * `callable` and every slot are consumed on every path. Returns a new reference or NULL with the
+ * exception set.
+ */
+PyObject *pycc_ext_obj_call_loaded_kw(PyObject *callable, PyObject **stack, long long nargs,
+                                      const char **names, long long nkw, PyccExtCallSite *site,
+                                      PyObject **site_kwnames)
+{
+    PyObject *self = stack[0];
+    PyObject *result = NULL;
+    PyObject *kwnames = NULL;
+    long long total = nargs + nkw;
+    long long i;
+    int packed = callable != NULL;
+
+    for (i = 1; i <= total; i++) {
+        if (stack[i] == NULL) {
+            packed = 0;
+        }
+    }
+    if (packed) {
+        /* The site's own tuple, made once and kept for the module's life. */
+        if (*site_kwnames == NULL) {
+            *site_kwnames = pycc_ext_kwnames(names, nkw);
+        }
+        kwnames = Py_XNewRef(*site_kwnames);
+    }
+    if (kwnames != NULL && self != NULL && site != NULL && site->fwd != NULL
+        && pycc_ext_site_method(site, self) == callable) {
+        result = pycc_fwd_direct(site->fwd, callable, stack, (Py_ssize_t)(total + 1), kwnames);
+    } else if (kwnames != NULL && self != NULL) {
+        result = PyObject_Vectorcall(callable, stack, (size_t)(nargs + 1), kwnames);
+    } else if (kwnames != NULL) {
+        result = PyObject_Vectorcall(callable, stack + 1, (size_t)nargs | PY_VECTORCALL_ARGUMENTS_OFFSET,
+                                     kwnames);
+    }
+    Py_XDECREF(kwnames);
+    Py_XDECREF(callable);
+    Py_XDECREF(self);
+    for (i = 1; i <= total; i++) {
+        Py_XDECREF(stack[i]);
+    }
+    return result;
+}
+
+/*
  * Part 3 of #1026 (PR 3a of #1082): `len(o)` on a CPython object value
  * (`EXT_OBJ_LEN_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
  *

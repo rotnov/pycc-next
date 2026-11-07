@@ -166,34 +166,69 @@ pub(super) fn emit_compare_truth<'ctx>(
     let selector = rich_compare_selector(op)
         .expect("pycc_codegen: internal error: an identity test has no rich comparison");
     let edge = ForeignFailEdge::for_current(builder);
-    let (l, l_owned) = operand_pointer(context, builder, module, left);
-    let (r, r_owned) = operand_pointer(context, builder, module, right);
-    let owned = u64::from(l_owned) | (u64::from(r_owned) << 1);
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let i32_type = context.i32_type();
-    let compare = shim_fn(
-        module,
-        crate::ext::EXT_OBJ_COMPARE_BOOL_SYMBOL,
-        i32_type.fn_type(
-            &[ptr.into(), ptr.into(), i32_type.into(), i32_type.into()],
-            false,
-        ),
-    );
-    let status = builder
-        .build_call(
-            compare,
-            &[
-                l.into(),
-                r.into(),
-                i32_type.const_int(selector, false).into(),
-                i32_type.const_int(owned, false).into(),
-            ],
-            "foreign_compare_truth",
-        )
-        .expect("build_call should not fail for pycc_ext_obj_compare_bool")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_compare_bool returns int")
-        .into_int_value();
+    let call = || {
+        let (l, l_owned) = operand_pointer(context, builder, module, left);
+        let (r, r_owned) = operand_pointer(context, builder, module, right);
+        let owned = u64::from(l_owned) | (u64::from(r_owned) << 1);
+        let ptr = context.ptr_type(inkwell::AddressSpace::default());
+        let i32_type = context.i32_type();
+        let compare = shim_fn(
+            module,
+            crate::ext::EXT_OBJ_COMPARE_BOOL_SYMBOL,
+            i32_type.fn_type(
+                &[ptr.into(), ptr.into(), i32_type.into(), i32_type.into()],
+                false,
+            ),
+        );
+        builder
+            .build_call(
+                compare,
+                &[
+                    l.into(),
+                    r.into(),
+                    i32_type.const_int(selector, false).into(),
+                    i32_type.const_int(owned, false).into(),
+                ],
+                "foreign_compare_truth",
+            )
+            .expect("build_call should not fail for pycc_ext_obj_compare_bool")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_obj_compare_bool returns int")
+    };
+    let status = match (left, right) {
+        (Some(l), Some(r))
+            if crate::foreign_arith::fast_int_operand(l)
+                && crate::foreign_arith::fast_int_operand(r) =>
+        {
+            // `COMPARE_OP_INT`: two compact `int`s (a native operand a small
+            // word) compare by value; otherwise two exact `str`s may be
+            // answered by `fast_str_equality`, else the helper.
+            crate::fast_ops::guarded(
+                context,
+                builder,
+                module,
+                "fast_int_compare",
+                |fast| {
+                    let a = crate::foreign_arith::fast_int_value(fast, l, "fast_l");
+                    let b = crate::foreign_arith::fast_int_value(fast, r, "fast_r");
+                    let bit = builder
+                        .build_int_compare(int_predicate(op), a, b, "fast_int_truth")
+                        .expect("icmp of two i64");
+                    status_of(context, builder, bit)
+                },
+                || match (l, r) {
+                    (Scalar::Object(l), Scalar::Object(r))
+                        if matches!(op, CmpOpKind::Eq | CmpOpKind::NotEq) =>
+                    {
+                        fast_str_equality(context, builder, module, op, l, r, call)
+                    }
+                    _ => call(),
+                },
+            )
+        }
+        _ => call(),
+    }
+    .into_int_value();
     route_negative(
         context,
         builder,
@@ -206,6 +241,93 @@ pub(super) fn emit_compare_truth<'ctx>(
     builder
         .build_int_truncate(status, context.bool_type(), "foreign_compare_bit")
         .expect("build_int_truncate should not fail")
+}
+
+/// The signed predicate of a rich comparison on two `i64` values.
+fn int_predicate(op: CmpOpKind) -> inkwell::IntPredicate {
+    match op {
+        CmpOpKind::Lt => inkwell::IntPredicate::SLT,
+        CmpOpKind::LtE => inkwell::IntPredicate::SLE,
+        CmpOpKind::Eq => inkwell::IntPredicate::EQ,
+        CmpOpKind::NotEq => inkwell::IntPredicate::NE,
+        CmpOpKind::Gt => inkwell::IntPredicate::SGT,
+        CmpOpKind::GtE => inkwell::IntPredicate::SGE,
+        _ => unreachable!("a rich comparison"),
+    }
+}
+
+/// An `i1` answer as a helper's `int` status (`1`/`0`).
+fn status_of<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    bit: inkwell::values::IntValue<'ctx>,
+) -> inkwell::values::BasicValueEnum<'ctx> {
+    builder
+        .build_int_z_extend(bit, context.i32_type(), "fast_status")
+        .expect("zext of an i1")
+        .into()
+}
+
+/// `l == r` / `l != r` (`op`) for two objects as a helper's status: two
+/// exact compact ASCII `str`s are equal when they are one object, and
+/// unequal when their lengths or computed hashes differ
+/// (`COMPARE_OP_STR`'s quick answers); anything else is `call`.
+fn fast_str_equality<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    op: CmpOpKind,
+    l: PointerValue<'ctx>,
+    r: PointerValue<'ctx>,
+    call: impl FnOnce() -> inkwell::values::BasicValueEnum<'ctx>,
+) -> inkwell::values::BasicValueEnum<'ctx> {
+    crate::fast_ops::guarded(
+        context,
+        builder,
+        module,
+        "fast_str_eq",
+        |fast| {
+            let bit = |predicate, a, b, name| {
+                builder
+                    .build_int_compare(predicate, a, b, name)
+                    .expect("icmp")
+            };
+            let or = |a, b, name| builder.build_or(a, b, name).expect("or");
+            let and = |a, b, name| builder.build_and(a, b, name).expect("and");
+            let l_len = fast.ascii_str(l, "fast_l");
+            let r_len = fast.ascii_str(r, "fast_r");
+            let same = builder
+                .build_int_compare(inkwell::IntPredicate::EQ, l, r, "fast_same")
+                .expect("icmp of two pointers");
+            let unknown = context.i64_type().const_all_ones();
+            let l_hash = fast.str_hash(l, "fast_l");
+            let r_hash = fast.str_hash(r, "fast_r");
+            let hashed = and(
+                bit(inkwell::IntPredicate::NE, l_hash, unknown, "fast_l_hashed"),
+                bit(inkwell::IntPredicate::NE, r_hash, unknown, "fast_r_hashed"),
+                "fast_hashed",
+            );
+            let hashes = and(
+                hashed,
+                bit(inkwell::IntPredicate::NE, l_hash, r_hash, "fast_hashes_differ"),
+                "fast_hashes",
+            );
+            let unequal = or(
+                bit(inkwell::IntPredicate::NE, l_len, r_len, "fast_lengths_differ"),
+                hashes,
+                "fast_unequal",
+            );
+            fast.require(or(same, unequal, "fast_decided"), "fast_str_decided");
+            // Decided: equal exactly when one object.
+            let answer = if op == CmpOpKind::Eq {
+                same
+            } else {
+                builder.build_not(same, "fast_differ").expect("not")
+            };
+            status_of(context, builder, answer)
+        },
+        call,
+    )
 }
 
 /// The truth of `object == text` / `object != text` (`op`) for an evaluated
@@ -253,22 +375,47 @@ pub(super) fn emit_eq_text_truth<'ctx>(
             false,
         ),
     );
-    let status = builder
-        .build_call(
-            eq_text,
-            &[
-                object.into(),
-                global.as_pointer_value().into(),
-                i64_type.const_int(bytes.len() as u64, false).into(),
-                i32_type.const_int(selector, false).into(),
-                i32_type.const_int(u64::from(text_first), false).into(),
-            ],
-            "foreign_eq_text",
+    let call = || {
+        builder
+            .build_call(
+                eq_text,
+                &[
+                    object.into(),
+                    global.as_pointer_value().into(),
+                    i64_type.const_int(bytes.len() as u64, false).into(),
+                    i32_type.const_int(selector, false).into(),
+                    i32_type.const_int(u64::from(text_first), false).into(),
+                ],
+                "foreign_eq_text",
+            )
+            .expect("build_call should not fail for pycc_ext_obj_eq_text")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_obj_eq_text returns int")
+    };
+    let status = if text.is_ascii() {
+        // `COMPARE_OP_STR` against the literal: an exact compact ASCII
+        // `str` is equal exactly when it has the literal's length and bytes.
+        crate::fast_ops::guarded(
+            context,
+            builder,
+            module,
+            "fast_eq_text",
+            |fast| {
+                let length = fast.ascii_str(object, "fast_text");
+                let equal = fast.ascii_equals(object, length, global.as_pointer_value(), bytes, "fast_text");
+                let answer = if op == CmpOpKind::Eq {
+                    equal
+                } else {
+                    builder.build_not(equal, "fast_text_differ").expect("not")
+                };
+                status_of(context, builder, answer)
+            },
+            call,
         )
-        .expect("build_call should not fail for pycc_ext_obj_eq_text")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_eq_text returns int")
-        .into_int_value();
+    } else {
+        call()
+    }
+    .into_int_value();
     route_negative(context, builder, module, rt, edge, status, "foreign_eq_text");
     builder
         .build_int_truncate(status, context.bool_type(), "foreign_eq_text_bit")
@@ -340,22 +487,55 @@ pub(super) fn emit_contains<'ctx>(
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i32_type = context.i32_type();
     let container_ptr = expect_object_pointer(container);
-    let item_ptr = emit_pack(context, builder, module, item, "foreign_contains_item");
-    let contains = shim_fn(
-        module,
-        EXT_OBJ_CONTAINS_SYMBOL,
-        i32_type.fn_type(&[ptr.into(), ptr.into()], false),
-    );
-    let status = builder
-        .build_call(
-            contains,
-            &[container_ptr.into(), item_ptr.into()],
-            "foreign_contains",
-        )
-        .expect("build_call should not fail for pycc_ext_obj_contains")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_contains returns int")
-        .into_int_value();
+    let call = || {
+        let item_ptr = emit_pack(context, builder, module, item, "foreign_contains_item");
+        let contains = shim_fn(
+            module,
+            EXT_OBJ_CONTAINS_SYMBOL,
+            i32_type.fn_type(&[ptr.into(), ptr.into()], false),
+        );
+        builder
+            .build_call(
+                contains,
+                &[container_ptr.into(), item_ptr.into()],
+                "foreign_contains",
+            )
+            .expect("build_call should not fail for pycc_ext_obj_contains")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_obj_contains returns int")
+    };
+    let status = match item {
+        Scalar::Object(item_ptr) => {
+            // `CONTAINS_OP_SET`: an exact `str` in an exact `set` or
+            // `frozenset` is the set's own lookup, the item borrowed (a `str`
+            // is hashable, so CPython's retry of an unhashable `set` item as a
+            // `frozenset` never applies).
+            crate::fast_ops::guarded(
+                context,
+                builder,
+                module,
+                "fast_set_contains",
+                |fast| {
+                    use crate::fast_ops::{FROZENSET, SET, STR};
+                    fast.require_class_in(container_ptr, &[SET, FROZENSET], "fast_set");
+                    fast.require_class_in(item_ptr, &[STR], "fast_set_item");
+                    let contains = shim_fn(
+                        module,
+                        "PySet_Contains",
+                        i32_type.fn_type(&[ptr.into(), ptr.into()], false),
+                    );
+                    builder
+                        .build_call(contains, &[container_ptr.into(), item_ptr.into()], "fast_set_contains")
+                        .expect("build_call should not fail for PySet_Contains")
+                        .try_as_basic_value()
+                        .expect_basic("PySet_Contains returns int")
+                },
+                call,
+            )
+        }
+        _ => call(),
+    }
+    .into_int_value();
     route_negative(
         context,
         builder,
@@ -401,6 +581,7 @@ pub(super) fn emit_isinstance<'ctx>(
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i32_type = context.i32_type();
     let value_ptr = expect_object_pointer(value);
+    let builtin_class = matches!(class, IsInstanceClass::Builtin(_));
     let (class_ptr, builtin) = match class {
         IsInstanceClass::Builtin(selector) => (ptr.const_null(), selector),
         IsInstanceClass::Object(class) => (expect_object_pointer(class), 0),
@@ -430,25 +611,43 @@ pub(super) fn emit_isinstance<'ctx>(
             return finish_isinstance(context, builder, module, rt, edge, status);
         }
     };
-    let isinstance = shim_fn(
-        module,
-        EXT_OBJ_ISINSTANCE_SYMBOL,
-        i32_type.fn_type(&[ptr.into(), ptr.into(), i32_type.into()], false),
-    );
-    let status = builder
-        .build_call(
-            isinstance,
-            &[
-                value_ptr.into(),
-                class_ptr.into(),
-                i32_type.const_int(builtin, false).into(),
-            ],
-            "foreign_isinstance",
+    let call = || {
+        let isinstance = shim_fn(
+            module,
+            EXT_OBJ_ISINSTANCE_SYMBOL,
+            i32_type.fn_type(&[ptr.into(), ptr.into(), i32_type.into()], false),
+        );
+        builder
+            .build_call(
+                isinstance,
+                &[
+                    value_ptr.into(),
+                    class_ptr.into(),
+                    i32_type.const_int(builtin, false).into(),
+                ],
+                "foreign_isinstance",
+            )
+            .expect("build_call should not fail for pycc_ext_obj_isinstance")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_obj_isinstance returns int")
+    };
+    let status = if builtin_class {
+        // An instance of exactly the built-in class is one.
+        crate::fast_ops::guarded(
+            context,
+            builder,
+            module,
+            "fast_isinstance",
+            |fast| {
+                fast.require_builtin_instance(value_ptr, builtin, "fast_isinstance");
+                i32_type.const_int(1, false).into()
+            },
+            call,
         )
-        .expect("build_call should not fail for pycc_ext_obj_isinstance")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_isinstance returns int")
-        .into_int_value();
+    } else {
+        call()
+    }
+    .into_int_value();
     finish_isinstance(context, builder, module, rt, edge, status)
 }
 

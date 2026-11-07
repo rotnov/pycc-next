@@ -39,12 +39,13 @@ fn direct(args: Vec<MirExpr>) -> Vec<MirItem> {
     items
 }
 
-/// A method keyword call looks the method up, consumes the bound method
-/// through `pycc_ext_obj_call_kw`, passes one positional slot (the total
-/// minus the keyword count), and hands the keyword names over as global
-/// strings in source order.
+/// A method keyword call loads the method with no bound method made
+/// (`pycc_ext_obj_load_method`), and calls it through
+/// `pycc_ext_obj_call_loaded_kw` with one positional slot (the total minus
+/// the keyword count), the keyword names as global strings in source order,
+/// and the site's own kwnames tuple slot.
 #[test]
-fn a_method_keyword_call_consumes_the_bound_method_and_names_its_keywords() {
+fn a_method_keyword_call_loads_the_method_and_names_its_keywords() {
     let ir = entry_ir(
         "foreign_kw_method",
         keyword_call(
@@ -53,18 +54,16 @@ fn a_method_keyword_call_consumes_the_bound_method_and_names_its_keywords() {
             vec![MirExpr::IntLiteral(2), MirExpr::BoolLiteral(true)],
         ),
     );
-    assert!(ir.contains(EXT_OBJ_GETATTR_SYMBOL), "{ir}");
-    assert!(ir.contains(&format!("@{EXT_OBJ_CALL_KW_SYMBOL}(")), "{ir}");
-    assert!(
-        !ir.contains(&format!("@{EXT_OBJ_CALL_KW_BORROWED_SYMBOL}(")),
-        "{ir}"
-    );
+    assert!(ir.contains(&format!("@{}(", crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL)), "{ir}");
+    assert!(ir.contains(&format!("@{}(", crate::ext::EXT_OBJ_CALL_LOADED_KW_SYMBOL)), "{ir}");
+    assert!(!ir.contains(&format!("@{EXT_OBJ_CALL_KW_SYMBOL}(")), "{ir}");
     assert!(ir.contains("foreign_call_kwname_slot"), "{ir}");
+    assert!(ir.contains("@pycc_call_site_kwnames"), "{ir}");
     let generation = ir.find("pycc_foreign_kwname_generation").expect(&ir);
     let flag = ir.find("pycc_foreign_kwname_flag").expect(&ir);
     assert!(generation < flag, "names keep source order: {ir}");
     assert!(ir.contains("i64 1, ptr"), "one positional slot: {ir}");
-    assert!(ir.contains("i64 2)"), "two keyword names: {ir}");
+    assert!(ir.contains("i64 2, ptr @pycc_call_site"), "two keyword names: {ir}");
 }
 
 /// A direct keyword call of a module global borrows it, exactly as the

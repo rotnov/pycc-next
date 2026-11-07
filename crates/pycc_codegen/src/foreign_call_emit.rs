@@ -127,7 +127,7 @@ pub(super) fn emit_method_call<'ctx>(
         let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
         let held_base = object_release::hold(context, module, rt, base, &base_scalar);
         let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
-        let result = foreign_call::emit_method_call_fused(
+        let result = foreign_method_call::emit_method_call_fused(
             context,
             builder,
             module,
@@ -147,14 +147,14 @@ pub(super) fn emit_method_call<'ctx>(
     let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
     let held_base = object_release::hold(context, module, rt, base, &base_scalar);
     let (callable, receiver, site) =
-        foreign_call::emit_load_method(context, builder, module, rt, base_scalar, method);
+        foreign_method_call::emit_load_method(context, builder, module, rt, base_scalar, method);
     held_base.release(builder, rt);
     let held_callable = object_release::hold_new_reference(context, module, rt, callable);
     let held_receiver = object_release::hold_new_reference(context, module, rt, receiver);
     let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
     held_receiver.consumed(rt);
     held_callable.consumed(rt);
-    let result = foreign_call::emit_call_loaded(
+    let result = foreign_method_call::emit_call_loaded(
         context,
         builder,
         module,
@@ -163,6 +163,7 @@ pub(super) fn emit_method_call<'ctx>(
         receiver,
         site,
         &args.scalars,
+        &[],
     );
     args.release(context, builder, rt);
     result
@@ -245,7 +246,9 @@ fn emit_bound_method<'ctx>(
 ///
 /// `call.call` is the positional half (`pycc_mir::ObjKeywordCall`'s doc):
 /// an `ObjMethodCall` is emitted like [`emit_method_call`] -- receiver,
-/// lookup, arguments -- and its bound method is consumed; an `ObjCall`'s
+/// load, arguments, then the keyword values -- with no bound method made,
+/// unless an argument is unpacked (`*xs`, `**kw`), which binds at run time
+/// through the bound method `emit_bound_method` loads; an `ObjCall`'s
 /// callee is consumed or borrowed by `foreign_call::callee_is_produced`,
 /// exactly as for a positional call. The keyword values are evaluated after
 /// every positional argument and handed to `foreign_call::emit_call_kw`
@@ -259,6 +262,48 @@ pub(super) fn emit_keyword_call<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     call: &ObjKeywordCall,
 ) -> Scalar<'ctx> {
+    if let MirExpr::ObjMethodCall {
+        base, method, args, ..
+    } = &call.call
+        && !call.names.iter().any(|name| pycc_hir::is_unpacking(name))
+    {
+        // As a positional method call: loaded before the arguments, with no
+        // bound method, then called with the keyword values behind the
+        // positional ones (CPython's `LOAD_ATTR` and `CALL_KW`).
+        let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
+        let held_base = object_release::hold(context, module, rt, base, &base_scalar);
+        let (callable, receiver, site) =
+            foreign_method_call::emit_load_method(context, builder, module, rt, base_scalar, method);
+        held_base.release(builder, rt);
+        let held_callable = object_release::hold_new_reference(context, module, rt, callable);
+        let held_receiver = object_release::hold_new_reference(context, module, rt, receiver);
+        let mut arguments =
+            emit_object_args(context, builder, module, rt, user_functions, locals, args);
+        arguments.extend(emit_object_args(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            &call.values,
+        ));
+        held_receiver.consumed(rt);
+        held_callable.consumed(rt);
+        let result = foreign_method_call::emit_call_loaded(
+            context,
+            builder,
+            module,
+            rt,
+            callable,
+            receiver,
+            site,
+            &arguments.scalars,
+            &call.names,
+        );
+        arguments.release(context, builder, rt);
+        return result;
+    }
     let (consume, callable, held_callable, positional) = match &call.call {
         MirExpr::ObjMethodCall {
             base, method, args, ..

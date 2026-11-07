@@ -383,6 +383,29 @@ The selection marks each such function's lift explicitly
 native copy with those parameters typed, and an exact-type guard in front that calls it
 (`type(s) is str`). Any other argument, a subclass included, runs the generic lift.
 
+**PR 8, second part: guarded inline paths in generic bodies.** A body none of whose
+values has a native type still meets exact `int`s and `str`s at most of its operations.
+Each of these operations now checks for them inline, as CPython's specializing
+interpreter does, and calls its helper only when the check fails
+(`crates/pycc_codegen/src/fast_ops.rs`):
+
+| operation | inline path | CPython's |
+|---|---|---|
+| `a + b`, `a - b`, `a += 1` | two compact `int`s (a native operand a small word): the sum, one `PyLong_FromLongLong` | `BINARY_OP_ADD_INT` |
+| `a < b` ... in a condition | two compact `int`s: compared by value; `==`/`!=` of two exact ASCII `str`s: answered when they are one object, or their lengths or computed hashes differ | `COMPARE_OP_INT`, `COMPARE_OP_STR` |
+| `s == "lit"` | an exact compact ASCII `str`: its length, then its bytes | `COMPARE_OP_STR` |
+| `s[i]` | an exact compact ASCII `str` and a compact `int` in range: the cached one-character `str` | `BINARY_SUBSCR_STR_INT` |
+| `c in s` | an exact `str` in an exact `set` or `frozenset`: `PySet_Contains`, the item unpacked | `CONTAINS_OP_SET` |
+| `isinstance(o, dict)` (a builtin class) | `o` exactly of that class: `True` | |
+| a module global | a per-site cache of the namespace dict, its version and the value | `LOAD_GLOBAL_MODULE` |
+| a release | a mortal object that stays alive is decremented inline; the rest out of line | `Py_DECREF` |
+
+The layouts these read are checked at module exec (`src/ext/module/fast_ops.c`), which
+publishes the type pointers the checks compare with only when every check passes; on any
+other build, and with `PYCC_NO_FAST_OPS=1`, every check fails. The loads of an object's
+type and of an `int`'s or `str`'s value are `!invariant.load`, so a check on a value a
+loop does not rebind is loop-invariant.
+
 `specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
 reasons:
 - a dunder runs through a slot;

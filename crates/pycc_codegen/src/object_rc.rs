@@ -16,10 +16,14 @@
 //!   are skipped; `ob_refcnt` is decremented and `_Py_Dealloc` (a stable-ABI
 //!   function) called at zero.
 //!
-//! The retain is always inlined (four instructions); the release, whose
-//! branches and `_Py_Dealloc` call are most of an inlined copy, stays one
-//! call into the module's own copy: inlining it everywhere doubled LLVM's
-//! time on mistune's modules for 0.7% fewer instructions at run time.
+//! The retain is always inlined (four instructions). The release is
+//! inlined only as its common case -- a non-`NULL` mortal object whose
+//! count stays above zero is decremented -- and calls the module's own
+//! out-of-line copy (`pycc_ext_obj_release_slow`) for an immortal object or
+//! a last reference: inlining the whole release, with its `_Py_Dealloc`
+//! call, everywhere doubled LLVM's time on mistune's modules for 0.7% fewer
+//! instructions at run time, and in a generic body most releases are of
+//! values that stay alive.
 //!
 //! The shim keeps its own external definitions for its C callers; the
 //! module's are internal, so the two never clash at link time. Only a
@@ -105,7 +109,65 @@ fn define_retain(module: &Module<'_>, function: FunctionValue<'_>) {
     builder.build_return(None).expect("return");
 }
 
-fn define_release(module: &Module<'_>, function: FunctionValue<'_>) {
+/// The release: an inline decrement of a mortal object that stays alive
+/// (`refcnt` above 1), and one call into the module's own out-of-line copy
+/// (`pycc_ext_obj_release_slow`) for anything else -- `NULL` is tested
+/// inline too, an immortal object or a last reference out of line.
+fn define_release<'ctx>(module: &Module<'ctx>, function: FunctionValue<'ctx>) {
+    internal(module, function, true);
+    let context = module.get_context();
+    let slow = module.add_function(
+        "pycc_ext_obj_release_slow",
+        function.get_type(),
+        Some(Linkage::Internal),
+    );
+    define_release_slow(module, slow);
+    let builder = context.create_builder();
+    let i32_type = context.i32_type();
+    let i64_type = context.i64_type();
+    let object = function.get_nth_param(0).expect("one parameter").into_pointer_value();
+    let entry = context.append_basic_block(function, "entry");
+    let check = context.append_basic_block(function, "check");
+    let count = context.append_basic_block(function, "count");
+    let other = context.append_basic_block(function, "other");
+    let done = context.append_basic_block(function, "done");
+    builder.position_at_end(entry);
+    let null = builder.build_is_null(object, "null").expect("is_null");
+    builder.build_conditional_branch(null, done, check).expect("branch");
+    builder.position_at_end(check);
+    let refcnt = builder
+        .build_load(i64_type, object, "refcnt")
+        .expect("load")
+        .into_int_value();
+    let low = builder.build_int_truncate(refcnt, i32_type, "low").expect("trunc");
+    // Above 1 as a signed 32-bit count: mortal, and alive after the
+    // decrement.
+    let alive = builder
+        .build_int_compare(IntPredicate::SGT, low, i32_type.const_int(1, false), "alive")
+        .expect("compare");
+    let branch = builder.build_conditional_branch(alive, count, other).expect("branch");
+    let weights = context.metadata_node(&[
+        context.metadata_string("branch_weights").into(),
+        i32_type.const_int(2000, false).into(),
+        i32_type.const_int(1, false).into(),
+    ]);
+    branch
+        .set_metadata(weights, context.get_kind_id("prof"))
+        .expect("a conditional branch accepts `!prof` metadata");
+    builder.position_at_end(count);
+    let next = builder
+        .build_int_sub(refcnt, i64_type.const_int(1, false), "next")
+        .expect("sub");
+    builder.build_store(object, next).expect("store");
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(other);
+    builder.build_call(slow, &[object.into()], "").expect("call");
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(done);
+    builder.build_return(None).expect("return");
+}
+
+fn define_release_slow(module: &Module<'_>, function: FunctionValue<'_>) {
     internal(module, function, false);
     let context = module.get_context();
     let builder = context.create_builder();
@@ -178,6 +240,9 @@ mod tests {
         let ir = crate::llvm_string_to_owned(module.print_to_string());
         assert!(ir.contains("define internal void @pycc_ext_obj_retain(ptr"), "{ir}");
         assert!(ir.contains("define internal void @pycc_ext_obj_release(ptr"), "{ir}");
+        assert!(ir.contains("define internal void @pycc_ext_obj_release_slow(ptr"), "{ir}");
+        assert!(ir.contains("call void @pycc_ext_obj_release_slow(ptr"), "{ir}");
+        assert!(ir.contains("icmp sgt i32"), "{ir}");
         assert!(ir.contains("load i32, ptr"), "{ir}");
         assert!(ir.contains("icmp slt i32"), "{ir}");
         assert!(ir.contains("call void @_Py_Dealloc(ptr"), "{ir}");
