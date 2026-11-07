@@ -42,6 +42,34 @@ thread_local! {
     /// While a failure is narrowed down ([`culprit`]): the only qualnames
     /// the loader specializes.
     static ONLY: RefCell<Option<BTreeSet<String>>> = const { RefCell::new(None) };
+    /// The compiled lifts of selected functions whose parameters a profile
+    /// observed holding one exact type (`crate::select::Types`): by the
+    /// lift's name, its report name and those types. Only these, flagged
+    /// here by the selection and never by their names or annotations, get
+    /// specializations from observed types ([`specialize_entry`]).
+    static LIFTS: RefCell<BTreeMap<String, (String, Vec<(String, &'static str)>)>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+/// Records the lifts of the selected functions with observed types, for
+/// [`specialize_entry`]: `lifts` maps a lift's name to its report name and
+/// its parameters' observed types. A type no native body takes is left
+/// out.
+pub(crate) fn set_lifts(lifts: BTreeMap<String, (String, Vec<(String, String)>)>) {
+    let lifts = lifts
+        .into_iter()
+        .map(|(name, (report, types))| {
+            let types = types
+                .into_iter()
+                .filter_map(|(param, ty)| {
+                    let ty = pycc_ast::OBSERVED_TYPES.iter().find(|t| **t == ty)?;
+                    Some((param, *ty))
+                })
+                .collect();
+            (name, (report, types))
+        })
+        .collect();
+    LIFTS.with(|cell| *cell.borrow_mut() = lifts);
 }
 
 /// Forgets every dropped specialization, before a new program is built.
@@ -62,14 +90,23 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
     let keep = KEEP_BUILTINS.with(|keep| keep.borrow().clone());
     let planned = DROPPED.with(|dropped| {
         let dropped = dropped.borrow();
-        pycc_ast::specialize_untyped(
-            parsed,
-            &|qualname| {
-                dropped.contains_key(qualname)
-                    || only.as_ref().is_some_and(|only| !only.contains(qualname))
-            },
-            &|qualname| keep.contains(qualname),
-        )
+        let skip = |qualname: &str| {
+            dropped.contains_key(qualname) || only.as_ref().is_some_and(|only| !only.contains(qualname))
+        };
+        let mut planned = LIFTS.with(|lifts| {
+            let lifts = lifts.borrow();
+            if lifts.is_empty() {
+                return Vec::new();
+            }
+            pycc_ast::specialize_observed(
+                parsed,
+                &|name| lifts.get(name).cloned(),
+                &skip,
+                &|qualname| keep.contains(qualname),
+            )
+        });
+        planned.extend(pycc_ast::specialize_untyped(parsed, &skip, &|qualname| keep.contains(qualname)));
+        planned
     });
     PLANNED.with(|cell| *cell.borrow_mut() = planned);
 }

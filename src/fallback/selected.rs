@@ -84,6 +84,24 @@ pub(super) fn with_selection<T, E>(
             dropped.push((qualname.clone(), "pycc does not compile a function of its kind".to_string()));
         }
     }
+    // The selected functions' observed types, for their lifts' guarded
+    // specializations (`crate::specialize`).
+    let types = crate::select::module_types();
+    let lifts = units
+        .iter()
+        .filter_map(|unit| {
+            let lift = plan.lift(*unit)?;
+            let key = (lift.qualname.clone(), line_of(&plan.source, lift.range.start) as u32);
+            let types: Vec<(String, String)> = types?
+                .get(&key)?
+                .iter()
+                .filter(|(param, _)| lift.params.contains(param))
+                .cloned()
+                .collect();
+            (!types.is_empty()).then(|| (lift.name.clone(), (lift.qualname.clone(), types)))
+        })
+        .collect();
+    crate::specialize::set_lifts(lifts);
     let value = loop {
         let rendered = plan.render_selected(&units);
         if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {

@@ -159,7 +159,7 @@ fn main() -> ExitCode {
                     .map_err(|e| format!("cannot read `{}`: {e}", file.display()))
                     .and_then(|text| select::from_text(&text))
                 {
-                    Ok(selected) => select::set_module(selected),
+                    Ok((selected, types)) => select::set_module(selected, types),
                     Err(message) => {
                         eprintln!("error: {message}");
                         return ExitCode::from(2);
@@ -198,7 +198,10 @@ fn main() -> ExitCode {
                 // name (`pkg.mod` for a member of a package).
                 let module = select::import_name(&path);
                 match selection.modules.get(&module) {
-                    Some(selected) if !selected.is_empty() => select::set_module(selected.clone()),
+                    Some(selected) if !selected.is_empty() => select::set_module(
+                        selected.clone(),
+                        selection.types.get(&module).cloned().unwrap_or_default(),
+                    ),
                     _ => {
                         return match select::ship_source(&path, &out, target.as_deref()) {
                             Ok(source) => {

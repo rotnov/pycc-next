@@ -231,7 +231,12 @@ pub(crate) fn build_package(
     for (module, dir) in modules.iter().zip(&dirs) {
         if build.selection.is_some() {
             let functions = selected(module).cloned().unwrap_or_default();
-            write_ext_source(&dir.join(SELECTED_NAME), &crate::select::to_text(&functions))?;
+            let types = build
+                .selection
+                .and_then(|selection| selection.types.get(&crate::select::import_name(&module.path)))
+                .cloned()
+                .unwrap_or_default();
+            write_ext_source(&dir.join(SELECTED_NAME), &crate::select::to_text(&functions, &types))?;
         }
     }
     let jobs = std::env::var("PYCC_JOBS")

@@ -71,7 +71,11 @@ const BUILTINS: &str = "__pycc_specialize_builtins";
 
 /// The types a guard tests for, and the prefix of the module globals that
 /// hold them (`__pycc_specialize_int = builtins.int`).
-const GUARD_TYPES: [&str; 3] = ["int", "str", "bytearray"];
+const GUARD_TYPES: [&str; 4] = ["int", "float", "str", "bytearray"];
+
+/// The exact types a profile may observe for a parameter that
+/// [`specialize_observed`] specializes it to.
+pub const OBSERVED_TYPES: [&str; 4] = ["int", "float", "str", "bytearray"];
 const GUARD_TYPE_PREFIX: &str = "__pycc_specialize_";
 
 /// The annotation a `bytearray` guess writes into the copy: the byte
@@ -187,28 +191,33 @@ pub fn specialize_untyped(
         }
     }
     if !out.is_empty() {
-        // After the docstring and the `__future__` imports.
-        let mut at = usize::from(matches!(body.first(), Some(Stmt::Expr(e))
-            if e.value.is_string_literal_expr()));
-        while matches!(body.get(at), Some(Stmt::ImportFrom(import))
-            if import.module.as_ref().map(|m| m.as_str()) == Some("__future__"))
-        {
-            at += 1;
-        }
-        // The guards' types are read once, into globals of their own: an
-        // attribute of the `builtins` module read at every call cost more
-        // than the rest of the guard.
-        let mut source = format!("import builtins as {BUILTINS}\n");
-        for ty in GUARD_TYPES {
-            source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
-        }
-        let import = super::signatures::parse_helper(&source, TextRange::default());
-        for (offset, stmt) in import.into_iter().enumerate() {
-            body.insert(at + offset, stmt);
-        }
+        insert_guard_types(&mut body);
     }
     module.body = body.into();
     out
+}
+
+/// Inserts the globals the guards read their types from into `body` (a
+/// module's statements), after its docstring and `__future__` imports.
+fn insert_guard_types(body: &mut Vec<Stmt>) {
+    let mut at = usize::from(matches!(body.first(), Some(Stmt::Expr(e))
+        if e.value.is_string_literal_expr()));
+    while matches!(body.get(at), Some(Stmt::ImportFrom(import))
+        if import.module.as_ref().map(|m| m.as_str()) == Some("__future__"))
+    {
+        at += 1;
+    }
+    // The guards' types are read once, into globals of their own: an
+    // attribute of the `builtins` module read at every call cost more
+    // than the rest of the guard.
+    let mut source = format!("import builtins as {BUILTINS}\n");
+    for ty in GUARD_TYPES {
+        source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
+    }
+    let import = super::signatures::parse_helper(&source, TextRange::default());
+    for (offset, stmt) in import.into_iter().enumerate() {
+        body.insert(at + offset, stmt);
+    }
 }
 
 /// Whether `body`, a module's statements, binds `name` in the module's own
@@ -334,6 +343,24 @@ fn plan(
     if guessed.is_empty() {
         return None;
     }
+    Some(native_copy(def, receiver, annotations, guessed, &snapshots, keep_builtins, qualname))
+}
+
+/// The native copy of `def` (a method when `receiver` is its first
+/// parameter) whose parameters after the receiver take `annotations`, and
+/// what it covers: `guessed`, the specialized parameters (an attribute
+/// snapshot spelled `self.name`), `snapshots` the attributes it takes as
+/// snapshots.
+fn native_copy(
+    def: &StmtFunctionDef,
+    receiver: Option<&ruff_python_ast::ParameterWithDefault>,
+    annotations: Vec<Expr>,
+    guessed: Vec<(String, &'static str)>,
+    snapshots: &[String],
+    keep_builtins: &dyn Fn(&str) -> bool,
+    qualname: String,
+) -> (StmtFunctionDef, Specialized) {
+    let fn_name = def.name.as_str();
     let mut clone = def.clone();
     clone.name = Identifier::new(format!("{NATIVE_PREFIX}{fn_name}"), def.name.range());
     let offset = usize::from(receiver.is_some());
@@ -353,10 +380,10 @@ fn plan(
     if let Some(receiver) = receiver
         && !snapshots.is_empty()
     {
-        attrs::take_snapshots(&mut clone, receiver.parameter.name.as_str(), &snapshots);
+        attrs::take_snapshots(&mut clone, receiver.parameter.name.as_str(), snapshots);
     }
     let restored_builtins = !keep_builtins(&qualname) && restore_builtins(&mut clone.body);
-    Some((
+    (
         clone,
         Specialized {
             qualname,
@@ -364,7 +391,107 @@ fn plan(
             params: guessed,
             restored_builtins,
         },
-    ))
+    )
+}
+
+/// Adds the guarded specializations of `module`'s top-level functions that
+/// `observed` names: each such function (a selected function's compiled
+/// lift, docs/design/compile-little.md, section 2.5) gets a native copy
+/// whose parameters take the exact types a profile observed them to have
+/// in every sampled call ([`OBSERVED_TYPES`]), and the guard that calls it
+/// when the arguments have them, as [`specialize_untyped`]'s guesses do.
+/// `observed` maps a function's name to the name a report gives it and
+/// its parameters' types; its other parameters keep their annotations. As
+/// for a guess, only a function that loops is specialized, and the copies
+/// of those `keep_builtins` names (by report name) keep calling builtins
+/// as their originals do. Returns what was specialized, by report name.
+pub fn specialize_observed(
+    module: &mut ModModule,
+    observed: &dyn Fn(&str) -> Option<(String, Vec<(String, &'static str)>)>,
+    skip: &dyn Fn(&str) -> bool,
+    keep_builtins: &dyn Fn(&str) -> bool,
+) -> Vec<Specialized> {
+    if ["type", "str", "int", "float", "bytearray"]
+        .iter()
+        .any(|builtin| binds_at_module_level(&module.body, builtin))
+    {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let old = std::mem::take(&mut module.body);
+    let mut body = Vec::with_capacity(old.len());
+    for stmt in old {
+        let Stmt::FunctionDef(mut def) = stmt else {
+            body.push(stmt);
+            continue;
+        };
+        let planned = observed(def.name.as_str())
+            .filter(|(report, _)| !skip(report))
+            .and_then(|(report, types)| plan_observed(&def, report, &types, keep_builtins));
+        match planned {
+            Some((clone, spec)) => {
+                add_guard(&mut def, None, &spec);
+                body.push(Stmt::FunctionDef(def));
+                body.push(Stmt::FunctionDef(clone));
+                out.push(spec);
+            }
+            None => body.push(Stmt::FunctionDef(def)),
+        }
+    }
+    if !out.is_empty() {
+        insert_guard_types(&mut body);
+    }
+    module.body = body.into();
+    out
+}
+
+/// [`specialize_observed`]'s copy of `def`, reported as `report`, with
+/// `types` for its parameters.
+fn plan_observed(
+    def: &StmtFunctionDef,
+    report: String,
+    types: &[(String, &'static str)],
+    keep_builtins: &dyn Fn(&str) -> bool,
+) -> Option<(StmtFunctionDef, Specialized)> {
+    let p = &def.parameters;
+    if def.is_async
+        || !def.decorator_list.is_empty()
+        || p.vararg.is_some()
+        || p.kwarg.is_some()
+        || !p.posonlyargs.is_empty()
+        || !p.kwonlyargs.is_empty()
+        || super::ext_generators::yields(&def.body)
+        || !loops(&def.body)
+        || p.iter().any(|param| param.name().as_str() == "type")
+        || super::ext_generators::bindings(&def.body, "type") > 0
+    {
+        return None;
+    }
+    let mut guessed = Vec::new();
+    let mut annotations = Vec::with_capacity(p.args.len());
+    for param in &p.args {
+        let param_name = param.parameter.name.as_str();
+        let observed = types
+            .iter()
+            .find(|(name, ty)| name == param_name && OBSERVED_TYPES.contains(ty))
+            .map(|(_, ty)| *ty);
+        let annotation = match observed {
+            Some(ty) => {
+                guessed.push((param_name.to_string(), ty));
+                let spelling = if ty == "bytearray" { BYTEARRAY_ANNOTATION } else { ty };
+                name(spelling, ExprContext::Load, param.range())
+            }
+            None => match &param.parameter.annotation {
+                Some(annotation) => annotation.as_ref().clone(),
+                None => name("object", ExprContext::Load, param.range()),
+            },
+        };
+        annotations.push(annotation);
+    }
+    if guessed.is_empty() {
+        return None;
+    }
+    Some(native_copy(def, None, annotations, guessed, &[], keep_builtins, report))
 }
 
 /// Turns each `FALLBACK_BUILTINS.f(...)` call of `body` back into `f(...)`

@@ -35,11 +35,18 @@ pub(crate) enum SelectMode {
 /// name and first line (its first decorator's).
 pub(crate) type Key = (String, u32);
 
+/// A selected function's parameters a profile observed holding one exact
+/// type, each with it ([`profile::Entry::observed_types`]).
+pub(crate) type Types = Vec<(String, String)>;
+
 /// The selected functions of every module (by dotted name), and the notes
 /// the build prints about them.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct Selection {
     pub(crate) modules: BTreeMap<String, BTreeSet<Key>>,
+    /// Per module, the observed types of its selected functions that have
+    /// any.
+    pub(crate) types: BTreeMap<String, BTreeMap<Key, Types>>,
     pub(crate) notes: Vec<String>,
 }
 
@@ -47,6 +54,9 @@ pub(crate) struct Selection {
 pub(crate) struct Request<'a> {
     pub(crate) mode: SelectMode,
     pub(crate) profile: Option<&'a Path>,
+    /// Where the selected functions' observed types come from when
+    /// `profile` does not give them (pass 3's builds: `--types-profile`).
+    pub(crate) types_profile: Option<&'a Path>,
     /// `module:qualname` added (`--compile`) and removed (`--no-compile`).
     pub(crate) compile: &'a [String],
     pub(crate) no_compile: &'a [String],
@@ -161,10 +171,33 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
             .ok_or_else(|| format!("--no-compile `{spec}`: expected MODULE:QUALNAME"))?;
         chosen.retain(|(m, q, _)| !(m == module && q == qualname));
     }
+    // The types each selected function's compiled body is specialized for:
+    // those its current profile entry observed.
+    let typed = match (request.mode, request.profile, request.types_profile) {
+        (SelectMode::Profile, Some(path), _) | (_, _, Some(path)) => Some(profile::Profile::read(path)?),
+        _ => None,
+    };
     for (module, qualname, line) in chosen {
+        let types = typed.as_ref().map_or_else(Vec::new, |p| observed(p, sources, &module, &qualname, line));
+        if !types.is_empty() {
+            out.types.entry(module.clone()).or_default().insert((qualname.clone(), line), types);
+        }
         out.modules.entry(module).or_default().insert((qualname, line));
     }
     Ok(out)
+}
+
+/// The types `profile` observed for the function `module:qualname` at
+/// `line` of `sources`, while its entry has that function's current source.
+fn observed(profile: &profile::Profile, sources: &[Function], module: &str, qualname: &str, line: u32) -> Types {
+    let Some(f) = sources.iter().find(|f| f.module == module && f.qualname == qualname && f.firstlineno == line) else {
+        return Vec::new();
+    };
+    profile
+        .functions
+        .iter()
+        .find(|e| e.module == module && e.qualname == qualname && e.sha256 == f.sha256)
+        .map_or_else(Vec::new, profile::Entry::observed_types)
 }
 
 /// What `[tool.pycc]` of the `pyproject.toml` beside `path` (a module, or a
@@ -264,6 +297,7 @@ pub(crate) fn resolve(
         module: module.as_deref(),
         mode,
         profile: profile.as_deref(),
+        types_profile: flags.types_profile.as_deref(),
         compile: &compile,
         no_compile: &no_compile,
         rule: Rule {
@@ -313,9 +347,19 @@ fn package_root(path: &Path) -> PathBuf {
     root
 }
 
-/// Records this build's module's selection.
-pub(crate) fn set_module(selected: BTreeSet<Key>) {
+/// The observed types of this build's module's selected functions.
+static MODULE_TYPES: OnceLock<BTreeMap<Key, Types>> = OnceLock::new();
+
+/// Records this build's module's selection, and its functions' observed
+/// types.
+pub(crate) fn set_module(selected: BTreeSet<Key>, types: BTreeMap<Key, Types>) {
     let _ = MODULE.set(selected);
+    let _ = MODULE_TYPES.set(types);
+}
+
+/// The observed types of this build's module's selected functions.
+pub(crate) fn module_types() -> Option<&'static BTreeMap<Key, Types>> {
+    MODULE_TYPES.get()
 }
 
 /// This build's module's selection, when it selects functions.
@@ -353,26 +397,43 @@ pub(crate) fn import_name(path: &Path) -> String {
 }
 
 /// A member's selection as the package build passes it (`--select-functions
-/// FILE`): one `firstlineno qualname` per line.
-pub(crate) fn to_text(selected: &BTreeSet<Key>) -> String {
+/// FILE`): one `firstlineno qualname` per line, then, for a function with
+/// observed types, ` param:type` for each.
+pub(crate) fn to_text(selected: &BTreeSet<Key>, types: &BTreeMap<Key, Types>) -> String {
     selected
         .iter()
-        .map(|(qualname, line)| format!("{line} {qualname}\n"))
+        .map(|key| {
+            let (qualname, line) = key;
+            let typed: String = types
+                .get(key)
+                .into_iter()
+                .flatten()
+                .map(|(param, ty)| format!(" {param}:{ty}"))
+                .collect();
+            format!("{line} {qualname}{typed}\n")
+        })
         .collect()
 }
 
 /// Reads [`to_text`]'s form.
-pub(crate) fn from_text(text: &str) -> Result<BTreeSet<Key>, String> {
-    text.lines()
-        .filter(|line| !line.is_empty())
-        .map(|line| {
-            let (number, qualname) = line
-                .split_once(' ')
-                .ok_or_else(|| format!("bad selection line `{line}`"))?;
-            let number = number.parse().map_err(|_| format!("bad selection line `{line}`"))?;
-            Ok((qualname.to_string(), number))
-        })
-        .collect()
+pub(crate) fn from_text(text: &str) -> Result<(BTreeSet<Key>, BTreeMap<Key, Types>), String> {
+    let mut selected = BTreeSet::new();
+    let mut types = BTreeMap::new();
+    for line in text.lines().filter(|line| !line.is_empty()) {
+        let bad = || format!("bad selection line `{line}`");
+        let mut words = line.split(' ');
+        let number = words.next().and_then(|n| n.parse().ok()).ok_or_else(bad)?;
+        let qualname = words.next().filter(|q| !q.is_empty()).ok_or_else(bad)?;
+        let key = (qualname.to_string(), number);
+        let typed: Types = words
+            .map(|word| word.split_once(':').map(|(p, t)| (p.to_string(), t.to_string())).ok_or_else(bad))
+            .collect::<Result<_, _>>()?;
+        if !typed.is_empty() {
+            types.insert(key.clone(), typed);
+        }
+        selected.insert(key);
+    }
+    Ok((selected, types))
 }
 
 #[cfg(test)]

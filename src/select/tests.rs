@@ -16,6 +16,7 @@ fn request<'a>(mode: SelectMode, compile: &'a [String], no_compile: &'a [String]
     Request {
         mode,
         profile: None,
+        types_profile: None,
         compile,
         no_compile,
         rule: Rule::default(),
@@ -129,8 +130,12 @@ fn a_profile_selects_by_the_rule() {
 #[test]
 fn a_members_selection_round_trips_through_its_file() {
     let set: BTreeSet<Key> = [("C.m".to_string(), 3), ("f".to_string(), 10)].into();
-    assert_eq!(from_text(&to_text(&set)).unwrap(), set);
-    assert!(from_text("").unwrap().is_empty());
+    let types: BTreeMap<Key, Types> =
+        [(("f".to_string(), 10), vec![("s".to_string(), "str".to_string()), ("n".to_string(), "int".to_string())])].into();
+    assert_eq!(from_text(&to_text(&set, &types)).unwrap(), (set.clone(), types));
+    assert_eq!(from_text(&to_text(&set, &BTreeMap::new())).unwrap(), (set, BTreeMap::new()));
+    assert!(from_text("").unwrap().0.is_empty());
+    assert!(from_text("3 f s\n").is_err());
     assert!(from_text("x f\n").is_err());
     assert!(from_text("3\n").is_err());
 }
