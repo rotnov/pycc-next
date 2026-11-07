@@ -506,31 +506,42 @@ pub(super) fn emit_contains<'ctx>(
     };
     let status = match item {
         Scalar::Object(item_ptr) => {
-            // `CONTAINS_OP_SET`: an exact `str` in an exact `set` or
-            // `frozenset` is the set's own lookup, the item borrowed (a `str`
-            // is hashable, so CPython's retry of an unhashable `set` item as a
-            // `frozenset` never applies).
+            // A one-character ASCII `str` in an exact `frozenset` of exact
+            // `str`s: a bit test against the set's cached ASCII mask
+            // (`Fast::ascii_member`). Otherwise `CONTAINS_OP_SET`: an exact
+            // `str` in an exact `set` or `frozenset` is the set's own lookup,
+            // the item borrowed (a `str` is hashable, so CPython's retry of
+            // an unhashable `set` item as a `frozenset` never applies).
             crate::fast_ops::guarded(
                 context,
                 builder,
                 module,
-                "fast_set_contains",
-                |fast| {
-                    use crate::fast_ops::{FROZENSET, SET, STR};
-                    fast.require_class_in(container_ptr, &[SET, FROZENSET], "fast_set");
-                    fast.require_class_in(item_ptr, &[STR], "fast_set_item");
-                    let contains = shim_fn(
+                "fast_mask_contains",
+                |fast| fast.ascii_member(container_ptr, item_ptr, "fast_mask").into(),
+                || {
+                    crate::fast_ops::guarded(
+                        context,
+                        builder,
                         module,
-                        "PySet_Contains",
-                        i32_type.fn_type(&[ptr.into(), ptr.into()], false),
-                    );
-                    builder
-                        .build_call(contains, &[container_ptr.into(), item_ptr.into()], "fast_set_contains")
-                        .expect("build_call should not fail for PySet_Contains")
-                        .try_as_basic_value()
-                        .expect_basic("PySet_Contains returns int")
+                        "fast_set_contains",
+                        |fast| {
+                            use crate::fast_ops::{FROZENSET, SET, STR};
+                            fast.require_class_in(container_ptr, &[SET, FROZENSET], "fast_set");
+                            fast.require_class_in(item_ptr, &[STR], "fast_set_item");
+                            let contains = shim_fn(
+                                module,
+                                "PySet_Contains",
+                                i32_type.fn_type(&[ptr.into(), ptr.into()], false),
+                            );
+                            builder
+                                .build_call(contains, &[container_ptr.into(), item_ptr.into()], "fast_set_contains")
+                                .expect("build_call should not fail for PySet_Contains")
+                                .try_as_basic_value()
+                                .expect_basic("PySet_Contains returns int")
+                        },
+                        call,
+                    )
                 },
-                call,
             )
         }
         _ => call(),

@@ -397,7 +397,7 @@ interpreter does, and calls its helper only when the check fails
 | `s == "lit"` | an exact compact ASCII `str`: its length, then its bytes | `COMPARE_OP_STR` |
 | `s[i]` | an exact compact ASCII `str` and a compact `int` in range: the cached one-character `str`; an exact `bytes` or `bytearray`: its byte | `BINARY_SUBSCR_STR_INT` |
 | `b[i] = v` | an exact `bytearray`, a compact `int` index in range and a value in `range(256)`: the byte stored | `STORE_SUBSCR` |
-| `c in s` | an exact `str` in an exact `set` or `frozenset`: `PySet_Contains`, the item unpacked | `CONTAINS_OP_SET` |
+| `c in s` | a one-character ASCII `str` in an exact `frozenset`: one bit of the set's ASCII mask (below); any other exact `str` in an exact `set` or `frozenset`: `PySet_Contains`, the item unpacked | `CONTAINS_OP_SET` |
 | `isinstance(o, dict)` (a builtin class) | `o` exactly of that class: `True`; exactly of another of the 12 builtins the shim publishes: `False` | |
 | a module global | a per-site cache of the namespace dict, its version and the value | `LOAD_GLOBAL_MODULE` |
 
@@ -406,6 +406,16 @@ publishes the type pointers the checks compare with only when every check passes
 other build, and with `PYCC_NO_FAST_OPS=1`, every check fails. The loads of an object's
 type and of an `int`'s or `str`'s value are `!invariant.load`, so a check on a value a
 loop does not rebind is loop-invariant.
+
+`c in s` against a `frozenset` reads a 128-bit mask of the set's one-character ASCII
+members from a two-way cache of 64 sets keyed by the set's address
+(`pycc_ext_ascii_mask_fill`). A frozenset cannot change, and the cache holds a reference
+to each set whose mask it keeps, so an address cannot be reused while its entry lives. A
+set with more than 256 members, or with any member that is not an exact `str`, gets an
+entry marked unusable, without a reference, and takes `PySet_Contains`: a member of
+another type could compare equal to a one-character string. tomli's `c in
+BARE_KEY_CHARS`-style loops made the lookup its largest helper; the mask took tomli's
+`loads()` from 31.6M to 29.8M instructions.
 
 A release stays one call into the module's own out-of-line copy (`object_rc.rs`):
 inlining its common case (a mortal object that stays alive) took 1.5% of tomli's

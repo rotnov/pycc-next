@@ -70,6 +70,18 @@ const BYTES_DATA: u64 = 32;
 const BYTEARRAY_START: u64 = 40;
 const FAST_SIZE: u64 = CLASSES + CLASS_COUNT * 8;
 
+/// The shim's `PyccAsciiMask pycc_ext_ascii_masks[]` (`fast_ops.c`): two
+/// ways per index of `MASK_WAYS`, each entry `MASK_SIZE` bytes: its set, its
+/// two 64-bit words of ASCII members, whether it is usable.
+pub const EXT_ASCII_MASKS_SYMBOL: &str = "pycc_ext_ascii_masks";
+/// `PyccAsciiMask *pycc_ext_ascii_mask_fill(PyObject *frozenset)`: the
+/// entry after a miss in both ways.
+pub const EXT_ASCII_MASK_FILL_SYMBOL: &str = "pycc_ext_ascii_mask_fill";
+const MASK_WAYS: u64 = 64;
+const MASK_SIZE: u64 = 32;
+const MASK_BITS: u64 = 8;
+const MASK_USABLE: u64 = 24;
+
 /// The object layouts `fast_ops.c` checks (its file comment).
 const OB_TYPE: u64 = 8;
 const INT_TAG: u64 = 16;
@@ -544,6 +556,117 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
             .build_call(rt.obj_retain, &[text.into()], "")
             .expect("build_call should not fail for pycc_ext_obj_retain");
         text
+    }
+
+    /// `item in set` as an `i32` 0 or 1, requiring an exact `frozenset`
+    /// whose members are all exact `str`s and a one-character ASCII `str`:
+    /// a bit test against the set's ASCII mask, read from the shim's
+    /// two-way cache ([`EXT_ASCII_MASKS_SYMBOL`]) and computed on a miss
+    /// ([`EXT_ASCII_MASK_FILL_SYMBOL`], `fast_ops.c`).
+    pub(crate) fn ascii_member(&self, set: PointerValue<'ctx>, item: PointerValue<'ctx>, name: &str) -> IntValue<'ctx> {
+        let builder = self.builder;
+        let i64_type = self.context.i64_type();
+        let ptr = self.context.ptr_type(AddressSpace::default());
+        let length = self.ascii_str(item, &format!("{name}_item"));
+        let single = builder
+            .build_int_compare(IntPredicate::EQ, length, self.i64(1), &format!("{name}_single"))
+            .expect("icmp");
+        self.require(single, &format!("{name}_single"));
+        let byte = self.ascii_byte(item, self.i64(0), &format!("{name}_char"));
+        self.require_class_in(set, &[FROZENSET], &format!("{name}_set"));
+        let masks = self
+            .module
+            .get_global(EXT_ASCII_MASKS_SYMBOL)
+            .unwrap_or_else(|| {
+                let global = self.module.add_global(
+                    self.context.i8_type().array_type((MASK_WAYS * 2 * MASK_SIZE) as u32),
+                    None,
+                    EXT_ASCII_MASKS_SYMBOL,
+                );
+                global.set_linkage(Linkage::External);
+                global
+            })
+            .as_pointer_value();
+        let address = builder
+            .build_ptr_to_int(set, i64_type, &format!("{name}_address"))
+            .expect("ptrtoint");
+        let shifted = builder
+            .build_right_shift(address, self.i64(4), false, &format!("{name}_shifted"))
+            .expect("lshr");
+        let index = builder
+            .build_and(shifted, self.i64(MASK_WAYS - 1), &format!("{name}_index"))
+            .expect("and");
+        let offset = builder
+            .build_int_mul(index, self.i64(2 * MASK_SIZE), &format!("{name}_offset"))
+            .expect("mul");
+        // SAFETY: `index` is below `MASK_WAYS`, an entry pair of the cache.
+        let first = unsafe {
+            builder
+                .build_in_bounds_gep(self.context.i8_type(), masks, &[offset], &format!("{name}_first"))
+                .expect("gep")
+        };
+        let second = self.at(first, MASK_SIZE, &format!("{name}_second"));
+        let entry_block = builder.get_insert_block().expect("positioned");
+        let try_second = self.context.append_basic_block(self.function, &format!("{name}_try_second"));
+        let fill = self.context.append_basic_block(self.function, &format!("{name}_fill"));
+        let found = self.context.append_basic_block(self.function, &format!("{name}_entry"));
+        let first_set = self.load(ptr.into(), first, false, &format!("{name}_first_set")).into_pointer_value();
+        let first_hit = builder
+            .build_int_compare(IntPredicate::EQ, first_set, set, &format!("{name}_first_hit"))
+            .expect("icmp");
+        let branch = builder
+            .build_conditional_branch(first_hit, found, try_second)
+            .expect("build_conditional_branch should not fail for an i1");
+        crate::int_fast::weight_branch(self.context, branch, true);
+        builder.position_at_end(try_second);
+        let second_set = self.load(ptr.into(), second, false, &format!("{name}_second_set")).into_pointer_value();
+        let second_hit = builder
+            .build_int_compare(IntPredicate::EQ, second_set, set, &format!("{name}_second_hit"))
+            .expect("icmp");
+        builder
+            .build_conditional_branch(second_hit, found, fill)
+            .expect("build_conditional_branch should not fail for an i1");
+        builder.position_at_end(fill);
+        let fill_fn = self.module.get_function(EXT_ASCII_MASK_FILL_SYMBOL).unwrap_or_else(|| {
+            self.module.add_function(
+                EXT_ASCII_MASK_FILL_SYMBOL,
+                ptr.fn_type(&[ptr.into()], false),
+                Some(Linkage::External),
+            )
+        });
+        let filled = builder
+            .build_call(fill_fn, &[set.into()], &format!("{name}_filled"))
+            .expect("build_call should not fail for pycc_ext_ascii_mask_fill")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_ascii_mask_fill returns its entry")
+            .into_pointer_value();
+        builder.build_unconditional_branch(found).expect("branch");
+        builder.position_at_end(found);
+        let entry = builder.build_phi(ptr, &format!("{name}_mask")).expect("phi");
+        entry.add_incoming(&[(&first, entry_block), (&second, try_second), (&filled, fill)]);
+        let entry = entry.as_basic_value().into_pointer_value();
+        let usable = self
+            .load(i64_type.into(), self.at(entry, MASK_USABLE, &format!("{name}_usable_at")), false, &format!("{name}_usable"))
+            .into_int_value();
+        let usable = builder
+            .build_int_compare(IntPredicate::NE, usable, self.i64(0), &format!("{name}_is_usable"))
+            .expect("icmp");
+        self.require(usable, &format!("{name}_usable"));
+        let word_index = builder
+            .build_right_shift(byte, self.i64(6), false, &format!("{name}_word_index"))
+            .expect("lshr");
+        let word_offset = builder
+            .build_int_mul(word_index, self.i64(8), &format!("{name}_word_offset"))
+            .expect("mul");
+        let bits = self.at(entry, MASK_BITS, &format!("{name}_bits"));
+        let word_at = self.byte_at(bits, word_offset, &format!("{name}_word_at"));
+        let word = self.load(i64_type.into(), word_at, false, &format!("{name}_word")).into_int_value();
+        let bit = builder.build_and(byte, self.i64(63), &format!("{name}_bit")).expect("and");
+        let shifted = builder.build_right_shift(word, bit, false, &format!("{name}_word_shifted")).expect("lshr");
+        let member = builder.build_and(shifted, self.i64(1), &format!("{name}_member")).expect("and");
+        builder
+            .build_int_truncate(member, self.context.i32_type(), &format!("{name}_status"))
+            .expect("trunc")
     }
 
     /// A compact `int` result as a new `int` object (`NULL` with the

@@ -31,7 +31,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Generic bodies (non-strict `--ext`, every value a CPython object) run inline paths for
   exact `int`s and `str`s at their operations, as CPython's specializing interpreter does:
   compact-`int` `+`, `-`, `&`, `|`, `^` and comparisons, `str[int]` through the cached
-  one-character strings, `bytes`/`bytearray` item reads and `bytearray` item stores, `str == "lit"` and `str == str` quick answers, `str in set`, exact-class
+  one-character strings, `bytes`/`bytearray` item reads and `bytearray` item stores, `str == "lit"` and `str == str` quick answers, `str in set` (a one-character ASCII
+  `str` in a `frozenset` through a cached bit mask of the set), exact-class
   `isinstance` against a builtin, and a per-site cache for module globals
   (`docs/design/compile-little.md`, section 2.5).
   Anything else takes the helper call as before; `PYCC_NO_FAST_OPS=1` turns them off.
