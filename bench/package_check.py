@@ -81,16 +81,17 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            also count, under valgrind's callgrind, the instructions one call
            of each package's hot path executes against the compiled modules
            (with N = 1 and N = 1 + K calls; per call = the difference / K),
-           and fail a package over its bound (`max_instructions`). Unlike
+           and fail a package over its bound (`max_instructions`); CPython's
+           count on the sources, in the same run, is printed beside it, with
+           the ratio. Unlike
            wall time, the count is the same on every run of a shared CI
            runner, so it gates the code the compiler generates for the hot
            path; it cannot see what only changes speed (code placement).
            The bounds are for CI's Linux x86_64 runner and its CPython
-           (actions/setup-python; set with 3.13, which itself executes more
-           instructions than Ubuntu's own python3.13: the counts there are
-           1-10% lower, for tomli, half of whose `loads()` is CPython's).
-           With CPython 3.15.2 the counts measured off CI are within 0.2% of
-           3.13's or lower (pystache 0.36M against 0.47M).
+           (actions/setup-python), 5% above its counts: off CI the counts
+           differ by up to about 12% (CPython 3.15.2 from uv runs fewer
+           instructions than CI's 3.15), so a local count does not calibrate
+           a bound.
   --max-build-seconds S
            fail a package whose modules take more than S seconds to build in
            all (v0.5 accept 4: 10 on the CI Linux runner). The modules build
@@ -465,10 +466,14 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
                                       if b["package"] == pkg.name and b.get("timed")}})
     if a.instructions:
         per_call = instructions_per_call(pkg, built, cwd)
-        if per_call is None:
+        # CPython running the sources, in the same run: the bound is absolute,
+        # but whether the compiled code beats the interpreter is the ratio.
+        interpreted = instructions_per_call(pkg, plain, cwd)
+        if per_call is None or interpreted is None:
             return False
         print(f"  {pkg.instructions_label}: {per_call / 1e6:.2f}M instructions per call "
-              f"(at most {pkg.max_instructions / 1e6:.2f}M)")
+              f"(at most {pkg.max_instructions / 1e6:.2f}M; CPython on the sources "
+              f"{interpreted / 1e6:.2f}M, {interpreted / per_call:.2f}x)")
         if per_call > pkg.max_instructions:
             print(f"FAIL: {pkg.name}'s hot path executes more instructions than its bound")
             return False

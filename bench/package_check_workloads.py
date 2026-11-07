@@ -268,9 +268,9 @@ for _ in range(int(sys.argv[2])):
     dmp.diff_main(a, b, False)
 """,
             instructions_label="diff_main of the speed test's first 2000 characters",
-            # `--select all`: 318.4M instructions per call locally (CPython 3.15.2;
-            # CPython running the sources: 873.8M); the bound is 5% above.
-            max_instructions=334_300_000,
+            # `--select all`: 351.6M instructions per call on CI (CPython
+            # running the sources: 873.8M locally); the bound is 5% above.
+            max_instructions=369_100_000,
             instruction_calls=2,
         ),
         Package(
@@ -330,7 +330,13 @@ for _ in range(int(sys.argv[2])):
     tomli.loads(doc)
 """,
             instructions_label="loads() of the benchmark document",
-            max_instructions=2_930_000,
+            # `--select all`: 6.35M instructions per call on CI; the bound is
+            # 5% above. The whole-module build's typed bodies ran 2.79M (the
+            # comment above); the generic bodies execute more than CPython on
+            # the sources (62.2M against 44.7M off CI, `loads()` of
+            # `Cargo.lock`): every `src[pos]`, `pos += 1` and `char == "x"`
+            # is an object operation.
+            max_instructions=6_670_000,
             instruction_calls=20,
         ),
         Package(
@@ -371,12 +377,12 @@ for _ in range(int(sys.argv[2])):
     decode()
 """,
             instructions_label="read() of the 256x256 RGB image",
-            # `--select all`: 333.9M instructions per call locally (CPython
-            # 3.15.2; CPython running the sources: 248.7M, so the generic
-            # bodies of the byte loops cost more than the interpreter); the
-            # bound is 5% above. (The whole-module build's native `bytearray`
-            # specializations ran 21.2M.)
-            max_instructions=350_600_000,
+            # `--select all`: 355.9M instructions per call on CI; the bound is
+            # 5% above. CPython running the sources executes fewer (248.7M
+            # locally, against 333.9M compiled): the generic bodies of the
+            # byte loops cost more than the interpreter. (The whole-module
+            # build's native `bytearray` specializations ran 21.2M.)
+            max_instructions=373_700_000,
             instruction_calls=2,
             more_speed=(("read() of every PngSuite image its tests use (28) x5", PYPNG_SUITE),),
         ),
@@ -415,9 +421,9 @@ for _ in range(int(sys.argv[2])):
         mistune.html(doc)
 """,
             instructions_label="mistune.html of every benchmark/cases document",
-            # `--select all`: 65.1M instructions per call locally (CPython
-            # 3.15.2); the bound is 5% above.
-            max_instructions=68_300_000,
+            # `--select all`: 76.1M instructions per call on CI; the bound is
+            # 5% above.
+            max_instructions=79_900_000,
             instruction_calls=2,
             more_speed=(("the benchmark's \"mistune (full)\" parser (every plugin) x20",
                          MISTUNE_CASES + MISTUNE_FULL + MISTUNE_TIMED),
@@ -460,10 +466,10 @@ for _ in range(int(sys.argv[2])):
         test()
 """,
             instructions_label="the package's own benchmark examples, each rendered once",
-            # `--select all`: 0.50M instructions per call locally (CPython
-            # 3.15.2; CPython running the sources: 0.50M too); the bound is 5%
-            # above, rounded up.
-            max_instructions=530_000,
+            # `--select all`: 0.56M instructions per call on CI (0.50M locally,
+            # where CPython running the sources executes 0.37M); the bound is
+            # 5% above, rounded up.
+            max_instructions=590_000,
             instruction_calls=100,
             more_speed=(("import pystache (once per fresh process)", import_timed("pystache")),),
         ),

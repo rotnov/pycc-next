@@ -145,7 +145,9 @@ fn a_member_is_copied_with_the_packages_above_it() {
     std::fs::write(src.join("unrelated.txt"), "").unwrap();
     let out = dir.join("out");
     let copy = copy_package(&src.join("top/pkg"), &out, &[]).unwrap();
-    assert_eq!(copy, out.canonicalize().unwrap().join("top/pkg"));
+    assert_eq!(copy, crate::canonical::canonicalize(&out).unwrap().join("top/pkg"));
+    // Not a Windows verbatim path, to which Python cannot join `a/b`.
+    assert!(!copy.to_string_lossy().starts_with(r"\\?\"), "{}", copy.display());
     // The whole top-level package, for the member's sibling imports; with
     // no project marker, nothing else.
     assert!(out.join("top/__init__.py").is_file());
@@ -164,7 +166,7 @@ fn a_member_is_copied_with_the_packages_above_it() {
     // The path returned is the copy's own canonical path, whatever form the
     // destination was given in.
     let roundabout = copy_package(&src.join("alone.py"), &dir.join("two/../three"), &[]).unwrap();
-    assert_eq!(roundabout, dir.join("three").canonicalize().unwrap().join("alone.py"));
+    assert_eq!(roundabout, crate::canonical::canonicalize(&dir.join("three")).unwrap().join("alone.py"));
 }
 
 /// The workload reads files beside the package by their paths from the
@@ -186,7 +188,7 @@ fn the_copy_holds_the_project_files_beside_the_package() {
     std::fs::write(dir.join("beside_the_project.txt"), "").unwrap();
     let out = dir.join("out");
     let copy = copy_package(&project.join("src/pkg"), &out, &[]).unwrap();
-    assert_eq!(copy, out.canonicalize().unwrap().join("src/pkg"));
+    assert_eq!(copy, crate::canonical::canonicalize(&out).unwrap().join("src/pkg"));
     assert_eq!(std::fs::read_to_string(out.join("tests/data/case.txt")).unwrap(), "case\n");
     assert!(out.join("tests/test_pkg.py").is_file());
     assert!(out.join("pyproject.toml").is_file());
