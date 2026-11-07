@@ -105,6 +105,7 @@ pub(super) fn emit_call_loaded<'ctx>(
     site: inkwell::values::PointerValue<'ctx>,
     args: &[Scalar<'ctx>],
     names: &[String],
+    direct: Option<&crate::direct_call::DirectTarget<'ctx>>,
 ) -> Scalar<'ctx> {
     debug_assert!(names.len() <= args.len(), "every keyword name has a value");
     let edge = ForeignFailEdge::for_current(builder);
@@ -116,8 +117,10 @@ pub(super) fn emit_call_loaded<'ctx>(
     builder
         .build_store(stack, receiver)
         .expect("build_store should not fail");
+    let mut packed_args = vec![receiver];
     for (index, value) in args.iter().enumerate() {
         let packed = emit_pack(context, builder, module, *value, "foreign_call_arg");
+        packed_args.push(packed);
         let slot = unsafe {
             builder
                 .build_in_bounds_gep(
@@ -171,13 +174,30 @@ pub(super) fn emit_call_loaded<'ctx>(
         )
     };
     let call = shim_fn(module, symbol, fn_type);
-    let result = builder
-        .build_call(call, &operands, "foreign_call")
-        .expect("build_call should not fail for pycc_ext_obj_call_loaded")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_call_loaded returns PyObject *")
-        .into_pointer_value();
-    route_null(context, builder, module, rt, edge, result, "foreign_call");
+    let slow = || {
+        let result = builder
+            .build_call(call, &operands, "foreign_call")
+            .expect("build_call should not fail for pycc_ext_obj_call_loaded")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_obj_call_loaded returns PyObject *")
+            .into_pointer_value();
+        route_null(context, builder, module, rt, edge, result, "foreign_call");
+        result
+    };
+    // A lifted body's forwarder, loaded with its receiver, runs the body
+    // itself (`direct_call`): the receiver and the packed arguments are the
+    // body's parameters, and the loaded function is released.
+    let result = crate::direct_call::emit(
+        context,
+        builder,
+        module,
+        rt,
+        direct,
+        callable,
+        true,
+        &packed_args,
+        slow,
+    );
     Scalar::Object(result)
 }
 

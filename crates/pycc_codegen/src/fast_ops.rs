@@ -57,7 +57,7 @@ const CHAR_COUNT: u64 = 128;
 /// `frozenset`, `bytes` and `bytearray` ([`SET`], [`FROZENSET`], [`BYTES`],
 /// [`BYTEARRAY`]).
 const CLASSES: u64 = CHARS + CHAR_COUNT * 8;
-const CLASS_COUNT: u64 = 11;
+const CLASS_COUNT: u64 = 12;
 /// The selectors of `str`, `set` and `frozenset` in the classes.
 pub(crate) const STR: u64 = 1;
 pub(crate) const SET: u64 = 7;
@@ -239,12 +239,53 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         self.require(exact, &format!("{name}_exact"));
     }
 
-    /// Requires `object` to be non-NULL and an instance of exactly the
-    /// built-in class `pycc_ext_obj_isinstance` selects by `selector`.
-    pub(crate) fn require_builtin_instance(&self, object: PointerValue<'ctx>, selector: u64, name: &str) {
+    /// `isinstance(object, C)` for the built-in class `C` that
+    /// `pycc_ext_obj_isinstance` selects by `selector`, as an `i32` 0 or 1,
+    /// requiring `object` to be non-NULL and of exactly one of the classes
+    /// of the table (`NoneType` included). Such an object's `__class__` is
+    /// its type, and of those classes only `bool` derives from another
+    /// (`int`), so the answer is the type's identity.
+    pub(crate) fn builtin_isinstance(&self, object: PointerValue<'ctx>, selector: u64, name: &str) -> IntValue<'ctx> {
         assert!(selector < CLASS_COUNT, "pycc_codegen: internal error: no built-in class {selector}");
-        self.require_exact(object, CLASSES + selector * 8, name);
+        let ptr = self.context.ptr_type(AddressSpace::default());
+        let present = self
+            .builder
+            .build_is_not_null(object, &format!("{name}_present"))
+            .expect("build_is_not_null should not fail");
+        self.require(present, &format!("{name}_present"));
+        let actual = self
+            .load(ptr.into(), self.at(object, OB_TYPE, &format!("{name}_type_at")), true, &format!("{name}_type"))
+            .into_pointer_value();
+        let mut known = None;
+        let mut answer = None;
+        for class in 0..CLASS_COUNT {
+            let expected = self.fast_field(CLASSES + class * 8, &format!("{name}_class"));
+            let exact = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, actual, expected, &format!("{name}_is"))
+                .expect("icmp of two pointers");
+            known = Some(match known {
+                None => exact,
+                Some(previous) => self.builder.build_or(previous, exact, &format!("{name}_known")).expect("or"),
+            });
+            // `bool` (selector 3) is an `int` (selector 0).
+            if class == selector || (selector == 0 && class == 3) {
+                answer = Some(match answer {
+                    None => exact,
+                    Some(previous) => self.builder.build_or(previous, exact, &format!("{name}_answer")).expect("or"),
+                });
+            }
+        }
+        self.require(known.expect("the table has classes"), &format!("{name}_known"));
+        self.builder
+            .build_int_z_extend(
+                answer.expect("the selected class is in the table"),
+                self.context.i32_type(),
+                &format!("{name}_status"),
+            )
+            .expect("zext")
     }
+
 
     /// The value of `object` as an `i64`, requiring an exact compact `int`.
     pub(crate) fn compact_int(&self, object: PointerValue<'ctx>, name: &str) -> IntValue<'ctx> {

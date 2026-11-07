@@ -3,7 +3,9 @@
 //! --select all`: the module prints what CPython prints for its source,
 //! with the attribute caches on and off, and with the caches on, the calls
 //! whose keywords name the parameters in order go straight to the compiled
-//! body behind the method's forwarder (`pycc_ext_site_forward_calls`).
+//! body behind the method's forwarder: from the call site itself
+//! (`pycc_ext_direct_calls`, `crates/pycc_codegen/src/direct_call.rs`) or
+//! through the site's cache (`pycc_ext_site_forward_calls`).
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -46,7 +48,9 @@ fn keyword_method_calls_match_cpython_and_reach_the_compiled_body() {
     let probe = format!(
         "import ctypes, sys\nimport {module}\n{module}.main()\n\
          lib = ctypes.CDLL({module}.__file__)\n\
-         print('FORWARD', lib.pycc_ext_site_forward_calls(), file=sys.stderr)\n"
+         lib.pycc_ext_direct_calls.restype = ctypes.c_longlong\n\
+         print('FORWARD', lib.pycc_ext_site_forward_calls(), file=sys.stderr)\n\
+         print('DIRECT', lib.pycc_ext_direct_calls(), file=sys.stderr)\n"
     );
     for off in [false, true] {
         let mut run = python();
@@ -69,12 +73,17 @@ fn keyword_method_calls_match_cpython_and_reach_the_compiled_body() {
             .find_map(|l| l.strip_prefix("FORWARD "))
             .and_then(|n| n.trim().parse().ok())
             .unwrap_or_else(|| panic!("no FORWARD line\n{stderr}"));
+        let direct: usize = stderr
+            .lines()
+            .find_map(|l| l.strip_prefix("DIRECT "))
+            .and_then(|n| n.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no DIRECT line\n{stderr}"));
         if off {
             assert_eq!(forward, 0, "{stderr}");
         } else {
             // `calls(150)`: three in-order keyword calls per iteration (two
             // of `kw1`, one of `kw3`), the others bound.
-            assert!(forward >= 450, "{forward} direct calls\n{stderr}");
+            assert!(forward + direct >= 450, "{forward} + {direct} direct calls\n{stderr}");
         }
     }
 }

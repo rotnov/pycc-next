@@ -91,12 +91,56 @@ pub(super) fn emit_pack<'ctx>(
         symbol,
         ptr.fn_type(&[value.get_type().into()], false),
     );
+    let call = || {
+        builder
+            .build_call(packer, &[value.into()], name)
+            .unwrap_or_else(|_| panic!("build_call should not fail for {symbol}"))
+            .try_as_basic_value()
+            .expect_basic("a pycc_ext_obj_pack_* helper returns PyObject *")
+            .into_pointer_value()
+    };
+    let Scalar::Object(object) = scalar else {
+        return call();
+    };
+    // An object packs as a new reference to itself: retained here (inline
+    // in a release build), and only a NULL one -- a defect the packer
+    // reports as `SystemError` -- calls the packer.
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("a pack is emitted inside a function body");
+    let retain_bb = context.append_basic_block(function, &format!("{name}_retain"));
+    let null_bb = context.append_basic_block(function, &format!("{name}_null"));
+    let join_bb = context.append_basic_block(function, &format!("{name}_packed"));
+    let present = builder
+        .build_is_not_null(object, &format!("{name}_present"))
+        .expect("build_is_not_null should not fail");
+    let branch = builder
+        .build_conditional_branch(present, retain_bb, null_bb)
+        .expect("build_conditional_branch should not fail");
+    crate::int_fast::weight_branch(context, branch, true);
+    builder.position_at_end(retain_bb);
+    let retain = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_RETAIN_SYMBOL,
+        context.void_type().fn_type(&[ptr.into()], false),
+    );
     builder
-        .build_call(packer, &[value.into()], name)
-        .unwrap_or_else(|_| panic!("build_call should not fail for {symbol}"))
-        .try_as_basic_value()
-        .expect_basic("a pycc_ext_obj_pack_* helper returns PyObject *")
-        .into_pointer_value()
+        .build_call(retain, &[object.into()], "")
+        .expect("build_call should not fail for pycc_ext_obj_retain");
+    builder
+        .build_unconditional_branch(join_bb)
+        .expect("build_unconditional_branch should not fail");
+    builder.position_at_end(null_bb);
+    let reported = call();
+    let null_end = builder.get_insert_block().expect("positioned");
+    builder
+        .build_unconditional_branch(join_bb)
+        .expect("build_unconditional_branch should not fail");
+    builder.position_at_end(join_bb);
+    let phi = builder.build_phi(ptr, name).expect("build_phi should not fail");
+    phi.add_incoming(&[(&object, retain_bb), (&reported, null_end)]);
+    phi.as_basic_value().into_pointer_value()
 }
 
 /// Packs a native tuple of `int`/`float`/`bool` (`pycc_types`'

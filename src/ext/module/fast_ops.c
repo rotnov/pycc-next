@@ -38,8 +38,8 @@ typedef struct {
     PyTypeObject *int_type;
     PyObject *chars[128];
     /* `pycc_ext_obj_isinstance`'s built-in classes, by its selector, then
-     * `set`, `frozenset`, `bytes` and `bytearray`. */
-    PyTypeObject *classes[11];
+     * `set`, `frozenset`, `bytes`, `bytearray` and `NoneType`. */
+    PyTypeObject *classes[12];
 } PyccExtFast;
 
 static PyccExtFast pycc_ext_fast;
@@ -164,6 +164,7 @@ static void pycc_ext_fast_init(void)
     pycc_ext_fast.classes[8] = &PyFrozenSet_Type;
     pycc_ext_fast.classes[9] = &PyBytes_Type;
     pycc_ext_fast.classes[10] = &PyByteArray_Type;
+    pycc_ext_fast.classes[11] = Py_TYPE(Py_None);
     pycc_ext_fast.str_type = &PyUnicode_Type;
     pycc_ext_fast.int_type = &PyLong_Type;
 }
@@ -180,4 +181,35 @@ PyObject *pycc_ext_obj_pack_i64(long long value)
 int pycc_ext_fast_ops_enabled(void)
 {
     return pycc_ext_fast.str_type != NULL;
+}
+
+/* Before a compiled call site calls a lifted body directly
+ * (`pycc_codegen::direct_call`): what the call through the body's
+ * forwarder checks (`pycc_fwd_target`). 1 when the call may go ahead
+ * (`Py_LeaveRecursiveCall` follows it); 0 at the recursion limit, with no
+ * exception set: the site then calls through the forwarder, which raises
+ * CPython's `RecursionError` itself. */
+static long long pycc_ext_direct_count = 0;
+
+int pycc_ext_direct_enter(void)
+{
+    if (Py_EnterRecursiveCall(" while calling a Python object")) {
+        PyErr_Clear();
+        return 0;
+    }
+    pycc_ext_direct_count++;
+    return 1;
+}
+
+/* How many direct calls `pycc_ext_direct_enter` let go ahead, which the
+ * tests read with `ctypes` (`RUNTIME_COUNTERS`). */
+long long pycc_ext_direct_calls(void)
+{
+    return pycc_ext_direct_count;
+}
+
+/* After a direct call `pycc_ext_direct_enter` let go ahead. */
+void pycc_ext_direct_leave(void)
+{
+    Py_LeaveRecursiveCall();
 }

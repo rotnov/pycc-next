@@ -421,9 +421,9 @@ pub(super) fn emit_iter_header<'ctx>(
 }
 
 /// Emits the *callable lookup* of one `obj.method(args)` call, yielding the
-/// bound method as an owned `PyObject *` that [`emit_call`] consumes.
+/// bound method as an owned `PyObject *` that [`emit_call_kw`] consumes.
 ///
-/// Split from [`emit_call`] so that `emit_expr`'s own arm can run it
+/// Split from the call so that `emit_expr`'s own arm can run it
 /// *before* it evaluates the argument expressions. CPython resolves a
 /// call's callable first and only then evaluates the arguments, so
 /// `obj.missing(1 // 0)` raises `AttributeError`; an earlier revision of
@@ -492,37 +492,6 @@ pub(super) fn emit_lookup<'ctx>(
 }
 
 
-/// Marshals `args` and calls `bound`, yielding the call's result as an
-/// opaque [`Scalar::Object`].
-///
-/// `bound` comes from [`emit_lookup`] and `args` are already-evaluated
-/// scalars, so this function never recurses into the MIR and the evaluation
-/// order visible in the emitted code is exactly CPython's: base, callable,
-/// then each argument left to right.
-///
-/// `pycc_ext_obj_call` consumes `bound` and every packed argument on every
-/// path; only the call's *result* outlives it, owned on the rule
-/// `foreign_attr.rs` documents for an attribute load.
-pub(super) fn emit_call<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    bound: inkwell::values::PointerValue<'ctx>,
-    args: &[Scalar<'ctx>],
-) -> Scalar<'ctx> {
-    emit_call_with(
-        context,
-        builder,
-        module,
-        rt,
-        EXT_OBJ_CALL_SYMBOL,
-        bound,
-        args,
-        &[],
-    )
-}
-
 /// Marshals `args` and calls `callee` *itself* (#1313), yielding the call's
 /// result as an opaque [`Scalar::Object`].
 ///
@@ -532,7 +501,7 @@ pub(super) fn emit_call<'ctx>(
 /// other callee [`callee_is_produced`] does not list. It therefore goes to
 /// [`EXT_OBJ_CALL_BORROWED_SYMBOL`], which takes its own reference before
 /// delegating to the consuming `pycc_ext_obj_call`; passing the callee
-/// straight to [`emit_call`]'s consuming helper would release the caller's
+/// straight to the consuming `pycc_ext_obj_call` would release the caller's
 /// reference on the first call. The packed
 /// arguments are consumed on every path, exactly as for a method call.
 pub(super) fn emit_call_borrowed<'ctx>(
@@ -542,6 +511,7 @@ pub(super) fn emit_call_borrowed<'ctx>(
     rt: &RtFns<'ctx>,
     callee: Scalar<'ctx>,
     args: &[Scalar<'ctx>],
+    direct: Option<&crate::direct_call::DirectTarget<'ctx>>,
 ) -> Scalar<'ctx> {
     let callee_ptr = expect_object_pointer(callee);
     emit_call_with(
@@ -553,6 +523,7 @@ pub(super) fn emit_call_borrowed<'ctx>(
         callee_ptr,
         args,
         &[],
+        direct,
     )
 }
 
@@ -584,6 +555,7 @@ pub(super) fn callee_is_produced(callee: &MirExpr) -> bool {
 /// helper by its MIR shape ([`callee_is_produced`]). A produced callee whose
 /// arguments raise before this point is released by the argument's own
 /// failure edge (`foreign_call_emit::emit_direct_call` holds it there).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_object_call<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -592,12 +564,23 @@ pub(super) fn emit_object_call<'ctx>(
     callee_mir: &MirExpr,
     callee: Scalar<'ctx>,
     args: &[Scalar<'ctx>],
+    direct: Option<&crate::direct_call::DirectTarget<'ctx>>,
 ) -> Scalar<'ctx> {
     if callee_is_produced(callee_mir) {
         let callee_ptr = expect_object_pointer(callee);
-        emit_call(context, builder, module, rt, callee_ptr, args)
+        emit_call_with(
+            context,
+            builder,
+            module,
+            rt,
+            EXT_OBJ_CALL_SYMBOL,
+            callee_ptr,
+            args,
+            &[],
+            direct,
+        )
     } else {
-        emit_call_borrowed(context, builder, module, rt, callee, args)
+        emit_call_borrowed(context, builder, module, rt, callee, args, direct)
     }
 }
 
@@ -624,6 +607,7 @@ pub(super) fn emit_call_kw<'ctx>(
     callable: inkwell::values::PointerValue<'ctx>,
     args: &[Scalar<'ctx>],
     names: &[String],
+    direct: Option<&crate::direct_call::DirectTarget<'ctx>>,
 ) -> Scalar<'ctx> {
     debug_assert!(
         !names.is_empty() && names.len() <= args.len(),
@@ -634,15 +618,16 @@ pub(super) fn emit_call_kw<'ctx>(
     } else {
         EXT_OBJ_CALL_KW_BORROWED_SYMBOL
     };
-    emit_call_with(context, builder, module, rt, symbol, callable, args, names)
+    emit_call_with(context, builder, module, rt, symbol, callable, args, names, direct)
 }
 
-/// The shared body of [`emit_call`], [`emit_call_borrowed`] and
+/// The shared body of [`emit_object_call`], [`emit_call_borrowed`] and
 /// [`emit_call_kw`]: the positional helpers take the same
 /// `(callable, args, nargs)` parameters and differ only in who owns
 /// `callable`; the keyword helpers append `(names, nkw)`, where the last
 /// `nkw` of the `args` slots are the keyword values. The packer loop, the
-/// hoisted argument array and the failure edge are written once.
+/// hoisted argument array and the failure edge are written once, and with
+/// `direct` the guarded direct call of a lifted body (`crate::direct_call`).
 #[allow(clippy::too_many_arguments)]
 fn emit_call_with<'ctx>(
     context: &'ctx Context,
@@ -653,6 +638,7 @@ fn emit_call_with<'ctx>(
     callable: inkwell::values::PointerValue<'ctx>,
     args: &[Scalar<'ctx>],
     names: &[String],
+    direct: Option<&crate::direct_call::DirectTarget<'ctx>>,
 ) -> Scalar<'ctx> {
     let edge = ForeignFailEdge::for_current(builder);
     let entry_fn = edge.function();
@@ -660,6 +646,30 @@ fn emit_call_with<'ctx>(
     let i64_type = context.i64_type();
 
     let arg_array = emit_packed_array(context, builder, module, entry_fn, args);
+    // The packed arguments as the direct path passes them, read back from
+    // the array they were just stored to (LLVM forwards the stores).
+    let packed: Vec<inkwell::values::PointerValue<'ctx>> = if direct.is_some() {
+        (0..args.len())
+            .map(|index| {
+                let slot = unsafe {
+                    builder
+                        .build_in_bounds_gep(
+                            ptr,
+                            arg_array,
+                            &[i64_type.const_int(index as u64, false)],
+                            "direct_arg_slot",
+                        )
+                        .expect("build_in_bounds_gep should not fail")
+                };
+                builder
+                    .build_load(ptr, slot, "direct_arg")
+                    .expect("build_load should not fail")
+                    .into_pointer_value()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let nargs = i64_type.const_int((args.len() - names.len()) as u64, false);
     let (fn_type, operands): (_, Vec<BasicMetadataValueEnum<'ctx>>) = if names.is_empty() {
@@ -690,14 +700,21 @@ fn emit_call_with<'ctx>(
         )
     };
     let call = shim_fn(module, symbol, fn_type);
-    let result = builder
-        .build_call(call, &operands, "foreign_call")
-        .expect("build_call should not fail for a foreign call helper")
-        .try_as_basic_value()
-        .expect_basic("a foreign call helper returns PyObject *")
-        .into_pointer_value();
-
-    route_null(context, builder, module, rt, edge, result, "foreign_call");
+    let slow = || {
+        let result = builder
+            .build_call(call, &operands, "foreign_call")
+            .expect("build_call should not fail for a foreign call helper")
+            .try_as_basic_value()
+            .expect_basic("a foreign call helper returns PyObject *")
+            .into_pointer_value();
+        route_null(context, builder, module, rt, edge, result, "foreign_call");
+        result
+    };
+    // The consuming helpers own the callee; the borrowing ones leave it.
+    let consumes = symbol == EXT_OBJ_CALL_SYMBOL || symbol == EXT_OBJ_CALL_KW_SYMBOL;
+    let result = crate::direct_call::emit(
+        context, builder, module, rt, direct, callable, consumes, &packed, slow,
+    );
     Scalar::Object(result)
 }
 

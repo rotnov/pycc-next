@@ -121,7 +121,8 @@ pub(super) fn emit_method_call<'ctx>(
     method: &str,
     args: &[MirExpr],
 ) -> Scalar<'ctx> {
-    if args.iter().all(|arg| is_inert_argument(arg, locals)) {
+    let direct = crate::direct_call::method_target(module, user_functions, method, args.len(), &[]);
+    if direct.is_none() && args.iter().all(|arg| is_inert_argument(arg, locals)) {
         // Evaluating the arguments can neither raise nor run code, so the
         // lookup may follow them: one call, and no bound method.
         let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
@@ -164,6 +165,7 @@ pub(super) fn emit_method_call<'ctx>(
         site,
         &args.scalars,
         &[],
+        direct.as_ref(),
     );
     args.release(context, builder, rt);
     result
@@ -207,6 +209,8 @@ pub(super) fn emit_direct_call<'ctx>(
     let held_callee = object_release::hold(context, module, rt, callee, &callee_scalar);
     let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
     held_callee.consumed(rt);
+    let direct =
+        crate::direct_call::global_target(module, user_functions, callee, args.scalars.len(), &[]);
     let result = foreign_call::emit_object_call(
         context,
         builder,
@@ -215,6 +219,7 @@ pub(super) fn emit_direct_call<'ctx>(
         callee,
         callee_scalar,
         &args.scalars,
+        direct.as_ref(),
     );
     args.release(context, builder, rt);
     result
@@ -300,10 +305,28 @@ pub(super) fn emit_keyword_call<'ctx>(
             site,
             &arguments.scalars,
             &call.names,
+            crate::direct_call::method_target(
+                module,
+                user_functions,
+                method,
+                args.len(),
+                &call.names,
+            )
+            .as_ref(),
         );
         arguments.release(context, builder, rt);
         return result;
     }
+    let direct = match &call.call {
+        MirExpr::ObjCall { callee, args } => crate::direct_call::global_target(
+            module,
+            user_functions,
+            callee,
+            args.len(),
+            &call.names,
+        ),
+        _ => None,
+    };
     let (consume, callable, held_callable, positional) = match &call.call {
         MirExpr::ObjMethodCall {
             base, method, args, ..
@@ -365,6 +388,7 @@ pub(super) fn emit_keyword_call<'ctx>(
         callable,
         &args.scalars,
         &call.names,
+        direct.as_ref(),
     );
     args.release(context, builder, rt);
     result

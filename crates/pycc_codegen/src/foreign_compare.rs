@@ -632,16 +632,14 @@ pub(super) fn emit_isinstance<'ctx>(
             .expect_basic("pycc_ext_obj_isinstance returns int")
     };
     let status = if builtin_class {
-        // An instance of exactly the built-in class is one.
+        // An object of exactly one of the built-in classes is an instance
+        // of `class` by its type alone.
         crate::fast_ops::guarded(
             context,
             builder,
             module,
             "fast_isinstance",
-            |fast| {
-                fast.require_builtin_instance(value_ptr, builtin, "fast_isinstance");
-                i32_type.const_int(1, false).into()
-            },
+            |fast| fast.builtin_isinstance(value_ptr, builtin, "fast_isinstance").into(),
             call,
         )
     } else {

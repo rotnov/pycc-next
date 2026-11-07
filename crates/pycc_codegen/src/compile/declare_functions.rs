@@ -130,6 +130,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                     }
                     UserFunction {
                         param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),
+                        param_names: params.iter().map(|(name, _)| name.clone()).collect(),
                         fn_ptr_global: None,
                         fn_type,
                         name_global: None,
@@ -164,6 +165,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                         &format!("fnptr_{}", mangle_ext_name(name)),
                     );
                     fn_ptr_global.set_initializer(&fn_ptr_type.const_null());
+                    crate::direct_call::define_cell(context, module, name);
                     // Deliberately *not* mangled, on both counts. The symbol
                     // is internal-linkage and never declared from C, so it
                     // needs no C-legal spelling; and its contents are the
@@ -181,6 +183,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                     name_global.set_initializer(&context.const_string(name.as_bytes(), true));
                     UserFunction {
                         param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),
+                        param_names: params.iter().map(|(name, _)| name.clone()).collect(),
                         fn_ptr_global: Some(fn_ptr_global),
                         fn_type,
                         name_global: Some(name_global),

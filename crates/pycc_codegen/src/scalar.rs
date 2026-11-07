@@ -227,6 +227,9 @@ pub(crate) enum Scalar<'ctx> {
 #[derive(Clone)]
 pub(crate) struct UserFunction<'ctx> {
     pub(crate) param_tys: Vec<pycc_mir::Ty>,
+    /// The parameters' names, in order: what a keyword call of a lifted
+    /// body binds against (`crate::direct_call`).
+    pub(crate) param_names: Vec<String>,
     /// Issue #22: the global function-pointer slot for this function name.
     /// Initialized to null; set to the current definition's address when
     /// the `def` executes at module level. Calls load from this slot and

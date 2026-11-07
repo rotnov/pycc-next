@@ -258,6 +258,21 @@ extern long long pycc_ext_module_exec(void);
  * A single-module artifact has exactly one record.
  */
 struct PycFwdSlot;
+/*
+ * The direct-call cell of a lifted body (`pycc_codegen::direct_call`):
+ * zero until `forward.c` patches the body's Python forwarder, then the
+ * forwarder (`func`, borrowed: its slot holds it), the code it had then
+ * (`code`, borrowed likewise) and the positional counts a call may pass
+ * (`nargs`, bit `n` set when `n` positional arguments, the rest by keyword
+ * in parameter order, bind the parameters in order). A compiled call site
+ * whose callee is `func`, still running `code`, calls the body directly.
+ */
+typedef struct {
+    PyObject *func;
+    PyObject *code;
+    unsigned long long nargs;
+} PyccDirectCell;
+
 typedef struct PyccExtModule {
     /* The module's dotted name (`PYCC_EXT_MODULE_NAME_STR`). */
     const char *name;
@@ -287,6 +302,9 @@ typedef struct PyccExtModule {
      * their count (`forward_trampolines_c` in `src/ext_build/exports_inc.rs`). */
     const int *fwd_slot_count;
     vectorcallfunc (*fwd_trampoline)(int index);
+    /* The direct-call cell of the lifted body whose wrapper is `entry`, or
+     * NULL (`direct_cells_c` in `src/ext_build/exports_inc.rs`). */
+    PyccDirectCell *(*fwd_direct_cell)(void *entry);
     /* The slots of a carrier type created on demand: the shared
      * deallocator and this module's `__copy__` (`module_ctx.c`). */
     PyType_Slot *carrier_slots;
