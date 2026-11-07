@@ -828,14 +828,14 @@ pub(crate) fn copy_package(pkg: &Path, root: &Path, include: &[PathBuf]) -> Resu
     }
     let base = crate::canonical::canonicalize(&base).map_err(|e| format!("{}: {e}", base.display()))?;
     let top = crate::canonical::canonicalize(&top).map_err(|e| format!("{}: {e}", top.display()))?;
-    let pkg = crate::canonical::canonicalize(&pkg).map_err(|e| format!("{}: {e}", pkg.display()))?;
+    let pkg = crate::canonical::canonicalize(pkg).map_err(|e| format!("{}: {e}", pkg.display()))?;
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
     // Canonical, as the paths copied from are (a temporary directory is a
     // link on macOS: `/var` is `/private/var`), so the path returned is the
     // copy's own whatever form `root` was given in, relative included. Never
     // a Windows verbatim path (`crate::canonical`): the workload's Python
     // joins `/`-separated names to it, which a verbatim path refuses.
-    let skip = crate::canonical::canonicalize(&root).map_err(|e| e.to_string())?;
+    let skip = crate::canonical::canonicalize(root).map_err(|e| e.to_string())?;
     let root = skip.as_path();
     let installed = base.ancestors().any(installed_dir);
     let project = if installed {
@@ -862,7 +862,7 @@ pub(crate) fn copy_package(pkg: &Path, root: &Path, include: &[PathBuf]) -> Resu
         None => copy.entry(&top, &copy_base.join(below(&top, &base)?), true)?,
     }
     for path in include {
-        let path = crate::canonical::canonicalize(&path).map_err(|e| format!("--verify-include {}: {e}", path.display()))?;
+        let path = crate::canonical::canonicalize(path).map_err(|e| format!("--verify-include {}: {e}", path.display()))?;
         let rel = below(&path, &base).map_err(|_| {
             format!("--verify-include {}: not under the package's import root {}", path.display(), base.display())
         })?;
