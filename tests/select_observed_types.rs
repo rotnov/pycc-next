@@ -110,6 +110,55 @@ def caught(x, e):
         return len(x)
 
 
+def plus(x):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return +x
+
+
+def same_i(n):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return +n
+
+
+def stripped(s):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return s.strip()
+
+
+def whole(s):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return s[:]
+
+
+def tail(s):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return s + ''
+
+
+def first(s):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return s[0]
+
+
+def parts(s):
+    t = 0
+    for _ in range(2):
+        t += 1
+    return s.split()
+
+
 def last(n, xs):
     for item in xs:
         n = item
@@ -136,6 +185,13 @@ for i in range(1200):
     m.measured(2.5, lambda v: v)
     m.matched(2.5, lambda v: v)
     m.caught(2.5, m.Echo())
+    m.plus(2.5)
+    m.same_i(7)
+    m.stripped('abc')
+    m.whole('abc')
+    m.tail('abc')
+    m.first('abc')
+    m.parts('abc')
 ";
 
 /// Calls on both paths: the observed exact types, other types, a `str`
@@ -199,6 +255,10 @@ print('len', m.measured(nan, lambda v: v) is nan, m.measured(text, len))
 # So does a `len` bound by a `case` capture or an `except ... as`.
 print('case', m.matched(nan, lambda v: v) is nan, m.matched(text, len))
 print('except', m.caught(nan, m.Echo()) is nan, m.caught(2.5, m.Echo()))
+# An operation CPython may answer with its operand itself: the argument.
+print('plus', [m.plus(nan)] == [nan], m.plus(nan) is nan, m.same_i(big) is big, m.plus(-2.5))
+print('self', m.stripped(text) is text, m.whole(text) is text, m.tail(text) is text, m.parts(text)[0] is text)
+print('item', [m.first(c) is c for c in [''.join(['a', '']), chr(233), chr(8364), 'xy']])
 # A parameter bound again in the body is not held to its observed type.
 show(m.last, 0, ['ok'])
 show(m.last, 0, [1, 2])
@@ -267,6 +327,20 @@ fn built(scratch: &Path) -> (std::path::PathBuf, std::path::PathBuf, String) {
         "pkg.m:matched".as_ref(),
         "--compile".as_ref(),
         "pkg.m:caught".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:plus".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:same_i".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:stripped".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:whole".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:tail".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:first".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:parts".as_ref(),
         "--types-profile".as_ref(),
         profile.as_os_str(),
     ]);
@@ -294,6 +368,9 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     // `matched` is not compiled (the checker does not yet take a `case`
     // capture as a binding: T0021), so it runs as CPython runs it; the
     // pycc_ast tests check its specialization would read `x`'s object.
+    for (f, p) in [("plus", "x: float"), ("same_i", "n: int"), ("stripped", "s: str"), ("whole", "s: str")] {
+        assert!(report.contains(&format!("specialized: `{f}` runs natively when called with {p}")), "{report}");
+    }
     for f in ["hashed", "added", "measured", "caught"] {
         assert!(report.contains(&format!("specialized: `{f}` runs natively when called with x: float")), "{report}");
     }
@@ -310,7 +387,7 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(out.contains("nan True True 2.5\nbig True 5\n"), "{out}");
     assert!(out.contains("str True x\nseek True n n True True True\n"), "{out}");
     assert!(out.contains("last 'ok'\nlast 2\nlast 0\n"), "{out}");
-    assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\ncase True 7\nexcept True 2.5\n"), "{out}");
+    assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\ncase True 7\nexcept True 2.5\nplus True True True -2.5\nself True True True True\n"), "{out}");
     // The module is the one the package's extension serves.
     let o = Command::new(python())
         .args(["-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from pkg import m; print(type(m.__spec__.loader).__name__)"])

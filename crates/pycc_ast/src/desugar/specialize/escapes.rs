@@ -10,23 +10,31 @@
 //! identity first) nor hash alike. So the copy takes each such parameter's
 //! original object as well, in a parameter of its own, and every use of the
 //! parameter reads that object ([`keep_objects`]) unless the use provably
-//! keeps the value inside builtin code:
+//! keeps the value inside builtin code, and its result is consumed there
+//! or can never be the argument itself:
 //! - arithmetic, a unary operation or a comparison (not `is`) whose
 //!   operands are all provably native: specialized parameters, literals,
 //!   items of native sequences, or such operations on them;
 //! - an item, a slice, an index or a slice bound of a native `str` or
-//!   `bytearray`, or the `str` an `in` searches;
+//!   `bytearray`, and the `str` an `in` searches;
 //! - a test (`if x:`), or a loop over a native sequence;
-//! - `len`, `ord` or `range` of native values, unless a module binding, a
-//!   formal parameter or a binding in the body shadows the name;
+//! - `len`, `ord` or `range` of native values, unless a binding of the name
+//!   anywhere (module, formal parameter, body) shadows it;
 //! - a native `str`'s method called on it, and its native arguments but to
 //!   `format`.
 //!
-//! Anything else (another builtin, an operand of unknown type, which may
-//! dispatch to a Python-defined method) reads the object. Whether the
-//! result of an allowed operation is a new object or its operand
-//! (`s.strip()` of a string with nothing to strip) is CPython's
-//! implementation detail, which the native value need not reproduce. A
+//! CPython returns the operand itself from some of these: `+x` of an exact
+//! `int` or `float`, the full slice `s[:]`, `s + ''`, `s * 1`, a `str`
+//! method with nothing to change (`s.strip()`, `s.split()`'s one item). So
+//! where the result of such an operation may itself leave the function,
+//! its operands read their objects too ([`Objects::visit_in`]); only an
+//! operation whose result is a new value (a comparison, `-x`, `len`, an
+//! item, `s.find(t)`) consumes its operands whatever becomes of the result.
+//! An item of a `str` is at most a one-character string CPython caches,
+//! which boxing the native item gives as well.
+//!
+//! Anything else (another builtin, `hash`, an operand of unknown type,
+//! which may dispatch to a Python-defined method) reads the object. A
 //! `bytearray` parameter's native form is the object itself, and needs no
 //! such parameter.
 //!
@@ -81,6 +89,14 @@ pub(super) fn keep_objects(
 /// alone: `len` of a `str` or `bytearray`, `ord` of a `str`, `range` of
 /// `int`s. (`hash` is not one: a NaN hashes by identity.)
 pub(super) const PROVEN_BUILTINS: [&str; 3] = ["len", "ord", "range"];
+
+/// The `str` methods whose result is a number, a `bool` or `bytes`, so
+/// never the receiver or an argument itself.
+const VALUE_METHODS: [&str; 21] = [
+    "count", "encode", "endswith", "find", "index", "isalnum", "isalpha", "isascii",
+    "isdecimal", "isdigit", "isidentifier", "islower", "isnumeric", "isprintable",
+    "isspace", "istitle", "isupper", "rfind", "rindex", "startswith", "__len__",
+];
 
 /// The `str` methods whose arguments may not keep their native values:
 /// formatting reaches the arguments' `__format__`.
@@ -155,30 +171,105 @@ impl Objects {
             && call.arguments.args.iter().all(|arg| self.is_native(arg))
     }
 
-    /// Visits `expr` where a native value of it cannot leave: a parameter
-    /// read right there keeps its native value.
-    fn keep(&self, expr: &mut Expr) {
-        if self.param(expr).is_none() {
-            self.visit_expr(expr);
-        }
-    }
-
-    /// Visits a test: the truth of a native value is its value's.
-    fn test(&self, expr: &mut Expr) {
-        if self.is_native(expr) {
-            self.keep(expr);
-        } else {
-            self.visit_expr(expr);
-        }
-    }
-
     /// Visits a loop's iterable: iterating a native sequence yields new
-    /// items only.
+    /// items, or one-character strings CPython caches, never the sequence.
     fn iterable(&self, expr: &mut Expr) {
-        if self.is_sequence(expr) {
-            self.keep(expr);
-        } else {
-            self.visit_expr(expr);
+        let native = self.is_sequence(expr);
+        self.visit_in(expr, !native);
+    }
+
+    /// Visits `expr`, whose value leaves (`escapes`: is returned, stored,
+    /// passed on, ...) or is consumed where it stands. A parameter read
+    /// there keeps its native value only when consumed; an operation whose
+    /// result may be its operand itself (`+x`, `s[:]`, `s.strip()`,
+    /// `s + ''`) passes its own `escapes` on to that operand, and one whose
+    /// result never is (a comparison, `len`, an item) consumes it.
+    fn visit_in(&self, expr: &mut Expr, escapes: bool) {
+        if self.param(expr).is_some() {
+            if escapes {
+                self.visit_expr(expr);
+            }
+            return;
+        }
+        match expr {
+            Expr::BinOp(e) if self.is_native(&e.left) && self.is_native(&e.right) => {
+                // `s + ''`, `s * 1`, `x + 0` may be the operand itself.
+                self.visit_in(&mut e.left, escapes);
+                self.visit_in(&mut e.right, escapes);
+            }
+            Expr::UnaryOp(e) if self.is_native(&e.operand) => {
+                // `+x` is an exact `int` or `float` `x` itself; `-x`, `~x`
+                // and `not x` are new values.
+                let same = matches!(e.op, ruff_python_ast::UnaryOp::UAdd);
+                self.visit_in(&mut e.operand, escapes && same);
+            }
+            Expr::If(e) => {
+                self.visit_in(&mut e.test, false);
+                self.visit_in(&mut e.body, escapes);
+                self.visit_in(&mut e.orelse, escapes);
+            }
+            Expr::Subscript(e) if self.is_sequence(&e.value) => match e.slice.as_mut() {
+                Expr::Slice(slice) => {
+                    // `s[:]` is `s` itself.
+                    self.visit_in(&mut e.value, escapes);
+                    for bound in [&mut slice.lower, &mut slice.upper, &mut slice.step].into_iter().flatten() {
+                        let native = self.is_native(bound);
+                        self.visit_in(bound, !native);
+                    }
+                }
+                index => {
+                    // An item is a new value, or a one-character string
+                    // CPython caches, which boxing the native item gives too.
+                    let native = self.is_native(index);
+                    self.visit_in(index, !native);
+                    self.visit_in(&mut e.value, false);
+                }
+            },
+            Expr::Compare(e) if !e.ops.iter().any(|op| matches!(op, CmpOp::Is | CmpOp::IsNot)) => {
+                let all_native =
+                    self.is_native(&e.left) && e.comparators.iter().all(|operand| self.is_native(operand));
+                if all_native {
+                    self.visit_in(&mut e.left, false);
+                    for operand in e.comparators.iter_mut() {
+                        self.visit_in(operand, false);
+                    }
+                } else if matches!(*e.ops, [CmpOp::In | CmpOp::NotIn]) && self.is_text(&e.comparators[0]) {
+                    // `str.__contains__` takes no method of the item it looks for.
+                    self.visit_expr(&mut e.left);
+                    self.visit_in(&mut e.comparators[0], false);
+                } else {
+                    transformer::walk_expr(self, expr);
+                }
+            }
+            Expr::Call(call) if self.proven_call(call) => {
+                for arg in &mut call.arguments.args {
+                    self.visit_in(arg, false);
+                }
+            }
+            Expr::Call(call)
+                if matches!(call.func.as_ref(), Expr::Attribute(method) if self.is_text(&method.value)) =>
+            {
+                let Expr::Attribute(method) = call.func.as_mut() else {
+                    unreachable!("matched above")
+                };
+                let formatting = FORMATTING_METHODS.contains(&method.attr.as_str());
+                // A `str` method may return its receiver (`s.strip()` with
+                // nothing to strip, `s.split()` holding `s`) or a `str`
+                // argument (`''.join(t)`), unless its result is a value.
+                let escapes = escapes && !VALUE_METHODS.contains(&method.attr.as_str());
+                self.visit_in(&mut method.value, escapes);
+                for arg in &mut call.arguments.args {
+                    match self.param(arg) {
+                        _ if formatting || !self.is_native(arg) => self.visit_expr(arg),
+                        Some("int" | "float") => {}
+                        _ => self.visit_in(arg, escapes),
+                    }
+                }
+                for keyword in &mut call.arguments.keywords {
+                    self.visit_expr(&mut keyword.value);
+                }
+            }
+            _ => transformer::walk_expr(self, expr),
         }
     }
 }
@@ -187,17 +278,17 @@ impl Transformer for Objects {
     fn visit_stmt(&self, stmt: &mut Stmt) {
         match stmt {
             Stmt::If(s) => {
-                self.test(&mut s.test);
+                self.visit_in(&mut s.test, false);
                 self.visit_body(&mut s.body);
                 for clause in &mut s.elif_else_clauses {
                     if let Some(test) = &mut clause.test {
-                        self.test(test);
+                        self.visit_in(test, false);
                     }
                     self.visit_body(&mut clause.body);
                 }
             }
             Stmt::While(s) => {
-                self.test(&mut s.test);
+                self.visit_in(&mut s.test, false);
                 self.visit_body(&mut s.body);
                 self.visit_body(&mut s.orelse);
             }
@@ -208,7 +299,7 @@ impl Transformer for Objects {
                 self.visit_body(&mut s.orelse);
             }
             Stmt::Assert(s) => {
-                self.test(&mut s.test);
+                self.visit_in(&mut s.test, false);
                 if let Some(msg) = &mut s.msg {
                     self.visit_expr(msg);
                 }
@@ -221,7 +312,7 @@ impl Transformer for Objects {
         self.visit_expr(&mut comprehension.target);
         self.iterable(&mut comprehension.iter);
         for test in &mut comprehension.ifs {
-            self.test(test);
+            self.visit_in(test, false);
         }
     }
 
@@ -237,74 +328,9 @@ impl Transformer for Objects {
             n.id = format!("{OBJECT_PREFIX}{}", n.id).into();
             return;
         }
-        match expr {
-            Expr::BinOp(e) if self.is_native(&e.left) && self.is_native(&e.right) => {
-                self.keep(&mut e.left);
-                self.keep(&mut e.right);
-            }
-            Expr::UnaryOp(e) if self.is_native(&e.operand) => self.keep(&mut e.operand),
-            Expr::If(e) => {
-                self.test(&mut e.test);
-                self.visit_expr(&mut e.body);
-                self.visit_expr(&mut e.orelse);
-            }
-            Expr::Subscript(e) if self.is_sequence(&e.value) => {
-                self.keep(&mut e.value);
-                match e.slice.as_mut() {
-                    Expr::Slice(slice) => {
-                        for bound in [&mut slice.lower, &mut slice.upper, &mut slice.step].into_iter().flatten() {
-                            if self.is_native(bound) {
-                                self.keep(bound);
-                            } else {
-                                self.visit_expr(bound);
-                            }
-                        }
-                    }
-                    index if self.is_native(index) => self.keep(index),
-                    index => self.visit_expr(index),
-                }
-            }
-            Expr::Compare(e) if !e.ops.iter().any(|op| matches!(op, CmpOp::Is | CmpOp::IsNot)) => {
-                let all_native =
-                    self.is_native(&e.left) && e.comparators.iter().all(|operand| self.is_native(operand));
-                if all_native {
-                    self.keep(&mut e.left);
-                    for operand in e.comparators.iter_mut() {
-                        self.keep(operand);
-                    }
-                } else if matches!(*e.ops, [CmpOp::In | CmpOp::NotIn]) && self.is_text(&e.comparators[0]) {
-                    // `str.__contains__` takes no method of the item it looks for.
-                    self.visit_expr(&mut e.left);
-                    self.keep(&mut e.comparators[0]);
-                } else {
-                    transformer::walk_expr(self, expr);
-                }
-            }
-            Expr::Call(call) if self.proven_call(call) => {
-                for arg in &mut call.arguments.args {
-                    self.keep(arg);
-                }
-            }
-            Expr::Call(call)
-                if matches!(call.func.as_ref(), Expr::Attribute(method) if self.is_text(&method.value)) =>
-            {
-                let Expr::Attribute(method) = call.func.as_mut() else {
-                    unreachable!("matched above")
-                };
-                let formatting = FORMATTING_METHODS.contains(&method.attr.as_str());
-                self.keep(&mut method.value);
-                for arg in &mut call.arguments.args {
-                    if !formatting && self.is_native(arg) {
-                        self.keep(arg);
-                    } else {
-                        self.visit_expr(arg);
-                    }
-                }
-                for keyword in &mut call.arguments.keywords {
-                    self.visit_expr(&mut keyword.value);
-                }
-            }
-            _ => transformer::walk_expr(self, expr),
+        if self.param(expr).is_some() {
+            return;
         }
+        self.visit_in(expr, true);
     }
 }

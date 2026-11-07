@@ -407,7 +407,12 @@ function it copies (`specialize/escapes.rs`):
   arguments except to `format`. Everything else reads the object: a return, a store,
   a call or container argument, `is`, `hash` (a NaN hashes by identity), and any
   operation with an operand of unknown type, which may reach that operand's reflected
-  method (`__radd__`). A `bytearray`'s native form is the object itself.
+  method (`__radd__`). An allowed operation whose result CPython may give as the operand
+  itself (`+x`, `s[:]`, `s + ''`, `s * 1`, a `str` method with nothing to change, such as
+  `s.strip()`, or `s.split()`'s one item) keeps its operands native only while its own
+  result is consumed. Where that result leaves, the operands read their objects too.
+  Operations whose result is always a new value (comparisons, `-x`, `len`, an item,
+  `s.find(t)`) consume their operands. A `bytearray`'s native form is the object itself.
 - **A parameter the body may bind again is not specialized.** The observed type is the
   argument's, not that of later values (`for item in xs: n = item`). Any assignment,
   augmented assignment, `for`/`with`/comprehension target, walrus, `del`, `except ... as`
@@ -420,17 +425,18 @@ function it copies (`specialize/escapes.rs`):
 `tests/select_observed_types.rs` checks both paths against CPython: the observed `str`s;
 a list, a tuple, an `int` or `None`; `str` subclasses that change indexing or `len`; a
 NaN, a large `int` and a `str` that leave unchanged; `hash` of a NaN, a reflected
-`__radd__`, and a `len` bound by a parameter, a `case` capture or an `except ... as`; and a
-rebound parameter.
+`__radd__`, and a `len` bound by a parameter, a `case` capture or an `except ... as`; `+x`,
+`s.strip()`, `s[:]`, `s + ''` and `s.split()` against CPython's identities; and a rebound
+parameter.
 
 Measured locally on CPython 3.15:
 - **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
   0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for
   `text1: str, text2: str` (2,763 ms against 2,814 ms for its 30-function region). Before:
   2.75x. **The checkpoint's diff_main bar (>= 6x) is met.** With the two rules below
-  (the allowlist of native uses, no rebound parameters) it measures 6.33x (CPython
-  5.431 s, compiled 0.857 s, medians of 5); the runs during these fixes ranged 6.33x to
-  6.98x, compiled 0.86 to 0.92 s, the spread being mostly CPython's (5.43 to 6.39 s).
+  (the allowlist of native uses, no rebound parameters) it measures 6.73x (CPython
+  7.116 s, compiled 1.058 s, medians of 5). The runs during these fixes ranged from 6.33x
+  to 6.98x; the machine's own speed varied between them (CPython 5.43 to 7.12 s).
   `diff_bisect` keeps its specialization, since its loop only indexes `text1` and
   `text2` and takes their `len`. Pass 3 keeps it alone or the 30-function region, whose
   timings are within noise of each other; three functions of the region rebind an
