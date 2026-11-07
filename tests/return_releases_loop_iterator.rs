@@ -73,7 +73,7 @@ fn a_return_from_an_object_loop_releases_its_iterator_like_cpython() {
         .arg("-o")
         .arg(compiled.join(MODULE))
         .arg("--ext")
-        .args(["--non-strict", "--select", "module"])
+        .args(["--non-strict", "--select", "all"])
         .arg("--report-fallbacks")
         .output()
         .expect("pycc should spawn");

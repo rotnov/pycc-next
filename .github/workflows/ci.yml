@@ -145,12 +145,15 @@ jobs:
       # Hot-path instruction counts under callgrind (stable on a shared runner,
       # unlike wall time): each package's hot path executes at most its
       # documented bound per call (`max_instructions` in bench/package_check_workloads.py,
-      # 5% above the count on this runner with this CPython).
+      # 5% above the count on this runner with this CPython). `--select all`:
+      # a profile build's selection comes from pass 3's timings, which vary
+      # from run to run, so only an every-eligible-function build has stable
+      # counts.
       - name: Real packages' hot-path instruction counts
         if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get install -y -q valgrind
-          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --instructions
+          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --instructions --select all
       # Compile speed (v0.5 accept 4): `pycc build` of every bench/py program
       # takes 2 s at most.
       - name: Benchmark programs build in 2 s

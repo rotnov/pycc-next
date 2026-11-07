@@ -303,10 +303,11 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
         }
         {
             const Py_ssize_t limit = (Py_ssize_t)1 << 61;
-            /* A slice bound clamps (`_PyEval_SliceIndex`); an index raises. */
-            Py_ssize_t n = PyNumber_AsSsize_t(index, kind == 8   ? NULL
-                                                     : kind == 4 ? PyExc_OverflowError
-                                                                 : PyExc_IndexError);
+            /* A slice bound clamps (`_PyEval_SliceIndex`); an index raises.
+               A `range()` argument clamps too, so that one beyond the limit
+               raises the compiled range's own error below. */
+            Py_ssize_t n =
+                PyNumber_AsSsize_t(index, kind == 8 || kind == 4 ? NULL : PyExc_IndexError);
             Py_DECREF(index);
             if (n == -1 && PyErr_Occurred()) {
                 return -1;

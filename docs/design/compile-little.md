@@ -3,7 +3,9 @@
 Status: in progress. Implemented: PR 1 (measurement, section 3), PR 2 (`hot_api.c` deleted,
 section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`), PR 4 (the switch,
 sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`), PR 5 (the chunk machinery
-deleted, section 7 items 1-5; `src/ext_build/module_code.rs`). Tracking issue:
+deleted, section 7 items 1-5; `src/ext_build/module_code.rs`), PR 5a (selection by
+region), PR 8's first part (observed-type specialization), PR 6b (`--select module`
+deleted). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../ROADMAP.md#v012--imports-faster-than-cpython-finished).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -157,8 +159,7 @@ to be hot are compiled, and each is compiled into specialized native code.
   at `OUT` is removed, as CPython would import it ahead of the source.
   Compiling without evidence was measured as a loss (section 1, point 2).
 - **Overrides.** `--select all` compiles every eligible function. It exists for tests and
-  for users who measure for themselves. Until PR 6 (section 8), a transitional `--select module`
-  keeps today's whole-module compilation for the existing tests. `[tool.pycc] compile = ["pkg.mod:qual", ...]`
+  for users who measure for themselves. `[tool.pycc] compile = ["pkg.mod:qual", ...]`
   adds functions and `[tool.pycc] exclude = [...]` removes them. Both override the
   profile.
 
@@ -693,9 +694,9 @@ request that makes it unnecessary.
 | 4 | The switch: a non-strict `--ext` build runs module bytecode and patches the selected functions (sections 2.1, 2.4); one marshalled code object per served module (item 1's replacement); `--profile`, `--select all\|none`, `[tool.pycc] compile/exclude`; default none; the finder serves only modules with selected functions (item 22); `bench.yml` builds with the training profile. Today's whole-module compilation stays reachable only as a transitional `--select module`, which the existing non-strict tests use until PR 6 | no phase of pydantic, pystache or mistune slower than CPython (within the IQR), with the training profiles; all three suites pass, plus pydantic's `__file__` test that fails today. Only measured winners are selected. (The first plan asked schema >= 1.05x here; section 2.3 gives the measurement that moved it to PR 7) |
 | 5 | Delete the chunk machinery (items 1-5): chunk tables, dataclass texts, forward references, direct defs, `--exact-cpython`, their tests and DEVIATIONS rows. The transitional `--select module` runs its fallback statements with `exec(compile(...))`, as the native path does | the PR 4 numbers hold within the IQR; pydantic `.so` at least 1.3 MB smaller (the chunk tables were 1.32 MB of `.rodata`); build time reported |
 | 5a | Selection by region (section 2.3): a region judged on its combined self time, crossings by cost, a size cap in lines; pass 3 checks a region against its hot functions alone; a rejection names the first step that failed; `package_check --select profile` trains on the test suite plus the timed workloads | diff-match-patch's diff_main with the profile about 2.8x (`diff_bisect` selected; hand-selected it measured 2.8x); no phase of pydantic, mistune or pystache slower than CPython within the IQR |
-| 6 | Delete non-strict module-body compilation (items 6, 7, 8 slot sync, 9, 20) where it does not serve `--select module` | as PR 5; LOC removed reported |
+| 6 | Delete non-strict module-body compilation (items 6, 7, 8 slot sync, 9, 20), which since 6b no non-strict `--ext` build reaches. The `--ext` oracle tests whose fixture runs its program at import run it before the patch, as bytecode (section 2.4), so since 6b they check the build and the embedded code but not the compiled bodies; each is converted to call the program after the import, as `tests/attr_cache.rs` does since 6b | as PR 5; LOC removed reported |
 | 8 | Call-site specialization (section 2.5): exact-type guards inline, helpers cold, per-site attribute records (item 13), profile-observed types (item 19, then delete `specialize.rs`), `isinstance` exact path. **The concept checkpoint** (moved ahead of PR 7) | profile mode on diff-match-patch's diff_main >= 6x (`--select module`: 7.1x); pydantic schema >= 1.05x; schema I1 misses <= 1.1x CPython's; `ConfigWrapper.__getattr__` replay <= 1.75 ms. If either of the first two is missed, stop and report |
-| 6b | Delete `--select module`; CI's `--instructions` gate and `package_check` move to profile mode | as PR 8; the non-strict test suite converted to `--select all` passes |
+| 6b | Delete `--select module`; CI's `--instructions` gate and `package_check` move to profile mode | as PR 8; the non-strict test suite converted to `--select all` passes. **Done.** The `--instructions` gate builds with `--select all`, not the profile: pass 3 picks winners by wall time on the runner, so a profile build's set, and its counts, may change from run to run, which a gate on counts cannot allow. The `--ext` branches of the fallback loop (item 7) went with the flag; the runtime and codegen parts of items 6-9 and 20, now reached by no non-strict build, are PR 6. No build makes item 19's guessed specializations any more; their tests check that the functions compile and match CPython, and the code is deleted with item 19. With the whole-module bodies gone, the `--select all` counts measure generic bodies, which execute more instructions than CPython on the sources for tomli (`loads()`), pypng (`read()`) and pystache: every indexing, addition and comparison is a C API call where CPython's specializing interpreter has an inline path. Pass 3 keeps such sets out of a profile build; making generic bodies beat the interpreter is section 2.5's work |
 | 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
 | 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34) |
 | 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally |
@@ -731,9 +732,8 @@ So typed bodies (PR 8) are the lever and direct calls (PR 7) add little there:
 - **Import parity under load.** Loading a small `.so` costs about 0.13 ms (an empty `.so`)
   to 0.45 ms (pystache's), about 0.5% of pydantic's import. That is inside the IQR but
   could tip the median. A package with nothing selected gets no extension at all.
-- **Test churn.** The non-strict `--ext` tests compile whole modules today. They run on the
-  transitional `--select module` from PR 4 to PR 6, and PR 6 converts
-  them to `--select all`. Tests of the deleted mechanisms go with them.
+- **Test churn.** The non-strict `--ext` tests compiled whole modules until PR 6b, which
+  converted them to `--select all`. Tests of the deleted mechanisms go with them.
 - **Generator-expression tracebacks.** Inlining a generator expression needs the error path
   to add the `<genexpr>` frame record (section 2.6). The oracle tests must cover an
   exception raised inside one.

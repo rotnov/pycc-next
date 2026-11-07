@@ -43,17 +43,6 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-fn remove_sources(dir: &Path) {
-    for entry in std::fs::read_dir(dir).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.is_dir() {
-            remove_sources(&path);
-        } else if path.extension().is_some_and(|ext| ext == "py") {
-            std::fs::remove_file(&path).expect("remove a source");
-        }
-    }
-}
-
 /// Builds `dir/pkimp` whole; the report.
 fn build_whole(dir: &Path) -> String {
     let package = dir.join("pkimp");
@@ -62,7 +51,7 @@ fn build_whole(dir: &Path) -> String {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks", "--release"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks", "--release"])
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);
@@ -94,16 +83,7 @@ fn importing_the_compiled_package_is_observed_as_importing_its_sources() {
     copy_tree(&fixtures().join("vendor"), &built.join("vendor"));
     copy_tree(&fixtures().join("vendor"), &plain.join("vendor"));
     let report = build_whole(&built);
-    // The classes the driver reads as published are published; the one
-    // with a keyword argument runs in CPython.
-    for class in ["Plain", "Boxed", "Loader"] {
-        assert!(
-            report.contains(&format!("native class: instances of `pkimp.classes.{class}`")),
-            "{report}"
-        );
-    }
-    assert!(report.contains("class `Abstract` at"), "{report}");
-    remove_sources(&built.join("pkimp"));
+    assert!(report.contains("compiled: pkimp.classes:Plain.get\n"), "{report}");
     let driver = fixtures().join("driver.py");
     let theirs = run(&driver, &plain);
     assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));

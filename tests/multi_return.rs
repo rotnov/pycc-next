@@ -51,7 +51,7 @@ fn native_build_matches_cpython(name: &str, flags: &[&str]) {
 
 #[test]
 fn object_tuples_non_strict_match_cpython() {
-    native_build_matches_cpython("multi_return_object", &["--non-strict", "--select", "module"]);
+    native_build_matches_cpython("multi_return_object", &["--non-strict"]);
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn native_tuples_strict_match_cpython() {
 
 #[test]
 fn native_tuples_non_strict_match_cpython() {
-    native_build_matches_cpython("multi_return_native", &["--non-strict", "--select", "module"]);
+    native_build_matches_cpython("multi_return_native", &["--non-strict"]);
 }
 
 fn build_ext(dir: &Path, module: &str, source: &Path) {
@@ -70,7 +70,7 @@ fn build_ext(dir: &Path, module: &str, source: &Path) {
         .arg(source)
         .arg("-o")
         .arg(dir.join(module))
-        .args(["--ext", "--non-strict", "--select", "module", "--release", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--release", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));

@@ -42,7 +42,7 @@ fn assert_matches_cpython_with(name: &str, env: &[(&str, &str)]) {
     let dir = ScratchDir::new(&format!("fuzz_{name}")).expect("scratch");
     for (mode, flags) in [
         ("strict", &["--release"][..]),
-        ("non-strict", &["--release", "--non-strict", "--select", "module"][..]),
+        ("non-strict", &["--release", "--non-strict"][..]),
     ] {
         let binary = dir.join(format!("app-{mode}"));
         let build = pycc()
@@ -105,7 +105,7 @@ fn embedded_cpython_prints_utf8_under_the_c_locale() {
         .arg(&source)
         .arg("-o")
         .arg(&binary)
-        .args(["--release", "--non-strict", "--select", "module"])
+        .args(["--release", "--non-strict"])
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", rendered(&build));
@@ -166,7 +166,7 @@ fn a_refused_double_star_call_is_reported_at_the_call() {
     assert!(!text.contains("panicked"), "{text}");
     assert!(text.contains("subject.py:5:5"), "{text}");
     // Non-strict: `main` runs in CPython; it is never called.
-    let non_strict = build(&["--non-strict", "--select", "module"]);
+    let non_strict = build(&["--non-strict"]);
     assert!(non_strict.status.success(), "{}", rendered(&non_strict));
     let run = Command::new(dir.join("prog")).output().expect("runs");
     assert_eq!(
@@ -188,7 +188,7 @@ fn str_repr_escapes_unprintable_unicode() {
 fn a_constant_set_display_object_iterates_in_cpythons_order() {
     let source = fixture("fuzz_constant_set_object.py");
     let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
-    let got = support::run_native("fuzz_constant_set_object", &source, &["--release", "--non-strict", "--select", "module"]);
+    let got = support::run_native("fuzz_constant_set_object", &source, &["--release", "--non-strict"]);
     assert_eq!(got, expected);
 }
 
@@ -268,7 +268,7 @@ fn ext_non_strict_exception_classes_keep_their_members() {
         .arg(&source)
         .arg("-o")
         .arg(dir.join("fuzz_ext_exception_members"))
-        .args(["--ext", "--non-strict", "--select", "module"])
+        .args(["--ext", "--non-strict", "--select", "all"])
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", rendered(&build));
@@ -302,17 +302,9 @@ fn key_error_for_a_non_str_key_crosses_the_ext_boundary() {
 fn a_fallback_str_method_inside_a_method_call() {
     let source = fixture("fuzz_fallback_str_method_in_call.py");
     let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
-    let flags = &["--release", "--non-strict", "--select", "module"][..];
+    let flags = &["--release", "--non-strict"][..];
     let got = support::run_native("fuzz_fallback_str_method", &source, flags);
     assert_eq!(got, expected, "{flags:?}");
-}
-
-/// An `--ext --non-strict` module's twinned function is defined where its
-/// `def` is, even with no blank line after it, so CPython code right after
-/// it can call it.
-#[test]
-fn a_twin_is_defined_before_the_next_statement() {
-    assert_ext_non_strict_matches("fuzz_twin_before_use");
 }
 
 /// An `--ext --non-strict` module's compiled `except AppError:` catches an
@@ -326,7 +318,7 @@ fn a_compiled_handler_catches_a_fallback_exception_subclass() {
 /// Builds `tests/fixtures/<name>.py` as an `--ext --non-strict` module and
 /// compares importing it with running the source under CPython.
 fn assert_ext_non_strict_matches(name: &str) {
-    assert_ext_non_strict_matches_selecting(name, "module");
+    assert_ext_non_strict_matches_selecting(name, "all");
 }
 
 /// A frozenset constant of a module that runs as CPython bytecode iterates
@@ -382,7 +374,7 @@ fn int_and_float_read_unicode_decimal_digits() {
 fn a_set_display_object_operand_crosses_as_a_set() {
     let source = fixture("fuzz_set_display_object_operand.py");
     let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
-    let got = support::run_native("fuzz_set_operand", &source, &["--release", "--non-strict", "--select", "module"]);
+    let got = support::run_native("fuzz_set_operand", &source, &["--release", "--non-strict"]);
     assert_eq!(got, expected);
 }
 
@@ -402,7 +394,7 @@ fn key_error_for_a_non_str_key_in_an_embedding_program() {
     let got = support::run_native(
         "fuzz_key_error_fallback",
         &source,
-        &["--release", "--non-strict", "--select", "module"],
+        &["--release", "--non-strict"],
     );
     assert_eq!(got, expected);
 }
@@ -421,7 +413,7 @@ fn an_unexpected_keyword_suggests_a_close_parameter() {
 fn an_fstring_debug_field_keeps_its_text_in_fallback_code() {
     let source = fixture("fuzz_fstring_debug_fallback_global.py");
     let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
-    let got = support::run_native("fuzz_fstring_debug", &source, &["--release", "--non-strict", "--select", "module"]);
+    let got = support::run_native("fuzz_fstring_debug", &source, &["--release", "--non-strict"]);
     assert_eq!(got, expected);
 }
 
@@ -439,7 +431,7 @@ fn a_star_constructor_suggests_its_own_receiver_spelling() {
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("star"))
-        .args(["--ext", "--non-strict", "--select", "module"])
+        .args(["--ext", "--non-strict", "--select", "all"])
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", rendered(&build));

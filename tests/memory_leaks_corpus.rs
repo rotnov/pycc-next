@@ -117,7 +117,7 @@ fn object_any_all_and_tuple_iteration_run_in_constant_memory() {
         .expect("write the probe source");
         let bin = dir.join(&name);
         let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
-            .args(["build", "--release", "--non-strict", "--select", "module", "--report-fallbacks"])
+            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
             .arg(&src)
             .arg("-o")
             .arg(&bin)

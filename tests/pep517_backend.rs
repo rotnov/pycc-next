@@ -89,8 +89,8 @@ geo-demo = "geo.cli:main"
 
 [tool.pycc]
 pure-python = ["geo.cli"]
-# Whole modules compiled (the transitional `--select module`).
-select = "module"
+# Every eligible function compiled.
+select = "all"
 
 [tool.pycc.overrides."geo.__init__"]
 strict = false

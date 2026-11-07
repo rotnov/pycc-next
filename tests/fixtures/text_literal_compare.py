@@ -19,5 +19,10 @@ def parse(t):
     return out
 
 
-for t in ("0,0", "5", ",12", "5,0", "0,12", ""):
-    print(t, parse(t))
+def main():
+    for t in ("0,0", "5", ",12", "5,0", "0,12", ""):
+        print(t, parse(t))
+
+
+if __name__ == "__main__":
+    main()

@@ -71,21 +71,37 @@ fn pickling_matches_cpython(flags: &[&str]) {
 
 #[test]
 fn compiled_instances_pickle_ext() {
-    pickling_matches_cpython(&["--non-strict", "--select", "module"]);
+    pickling_matches_cpython(&["--non-strict", "--select", "all"]);
 }
 
 #[test]
 fn compiled_instances_pickle_ext_release() {
-    pickling_matches_cpython(&["--non-strict", "--select", "module", "--release"]);
+    pickling_matches_cpython(&["--non-strict", "--select", "all", "--release"]);
 }
 
 /// An instance with an attribute Python code cannot see (a list of native
-/// values) refuses to pickle rather than losing the attribute
-/// (`docs/DEVIATIONS.md`).
+/// values, in a strict `--ext` build) refuses to pickle rather than losing
+/// the attribute (`docs/DEVIATIONS.md`).
 #[test]
 fn an_attribute_python_cannot_see_refuses_to_pickle() {
     let compiled = ScratchDir::new("v010_pickle_hidden").expect("scratch");
-    build(&compiled, &["--non-strict", "--select", "module"]);
+    let source = compiled.join("m.py");
+    std::fs::write(
+        &source,
+        "class Path:\n    def __init__(self, n: int) -> None:\n        \
+         self.steps: list[int] = [i for i in range(n)]\n\n\n\
+         def make(n: int) -> Path:\n    return Path(n)\n",
+    )
+    .expect("write");
+    let build = pycc()
+        .args(["build", "--ext"])
+        .arg(&source)
+        .arg("-o")
+        .arg(compiled.join("m"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    std::fs::remove_file(&source).expect("import the artifact, not the source");
     let out = run(
         &compiled,
         "import pickle, m\ntry:\n    pickle.dumps(m.make(4))\nexcept TypeError as e:\n    \
@@ -103,7 +119,7 @@ fn an_attribute_python_cannot_see_refuses_to_pickle() {
 #[test]
 fn pickling_does_not_leak() {
     let compiled = ScratchDir::new("v010_pickle_leaks").expect("scratch");
-    build(&compiled, &["--non-strict", "--select", "module"]);
+    build(&compiled, &["--non-strict", "--select", "all"]);
     let out = run(
         &compiled,
         "import ctypes, gc, pickle, m\nlib = ctypes.CDLL(m.__file__)\n\

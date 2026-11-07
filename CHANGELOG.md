@@ -35,8 +35,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   chunk tables, the dataclass texts and forward references compiled at build time, the
   `def`s and signature wrappers made without running their code, and the `frozenset`
   order fixes are gone with the fallback chunks they served
-  (`docs/design/compile-little.md`, section 7 items 1-5); `--select module` runs its
-  fallback statements with `exec(compile(...))`.
+  (`docs/design/compile-little.md`, section 7 items 1-5).
 - **Non-strict `--ext` builds compile little** (`docs/design/compile-little.md`,
   sections 2.1-2.4): a module runs its source as CPython bytecode, and only its
   *selected* functions are compiled, each patched into the function object CPython
@@ -48,10 +47,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   none. **With no profile nothing is selected**, and a module or package with nothing
   selected gets no extension at all: CPython imports it unchanged (a module built to `-o OUT`
   gets its source as `OUT`'s `.py`). A package's finder
-  serves only its modules with selected functions. `--select module` keeps the
-  whole-module compilation of before, transitionally (the existing tests and CI's
-  package checks use it). The selection rule also leaves out a function that catches an
-  exception in half of its calls or more (`--select-handled`; `pycc profile` records
+  serves only its modules with selected functions. The whole-module compilation of
+  before (`--select module`) is gone: the tests build with `--select all`, CI's package
+  checks with a profile of each package's own suite (`--instructions` with `--select
+  all`, whose counts do not depend on pass 3's timings). The export twins and the
+  `--ext` branches of the fallback loop that only it used are deleted. The guessed
+  specializations of unannotated functions, which only it produced, are no longer made
+  (their `DEVIATIONS` row is gone; their code is section 7 item 19); a `range()` argument beyond 2**61 in a selected function raises the compiled
+  range's own `OverflowError` message. The selection rule also leaves out a function that
+  catches an exception in half of its calls or more (`--select-handled`; `pycc profile` records
   `handled`). **Only measured winners are selected**: `pycc profile` now builds the
   rule's candidates and times the workload with them compiled against the sources
   (pass 3; `--verify-rounds`, `--no-verify`, `--verify-instructions`), records the

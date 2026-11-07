@@ -73,7 +73,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn native_fallback_code_reaches_compiled_globals_by_a_string() {
     let dir = ScratchDir::new("issue_20_native").expect("scratch");
     let source = fixture("issue_20_native", &dir, "m.py");
-    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict"]);
     // Only the functions calling the builtins run in CPython: the class and
     // the functions reading the globals stay compiled.
     assert!(!report.contains("class `Point`"), "{report}");
@@ -98,7 +98,7 @@ fn reaching_globals_by_a_string_keeps_a_project_import_compiled() {
     let dir = ScratchDir::new("issue_20_project").expect("scratch");
     let source = fixture("issue_20_project_main", &dir, "main.py");
     fixture("issue_20_project_helper", &dir, "helper.py");
-    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict"]);
     // Only the report's own lines: the build may also print linker
     // warnings (macOS `ld`).
     let fallbacks = report
@@ -124,7 +124,7 @@ fn ext_fallback_code_reaches_compiled_globals_by_a_string() {
     let compiled = ScratchDir::new("issue_20_ext").expect("scratch");
     let source = fixture("issue_20_api", &compiled, "api.py");
     fixture("issue_20_driver", &compiled, "driver.py");
-    build(&source, &compiled.join("api"), &["--ext", "--non-strict", "--select", "module"]);
+    build(&source, &compiled.join("api"), &["--ext", "--non-strict", "--select", "all"]);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("issue_20_ext_src").expect("scratch");
     fixture("issue_20_api", &plain, "api.py");

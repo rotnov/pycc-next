@@ -101,12 +101,13 @@ fn frozenset_of_str_matches_cpython() {
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn non_strict_rebinding_matches_cpython() {
-    assert_native_matches("non_strict_rebinding", &["--non-strict", "--select", "module"]);
+    assert_native_matches("non_strict_rebinding", &["--non-strict"]);
 }
 
 /// Builds `typed_pkg`'s `_core`, `_types` and `__init__` in place under
 /// `<dir>/ext`, next to an untouched copy under `<dir>/src`; returns the
-/// build reports.
+/// build reports. The sources stay: a module with no selected function
+/// gets no extension, and CPython imports its source.
 fn build_typed_pkg(dir: &Path) -> String {
     let (ext, src) = (dir.join("ext"), dir.join("src"));
     copy_tree(&fixture("typed_pkg"), &ext);
@@ -115,15 +116,12 @@ fn build_typed_pkg(dir: &Path) -> String {
     for module in ["_core", "_types", "__init__"] {
         let source = ext.join("pkg").join(format!("{module}.py"));
         let build = pycc_build(
-            &["--ext", "--non-strict", "--select", "module", "--foreign-relative-imports", "--report-fallbacks"],
+            &["--ext", "--non-strict", "--select", "all", "--foreign-relative-imports", "--report-fallbacks"],
             &source,
             &ext.join("pkg").join(module),
         );
         report.push_str(&text(&pycc_scratch::lf(&build.stderr)));
         assert!(build.status.success(), "{module}: {report}");
-    }
-    for module in ["_core", "_types", "__init__"] {
-        std::fs::remove_file(ext.join("pkg").join(format!("{module}.py"))).expect("rm");
     }
     report
 }
@@ -133,28 +131,19 @@ fn build_typed_pkg(dir: &Path) -> String {
 fn a_typed_package_builds_unchanged_and_matches_cpython() {
     let dir = ScratchDir::new("real_package_idioms_typed_pkg").expect("scratch");
     let report = build_typed_pkg(&dir);
-    // The parser's functions all compile: none falls back.
+    // The parser's functions all compile.
     for function in [
         "skip_chars",
+        "skip_until",
         "parse_key",
         "parse_string",
         "parse_value",
         "loads",
         "describe",
-        "Table",
+        "Table.__init__",
     ] {
-        // (An `__init__` re-export that names one runs in CPython anyway.)
-        assert!(
-            !report.lines().any(|line| {
-                (line.starts_with("fallback: function") || line.starts_with("fallback: class"))
-                    && line.contains(&format!("`{function}`"))
-            }),
-            "{function}\n{report}"
-        );
+        assert!(report.contains(&format!("compiled: pkg._core:{function}\n")), "{function}\n{report}");
     }
-    // A function whose signature the boundary cannot carry is compiled for
-    // the module's own callers and runs in CPython for Python's.
-    assert!(report.contains("twin: function `skip_until`"), "{report}");
     let run = |side: &str| {
         Command::new(python())
             .arg("driver.py")
@@ -174,7 +163,7 @@ fn a_mistyped_scalar_argument_runs_as_cpython_runs_it() {
     let dir = ScratchDir::new("real_package_idioms_ext_scalar_guard").expect("scratch");
     let fixture_dir = fixture("ext_scalar_guard");
     let build = pycc_build(
-        &["--ext", "--non-strict", "--select", "module", "--report-fallbacks"],
+        &["--ext", "--non-strict", "--select", "all", "--report-fallbacks"],
         &fixture_dir.join("m.py"),
         &dir.join("m"),
     );

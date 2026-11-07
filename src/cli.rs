@@ -52,15 +52,6 @@ pub struct ModeFlags {
     /// compiled code, and why (the diagnostic that made it fall back).
     #[arg(long)]
     pub report_fallbacks: bool,
-    /// Which functions a non-strict `--ext` build compiles
-    /// (docs/design/compile-little.md, section 2): `profile` (the default),
-    /// the selection of `--profile`, or nothing without one, and then no
-    /// extension is built; `all`, every eligible function; `none`, nothing;
-    /// `module`, transitional: whole modules compiled as before. Accepted,
-    /// and ignored, by every other build and command, so one set of mode
-    /// flags serves them all until `module` goes.
-    #[arg(long, value_enum)]
-    pub select: Option<crate::select::SelectMode>,
 }
 
 /// Which functions a non-strict `--ext` build compiles
@@ -68,6 +59,11 @@ pub struct ModeFlags {
 /// CPython bytecode.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SelectFlags {
+    /// Which functions are compiled: `profile` (the default), the selection
+    /// of `--profile`, or nothing without one, and then no extension is
+    /// built; `all`, every eligible function; `none`, nothing.
+    #[arg(long, value_enum, requires = "ext")]
+    pub select: Option<crate::select::SelectMode>,
     /// A profile of a representative workload (`pycc profile`): its hot
     /// functions are compiled. Also `[tool.pycc] profile = "..."`.
     #[arg(long, value_name = "PROFILE", requires = "ext")]
@@ -903,10 +899,10 @@ mod tests {
     #[test]
     fn non_strict_is_a_flag_of_build_run_check_and_lock() {
         for argv in [
-            &["pycc", "check", "--non-strict", "--select", "module", "a.py"][..],
-            &["pycc", "build", "--non-strict", "--select", "module", "a.py", "-o", "a"][..],
-            &["pycc", "run", "--non-strict", "--select", "module", "a.py"][..],
-            &["pycc", "lock", "--non-strict", "--select", "module", "a.py"][..],
+            &["pycc", "check", "--non-strict", "a.py"][..],
+            &["pycc", "build", "--non-strict", "a.py", "-o", "a"][..],
+            &["pycc", "run", "--non-strict", "a.py"][..],
+            &["pycc", "lock", "--non-strict", "a.py"][..],
         ] {
             let mode = match Cli::try_parse_from(argv).unwrap().command {
                 Command::Check { mode, .. }

@@ -1,8 +1,6 @@
-# A module's frozenset constants stay native frozensets in --ext --non-strict
-# mode, so its calls of an `Iterable[str]` function take the native
-# specialization (tomli's `skip_chars(src, pos, TOML_WS)` pattern), even
-# when another function of the module fails the first check and the
-# non-strict passes widen what they may.
+# A module's frozenset constants passed by compiled functions to an
+# `Iterable[str]` function (tomli's `skip_chars(src, pos, TOML_WS)` pattern)
+# and tested with `in`, next to a function that is not annotated.
 from __future__ import annotations
 
 TYPE_CHECKING = False

@@ -76,7 +76,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn ext(name: &str, flags: &[&str]) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    let mut all = vec!["--ext", "--non-strict", "--select", "module"];
+    let mut all = vec!["--ext", "--non-strict", "--select", "all"];
     all.extend_from_slice(flags);
     build(&source, &compiled.join("m"), &all);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
@@ -110,6 +110,16 @@ fn exact_dicts_ext_release() {
     ext("v10_exact_dicts", &["--release"]);
 }
 
+/// The source name of a selected function's compiled body, whose symbol is
+/// `__pycc_lift<N>_<name>__`.
+fn lifted_name(symbol: &str) -> &str {
+    symbol
+        .strip_prefix("__pycc_lift")
+        .and_then(|rest| rest.split_once('_'))
+        .and_then(|(_, rest)| rest.strip_suffix("__"))
+        .unwrap_or(symbol)
+}
+
 /// The functions of `name`'s `--ext --non-strict` build whose own code
 /// calls `callee` (from the LLVM IR `PYCC_DUMP_LLVM` writes).
 fn functions_calling(name: &str, callee: &str) -> Vec<String> {
@@ -117,7 +127,7 @@ fn functions_calling(name: &str, callee: &str) -> Vec<String> {
     let source = fixture(name, &dir, "m.py");
     let ir = dir.join("m.ll");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("m"))
@@ -133,7 +143,7 @@ fn functions_calling(name: &str, callee: &str) -> Vec<String> {
             current = rest
                 .split_once("@pyfn_")
                 .and_then(|(_, name)| name.split_once('('))
-                .map(|(name, _)| name.to_string());
+                .map(|(name, _)| lifted_name(name).to_string());
         } else if line.starts_with('}') {
             current = None;
         } else if let Some(function) = &current

@@ -38,7 +38,7 @@ fn native_non_strict_build_matches_cpython() {
         .arg(fixture())
         .arg("-o")
         .arg(&binary)
-        .args(["--release", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--release", "--non-strict", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
@@ -54,7 +54,7 @@ fn build_ext(dir: &Path, module: &str, source: &Path) {
         .arg(source)
         .arg("-o")
         .arg(dir.join(module))
-        .args(["--ext", "--non-strict", "--select", "module", "--release", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--release", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));

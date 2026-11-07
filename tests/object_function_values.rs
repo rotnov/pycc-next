@@ -29,7 +29,7 @@ fn function_values_and_constant_displays_match_cpython() {
     let native = run_native(
         "object_function_values",
         &source,
-        &["--release", "--non-strict", "--select", "module"],
+        &["--release", "--non-strict"],
     );
     assert_eq!(native, expected, "--non-strict");
     let dir = ScratchDir::new("object_function_values_ext").expect("scratch");
@@ -38,7 +38,7 @@ fn function_values_and_constant_displays_match_cpython() {
         .arg(&source)
         .arg("-o")
         .arg(dir.join("object_function_values"))
-        .args(["--ext", "--non-strict", "--select", "module", "--release"])
+        .args(["--ext", "--non-strict", "--select", "all", "--release"])
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", rendered(&build));

@@ -43,7 +43,7 @@ fn program(body: &str, n: u64) -> String {
 
 fn assert_constant_memory(name: &str, body: &str, sizes: [u64; 2]) {
     assert_constant_memory_in(name, body, "strict", &[], sizes);
-    assert_constant_memory_in(name, body, "nonstrict", &["--non-strict", "--select", "module"], sizes);
+    assert_constant_memory_in(name, body, "nonstrict", &["--non-strict"], sizes);
 }
 
 fn assert_constant_memory_in(name: &str, body: &str, mode: &str, flags: &[&str], sizes: [u64; 2]) {
@@ -138,7 +138,7 @@ fn fresh_list_arguments_non_strict() {
         "fresh_list_arguments",
         "total += len(json.dumps([str(i), \"x\"])) + len(json.dumps([i, i]))",
         "nonstrict",
-        &["--non-strict", "--select", "module"],
+        &["--non-strict"],
         [N_SMALL, N_LARGE],
     );
 }

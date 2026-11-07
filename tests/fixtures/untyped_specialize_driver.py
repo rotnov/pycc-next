@@ -34,9 +34,9 @@ for a in TEXTS + OTHERS:
         show("common_prefix", t.common_prefix, a, b)
         show("common_suffix", t.common_suffix, a, b)
 for a in TEXTS + OTHERS:
-    # (A `range()` bound beyond 2**61 on the object path is a documented
-    # deviation, so the huge index goes to the native path only.)
-    for k in (0, 1, 2, -1, True, I(5), 1.5, None) + ((2 ** 70,) if a in TEXTS else ()):
+    # (A `range()` bound beyond 2**61 is a documented deviation, so no `k`
+    # is that large; `char_at` takes huge indices below.)
+    for k in (0, 1, 2, -1, True, I(5), 1.5, None):
         if a is not None or isinstance(k, int):
             # (A `range()` of two failing objects is a documented deviation.)
             show("scan", t.scan, a, k)
