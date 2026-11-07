@@ -410,8 +410,9 @@ pub(crate) fn host_glibc_version() -> Option<String> {
 /// call sites' caches made straight to a compiled body behind its Python
 /// forwarder (`src/ext/module/forward.c`), and how many `int` indexes were
 /// read at a `tuple`'s or `list`'s layout (`src/ext/module/object_index.c`),
-/// and whether the inline fast paths are on (`src/ext/module/fast_ops.c`).
-pub(crate) const RUNTIME_COUNTERS: [&str; 15] = [
+/// and whether the inline fast paths are on and how many `frozenset` ASCII
+/// masks they computed (`src/ext/module/fast_ops.c`).
+pub(crate) const RUNTIME_COUNTERS: [&str; 16] = [
     "pycc_rt_str_live_objects",
     "pycc_rt_list_live_objects",
     "pycc_rt_dict_live_objects",
@@ -427,4 +428,5 @@ pub(crate) const RUNTIME_COUNTERS: [&str; 15] = [
     "pycc_ext_seq_layout_reads",
     "pycc_ext_fast_ops_enabled",
     "pycc_ext_direct_calls",
+    "pycc_ext_ascii_mask_fill_count",
 ];

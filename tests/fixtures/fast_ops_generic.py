@@ -4,14 +4,20 @@ meets the operands the fast path answers -- compact `int`s, compact ASCII
 `str`s, exact `set`s and `frozenset`s, exact built-in instances, module
 globals -- and the ones it must hand to CPython: big `int`s, `bool`s,
 subclasses, non-ASCII text, out-of-range indexes, unhashable items, and
-globals rebound between reads.
+globals rebound between reads. A one-character `str` in a `frozenset` is a
+bit test against the set's cached ASCII mask, which must answer as the set
+does for members of other types, with an `__eq__` CPython calls, beyond the
+mask's size limit, after its cache entries are evicted, and when releasing
+an evicted set runs a weakref callback that refills the cache.
 """
 
 import sys
+import weakref
 
 LIMIT = 3
 CHARS = frozenset("abc")
 SEEN = {"x", "y"}
+A_HASH = hash("a")
 
 
 class MyInt(int):
@@ -27,6 +33,18 @@ class MyStr(str):
         return "eq-called"
 
     __hash__ = str.__hash__
+
+
+class LikeA:
+    """Hashes as `"a"` and equals everything: CPython's lookup calls its
+    `__eq__` for an item of the same hash."""
+
+    def __hash__(self):
+        return A_HASH
+
+    def __eq__(self, other):
+        print("LikeA.__eq__", other)
+        return True
 
 
 def add(a, b):
@@ -140,6 +158,58 @@ def count_in(text):
         if c in CHARS:
             n += 1
     return n
+
+
+def masks():
+    odd = [frozenset({"a", 1}), frozenset({LikeA(), "b"}), frozenset({MyStr("a"), "b"}),
+           frozenset(map(chr, range(300))), frozenset(), frozenset({"é", "ab", "c"}),
+           frozenset({"\x00", "\x7f", "?", "@"})]
+    for c in ["a", "b", "c", "é", "ab", "", "\x00", "\x7f", "?", "@", "A", MyStr("a"), 7, None]:
+        print([member(c, s) for s in odd], member(c, CHARS), member(c, SEEN))
+    # More sets than the cache holds, each queried twice, evicting the
+    # entries of the earlier ones.
+    print(count_members([frozenset(chr(48 + k) for k in range(i % 70)) for i in range(400)]))
+    print(evicted_callback())
+
+
+def evicted_callback():
+    """A miss whose eviction releases the last reference to a set with a
+    weakref callback, the callback refilling the same cache bucket with a
+    set that lacks the item: the miss must still answer for its own set."""
+    # Which sets hold "q" must not follow the allocation stride.
+    pool = [frozenset({"q" if (i * 7919) % 13 < 6 else "z", "n%d" % i}) for i in range(2000)]
+    buckets = {}
+    for s in pool:
+        buckets.setdefault((id(s) >> 4) & 63, []).append(s)
+    for group in buckets.values():
+        with_q = [s for s in group if "q" in s]
+        without = [s for s in group if "q" not in s]
+        if len(with_q) >= 2 and len(without) >= 2:
+            break
+    else:
+        return "no bucket"
+    target, victim = with_q[0], with_q[1]
+    other, refill = without[0], without[1]
+    del pool, buckets, group, with_q, without, s
+    seen = []
+    ref = weakref.ref(victim, lambda _: seen.append(member("q", refill)))
+    member("q", victim)
+    member("q", other)
+    del victim
+    answer = member("q", target)
+    return answer, seen, ref() is None
+
+
+def count_members(sets):
+    found = 0
+    for _ in range(2):
+        i = 0
+        for s in sets:
+            for c in "0Az~\x7f":
+                if c in s:
+                    found += i
+            i += 1
+    return found
 
 
 def rebind_shared(n):
@@ -256,6 +326,7 @@ def main():
     print(rebind_ranges(2**30 - 40, 9, 10), rebind_ranges(-(2**30) + 40, -9, 10))
     print(rebind_bits(300), rebind_bits(-300000), rebind_bits(True))
     print(rebind_kinds(True), rebind_kinds(MyInt(5)), rebind_kinds(2.5), rebind_kinds(2**62))
+    masks()
 
 
 if __name__ == "__main__":

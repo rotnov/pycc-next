@@ -2,7 +2,8 @@
 //! built `--ext --non-strict --select all`: the module prints what CPython
 //! prints for its source with the inline fast paths on (`pycc_ext_fast`
 //! published) and off (`PYCC_NO_FAST_OPS=1`, every operation through its
-//! shim helper).
+//! shim helper), and that the `frozenset` ASCII masks are computed only on
+//! the fast path.
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -32,7 +33,7 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
         .expect("pycc should spawn");
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    for name in ["add", "bump", "less", "equal", "index", "first_chars", "is_quote", "member", "kinds", "read_limit", "count_in", "bits", "undo_sub", "store", "rebind_shared", "rebind_ranges", "same_object"] {
+    for name in ["add", "bump", "less", "equal", "index", "first_chars", "is_quote", "member", "kinds", "read_limit", "count_in", "bits", "undo_sub", "store", "count_members", "rebind_shared", "rebind_ranges", "same_object"] {
         assert!(report.contains(&format!("compiled: {module}:{name}\n")), "{name}\n{report}");
     }
     // The extension runs without its source beside it, so the module's
@@ -46,6 +47,8 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
         "import ctypes, sys\nimport {module}\n{module}.main()\n\
          lib = ctypes.CDLL({module}.__file__)\n\
          print('FAST', lib.pycc_ext_fast_ops_enabled(), file=sys.stderr)\n\
+         lib.pycc_ext_ascii_mask_fill_count.restype = ctypes.c_longlong\n\
+         print('MASKS', lib.pycc_ext_ascii_mask_fill_count() > 0, file=sys.stderr)\n\
          print('SAME', {module}.same_object(301), file=sys.stderr)\n"
     );
     for off in [false, true] {
@@ -65,6 +68,9 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
             "fast paths off: {off}\n{stderr}"
         );
         let expected = if off { "FAST 0" } else { "FAST 1" };
+        assert!(stderr.lines().any(|line| line == expected), "{expected}\n{stderr}");
+        // The masks are computed only on the fast path.
+        let expected = if off { "MASKS False" } else { "MASKS True" };
         assert!(stderr.lines().any(|line| line == expected), "{expected}\n{stderr}");
         // `i += 1` on the only reference to an `int` updates that `int` in
         // place with the fast paths on, so the loop ends on the object it
