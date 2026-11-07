@@ -221,14 +221,9 @@ fn insert_guard_types(body: &mut Vec<Stmt>, types: &[&str]) {
 }
 
 /// Whether `body`, a module's statements, binds `name` in the module's own
-/// scope: a top-level `def` or `class` of that name, or any binding by
-/// another statement (counted conservatively, nested scopes included).
+/// scope (`crate::namespace::module_scope_names`).
 fn binds_at_module_level(body: &[Stmt], name: &str) -> bool {
-    body.iter().any(|stmt| match stmt {
-        Stmt::FunctionDef(def) => def.name.as_str() == name,
-        Stmt::ClassDef(class) => class.name.as_str() == name,
-        other => super::ext_generators::bindings(std::slice::from_ref(other), name) > 0,
-    })
+    crate::namespace::module_scope_names(body).contains(name)
 }
 
 /// The type an unannotated parameter with literal default `default` has
@@ -272,7 +267,7 @@ fn plan(
         || super::ext_generators::yields(&def.body)
         || !loops(&def.body)
         || p.iter().any(|param| param.name().as_str() == "type")
-        || super::ext_generators::bindings(&def.body, "type") > 0
+        || crate::namespace::bound_anywhere(&def.body).contains("type")
     {
         return None;
     }
@@ -481,10 +476,11 @@ fn plan_observed(
         || super::ext_generators::yields(&def.body)
         || !loops(&def.body)
         || p.iter().any(|param| param.name().as_str() == "type")
-        || super::ext_generators::bindings(&def.body, "type") > 0
+        || crate::namespace::bound_anywhere(&def.body).contains("type")
     {
         return None;
     }
+    let bound = crate::namespace::bound_anywhere(&def.body);
     let mut guessed = Vec::new();
     let mut annotations = Vec::with_capacity(p.args.len());
     for param in &p.args {
@@ -494,7 +490,7 @@ fn plan_observed(
             .find(|(name, ty)| name == param_name && OBSERVED_TYPES.contains(ty))
             .map(|(_, ty)| *ty);
         if let Some(ty) = observed
-            && escapes::rebound(&def.body, param_name)
+            && bound.contains(param_name)
         {
             excluded.push((
                 report.clone(),
@@ -519,9 +515,11 @@ fn plan_observed(
         return None;
     }
     let (mut clone, spec) = native_copy(def, None, annotations, guessed, &[], keep_builtins, report);
-    // A formal parameter may shadow a builtin as a module binding may.
+    // A formal parameter or any binding in the body may shadow a builtin
+    // as a module binding may.
     let mut shadowed = shadowed.clone();
     shadowed.extend(p.iter().map(|param| param.name().as_str()));
+    shadowed.extend(bound.iter().map(String::as_str));
     let objects = escapes::keep_objects(&mut clone.body, &spec.params, &shadowed);
     for param in &objects {
         let mut object = clone.parameters.args[0].clone();

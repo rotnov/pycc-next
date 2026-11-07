@@ -86,6 +86,30 @@ def measured(x, len):
     return len(x)
 
 
+def matched(x, v):
+    t = 0.0
+    for _ in range(2):
+        t += 1.0
+    match v:
+        case len:
+            return len(x)
+
+
+class Echo(Exception):
+    def __call__(self, v):
+        return v
+
+
+def caught(x, e):
+    t = 0.0
+    for _ in range(2):
+        t += 1.0
+    try:
+        raise e
+    except Echo as len:
+        return len(x)
+
+
 def last(n, xs):
     for item in xs:
         n = item
@@ -110,6 +134,8 @@ for i in range(1200):
     m.hashed(2.5)
     m.added(2.5, Keep())
     m.measured(2.5, lambda v: v)
+    m.matched(2.5, lambda v: v)
+    m.caught(2.5, m.Echo())
 ";
 
 /// Calls on both paths: the observed exact types, other types, a `str`
@@ -170,6 +196,9 @@ class Keep:
 print('hash', m.hashed(nan) == hash(nan), m.hashed(2.5) == hash(2.5))
 print('radd', m.added(nan, Keep()) is nan, m.added(big + 0.5, Keep()) == big + 0.5, m.added(1.5, 1.0))
 print('len', m.measured(nan, lambda v: v) is nan, m.measured(text, len))
+# So does a `len` bound by a `case` capture or an `except ... as`.
+print('case', m.matched(nan, lambda v: v) is nan, m.matched(text, len))
+print('except', m.caught(nan, m.Echo()) is nan, m.caught(2.5, m.Echo()))
 # A parameter bound again in the body is not held to its observed type.
 show(m.last, 0, ['ok'])
 show(m.last, 0, [1, 2])
@@ -234,6 +263,10 @@ fn built(scratch: &Path) -> (std::path::PathBuf, std::path::PathBuf, String) {
         "pkg.m:added".as_ref(),
         "--compile".as_ref(),
         "pkg.m:measured".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:matched".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:caught".as_ref(),
         "--types-profile".as_ref(),
         profile.as_os_str(),
     ]);
@@ -258,7 +291,10 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(report.contains("specialized: `scale` runs natively when called with k: float"), "{report}");
     assert!(report.contains("specialized: `keep_f` runs natively when called with x: float"), "{report}");
     assert!(report.contains("specialized: `keep_s` runs natively when called with s: str"), "{report}");
-    for f in ["hashed", "added", "measured"] {
+    // `matched` is not compiled (the checker does not yet take a `case`
+    // capture as a binding: T0021), so it runs as CPython runs it; the
+    // pycc_ast tests check its specialization would read `x`'s object.
+    for f in ["hashed", "added", "measured", "caught"] {
         assert!(report.contains(&format!("specialized: `{f}` runs natively when called with x: float")), "{report}");
     }
     assert!(
@@ -274,7 +310,7 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(out.contains("nan True True 2.5\nbig True 5\n"), "{out}");
     assert!(out.contains("str True x\nseek True n n True True True\n"), "{out}");
     assert!(out.contains("last 'ok'\nlast 2\nlast 0\n"), "{out}");
-    assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\n"), "{out}");
+    assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\ncase True 7\nexcept True 2.5\n"), "{out}");
     // The module is the one the package's extension serves.
     let o = Command::new(python())
         .args(["-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from pkg import m; print(type(m.__spec__.loader).__name__)"])

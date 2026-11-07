@@ -31,13 +31,12 @@
 //! such parameter.
 //!
 //! That holds only while the parameter names the argument, so a parameter
-//! the body may bind again ([`rebound`]) is not specialized: its observed
+//! the body may bind again (`crate::namespace::bound_anywhere`) is not specialized: its observed
 //! type says nothing of the values bound to it later, which the native slot
 //! would refuse.
 
 use ruff_python_ast::visitor::transformer::{self, Transformer};
-use ruff_python_ast::visitor::{self, Visitor};
-use ruff_python_ast::{CmpOp, Comprehension, ExceptHandler, Expr, ExprContext, Pattern, Stmt};
+use ruff_python_ast::{CmpOp, Comprehension, Expr, ExprContext, Stmt};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -45,78 +44,13 @@ use std::collections::BTreeSet;
 /// original object.
 pub(super) const OBJECT_PREFIX: &str = "_pycc_object_";
 
-/// Whether `body` may bind `param` anywhere, nested scopes included: an
-/// assignment, augmented assignment, `for`, `with` or comprehension target,
-/// walrus or `del` of it, an `except ... as` or `case` capture, a `global`
-/// or `nonlocal` declaration, or a nested function, lambda or class binding
-/// the name. Conservative: a nested scope's own local of that name counts.
-pub(super) fn rebound(body: &[Stmt], param: &str) -> bool {
-    struct Find<'n> {
-        name: &'n str,
-        found: bool,
-    }
-    impl<'a> Visitor<'a> for Find<'_> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            let names = match stmt {
-                Stmt::Global(s) => Some(&s.names),
-                Stmt::Nonlocal(s) => Some(&s.names),
-                _ => None,
-            };
-            if names.is_some_and(|names| names.iter().any(|n| n.as_str() == self.name)) {
-                self.found = true;
-            }
-            visitor::walk_stmt(self, stmt);
-        }
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if let Expr::Lambda(lambda) = expr
-                && lambda
-                    .parameters
-                    .as_ref()
-                    .is_some_and(|p| p.iter().any(|p| p.name().as_str() == self.name))
-            {
-                self.found = true;
-            }
-            visitor::walk_expr(self, expr);
-        }
-        fn visit_except_handler(&mut self, handler: &'a ExceptHandler) {
-            let ExceptHandler::ExceptHandler(h) = handler;
-            if h.name.as_ref().is_some_and(|n| n.as_str() == self.name) {
-                self.found = true;
-            }
-            visitor::walk_except_handler(self, handler);
-        }
-        fn visit_pattern(&mut self, pattern: &'a Pattern) {
-            let name = match pattern {
-                Pattern::MatchAs(p) => p.name.as_ref(),
-                Pattern::MatchStar(p) => p.name.as_ref(),
-                Pattern::MatchMapping(p) => p.rest.as_ref(),
-                _ => None,
-            };
-            if name.is_some_and(|n| n.as_str() == self.name) {
-                self.found = true;
-            }
-            visitor::walk_pattern(self, pattern);
-        }
-    }
-    if super::super::ext_generators::bindings(body, param) > 0 {
-        return true;
-    }
-    let mut find = Find {
-        name: param,
-        found: false,
-    };
-    for stmt in body {
-        find.visit_stmt(stmt);
-    }
-    find.found
-}
 /// Makes every use of a `params` parameter in `body` read its original
 /// object unless the use provably cannot let the value out (module doc),
 /// and returns the parameters whose object it reads, in `params` order.
 /// `bytearray` parameters keep their native form everywhere. A builtin
-/// counts as one only if `shadowed` (the module's bindings and the
-/// function's formal parameters) does not name it and `body` does not bind
-/// it.
+/// counts as one only if `shadowed` (every name the module's scope, the
+/// function's formal parameters or any binding in its body binds) does
+/// not name it.
 pub(super) fn keep_objects(
     body: &mut [Stmt],
     params: &[(String, &'static str)],
@@ -124,7 +58,7 @@ pub(super) fn keep_objects(
 ) -> Vec<String> {
     let builtins = PROVEN_BUILTINS
         .into_iter()
-        .filter(|f| !shadowed.contains(f) && super::super::ext_generators::bindings(body, f) == 0)
+        .filter(|f| !shadowed.contains(f))
         .collect();
     let objects = Objects {
         builtins,

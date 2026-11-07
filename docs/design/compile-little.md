@@ -411,24 +411,30 @@ function it copies (`specialize/escapes.rs`):
 - **A parameter the body may bind again is not specialized.** The observed type is the
   argument's, not that of later values (`for item in xs: n = item`). Any assignment,
   augmented assignment, `for`/`with`/comprehension target, walrus, `del`, `except ... as`
-  or `case` capture, `global`/`nonlocal`, or nested scope binding the name counts;
+  or `case` capture, import, `global`/`nonlocal`, or nested scope binding the name counts.
+  One scan answers this and the builtin-shadowing question above, and the per-function
+  fallback uses the same per-scope part of it (`pycc_ast::namespace::bound_anywhere` and
+  `bound_names`);
   `--report-fallbacks` says `not specialized: ... may be bound again in the body`.
 
 `tests/select_observed_types.rs` checks both paths against CPython: the observed `str`s;
 a list, a tuple, an `int` or `None`; `str` subclasses that change indexing or `len`; a
 NaN, a large `int` and a `str` that leave unchanged; `hash` of a NaN, a reflected
-`__radd__` and a parameter named `len`; and a rebound parameter.
+`__radd__`, and a `len` bound by a parameter, a `case` capture or an `except ... as`; and a
+rebound parameter.
 
 Measured locally on CPython 3.15:
 - **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
   0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for
   `text1: str, text2: str` (2,763 ms against 2,814 ms for its 30-function region). Before:
   2.75x. **The checkpoint's diff_main bar (>= 6x) is met.** With the two rules below
-  (the allowlist of native uses, no rebound parameters) it measures 6.95x (CPython
-  6.047 s, compiled 0.870 s). `diff_bisect` keeps its specialization, since its loop only
-  indexes `text1` and `text2` and takes their `len`. This time pass 3 kept the
-  30-function region, whose timing (2.8 s) is within noise of `diff_bisect` alone;
-  three of its functions rebind an observed parameter and are not specialized.
+  (the allowlist of native uses, no rebound parameters) it measures 6.33x (CPython
+  5.431 s, compiled 0.857 s, medians of 5); the runs during these fixes ranged 6.33x to
+  6.98x, compiled 0.86 to 0.92 s, the spread being mostly CPython's (5.43 to 6.39 s).
+  `diff_bisect` keeps its specialization, since its loop only indexes `text1` and
+  `text2` and takes their `len`. Pass 3 keeps it alone or the 30-function region, whose
+  timings are within noise of each other; three functions of the region rebind an
+  observed parameter and are not specialized.
 - **pydantic `model_json_schema()`: 0.99x** (14.41 ms against 14.32 ms, 31 rounds). Pass
   3 keeps none of 55 candidates. **The checkpoint's schema bar (>= 1.05x) is missed.**
 

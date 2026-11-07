@@ -90,7 +90,9 @@ pub(super) fn snapshot_attrs(
     params: &HashMap<String, &'static str>,
     module_binds: &dyn Fn(&str) -> bool,
 ) -> Vec<String> {
-    if !class.plain {
+    // A receiver any binding form rebinds (`except ... as self` included)
+    // is not the instance the snapshots read.
+    if !class.plain || crate::namespace::bound_anywhere(&def.body).contains(receiver) {
         return Vec::new();
     }
     let mut reads = Reads {

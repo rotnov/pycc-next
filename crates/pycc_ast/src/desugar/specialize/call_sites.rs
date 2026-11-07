@@ -154,6 +154,11 @@ fn bytearray_locals(body: &[Stmt]) -> HashSet<String> {
     };
     for stmt in body {
         collect.visit_stmt(stmt);
+        // A binding no target spells (`except ... as`, a `case` capture,
+        // an import, a `def` or `class`) binds no `bytearray` either.
+        for name in crate::namespace::opaque_bound_names(stmt) {
+            collect.only.insert(name, false);
+        }
     }
     collect
         .only

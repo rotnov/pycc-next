@@ -337,14 +337,17 @@ fn a_parameter_bound_again_anywhere_in_the_body_is_rebound() {
         "def g():\n    global n",
         "def g(n): pass",
         "lambda n: n",
+        "[(n := 1) for _ in xs]",
+        "from m import n",
+        "async def g():\n    async for n in xs: pass",
         "class C:\n    n = 1",
         "import n",
     ];
     for body in rebinding {
-        assert!(escapes::rebound(&parse(body).body, "n"), "{body}");
+        assert!(crate::namespace::bound_anywhere(&parse(body).body).contains("n"), "{body}");
     }
     let reading = "m = n + 1\nfor i in range(n): print(n, i)\ndef g():\n    return n\nlambda: n\n";
-    assert!(!escapes::rebound(&parse(reading).body, "n"));
+    assert!(!crate::namespace::bound_anywhere(&parse(reading).body).contains("n"));
 }
 
 /// The loads of `_pycc_object_` names in `body`.
@@ -461,8 +464,7 @@ fn a_specialized_parameter_reads_its_original_object_unless_provably_consumed() 
     let shadowed = std::collections::BTreeSet::from(["len"]);
     let mut body = parse("y = len(s)").body.to_vec();
     assert_eq!(escapes::keep_objects(&mut body, &params, &shadowed), ["s"]);
-    let mut body = parse("def ord(c): return c\ny = ord(s)").body.to_vec();
-    assert_eq!(escapes::keep_objects(&mut body, &params, &none), ["s"]);
+
 }
 
 /// A specialization that reads a parameter's object takes it as a last
@@ -518,4 +520,52 @@ def f(x: object, n: object, xs: object) -> object:
         })
         .collect();
     assert_eq!(args, ["x", "n", "xs", "x"]);
+}
+
+/// A builtin's name bound in the body by a binding form no target spells
+/// (`case len:`, `except ... as len`) or by a formal parameter is not the
+/// builtin: the specialized parameter passed to it reads its object.
+#[test]
+fn a_builtin_shadowed_by_any_binding_form_is_not_taken_for_the_builtin() {
+    let bodies = [
+        "    match v:\n        case len:\n            return len(x)\n",
+        "    try:\n        raise v\n    except E as len:\n        return len(x)\n",
+        "    import len\n    return len(x)\n",
+        "    def len(c):\n        return c\n    return len(x)\n",
+        "    [(len := v) for _ in range(1)]\n    return len(x)\n",
+    ];
+    for body in bodies {
+        let source = format!("def f(x: object, v: object) -> object:\n    for _ in range(2):\n        pass\n{body}");
+        let mut module = parse(&source);
+        let lookup =
+            |name: &str| (name == "f").then(|| ("f".to_string(), vec![("x".to_string(), "str")]));
+        let (planned, _) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+        assert_eq!(planned.len(), 1, "{body}");
+        let native = module
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Stmt::FunctionDef(def) if def.name.as_str() == format!("{NATIVE_PREFIX}f") => Some(def),
+                _ => None,
+            })
+            .expect("the native copy");
+        assert_eq!(objects_read(&native.body), ["_pycc_object_x"], "{body}");
+    }
+    // A parameter named `len` shadows it as well.
+    let source = "def f(x: object, len: object) -> object:\n    for _ in range(2):\n        pass\n    return len(x)\n";
+    let mut module = parse(source);
+    let lookup = |name: &str| (name == "f").then(|| ("f".to_string(), vec![("x".to_string(), "str")]));
+    specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    let Some(Stmt::FunctionDef(native)) = module.body.iter().find(|s| matches!(s, Stmt::FunctionDef(d) if d.name.as_str().starts_with(NATIVE_PREFIX))) else {
+        panic!("the native copy")
+    };
+    assert_eq!(objects_read(&native.body), ["_pycc_object_x"]);
+    // The builtin itself keeps the native value.
+    let source = "def f(x: object) -> object:\n    for _ in range(2):\n        pass\n    return len(x)\n";
+    let mut module = parse(source);
+    specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    let Some(Stmt::FunctionDef(native)) = module.body.iter().find(|s| matches!(s, Stmt::FunctionDef(d) if d.name.as_str().starts_with(NATIVE_PREFIX))) else {
+        panic!("the native copy")
+    };
+    assert!(objects_read(&native.body).is_empty());
 }

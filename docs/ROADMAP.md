@@ -97,7 +97,7 @@ Accept (carried over from v0.11, not met there):
    compiled body gets a native copy typed with the exact types the profile observed for
    its parameters, behind an exact-type guard; a parameter is used natively only where that
    provably stays in builtin code, and one the body binds again is not specialized.
-   `diff_main` in profile mode runs 6.95x CPython (`diff_bisect` specialized with
+   `diff_main` in profile mode runs 6.33x CPython (6.33x to 6.98x over the runs) (`diff_bisect` specialized with
    `text1: str, text2: str`), so **the diff_main bar is
    met**. pydantic schema stays at 0.99x and **the schema bar (>= 1.05x) is missed**:
    pydantic's hot parameters each take many types, so whole-body specialization does
