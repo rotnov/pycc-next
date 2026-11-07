@@ -74,8 +74,9 @@ const FAST_SIZE: u64 = CLASSES + CLASS_COUNT * 8;
 /// ways per index of `MASK_WAYS`, each entry `MASK_SIZE` bytes: its set, its
 /// two 64-bit words of ASCII members, whether it is usable.
 pub const EXT_ASCII_MASKS_SYMBOL: &str = "pycc_ext_ascii_masks";
-/// `PyccAsciiMask *pycc_ext_ascii_mask_fill(PyObject *frozenset)`: the
-/// entry after a miss in both ways.
+/// `long long pycc_ext_ascii_mask_fill(PyObject *frozenset, long long c)`:
+/// after a miss in both ways, fills the entry and answers whether ASCII `c`
+/// is a member (1 or 0), or -1 when the set is not usable.
 pub const EXT_ASCII_MASK_FILL_SYMBOL: &str = "pycc_ext_ascii_mask_fill";
 const MASK_WAYS: u64 = 64;
 const MASK_SIZE: u64 = 32;
@@ -626,24 +627,9 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         builder
             .build_conditional_branch(second_hit, found, fill)
             .expect("build_conditional_branch should not fail for an i1");
-        builder.position_at_end(fill);
-        let fill_fn = self.module.get_function(EXT_ASCII_MASK_FILL_SYMBOL).unwrap_or_else(|| {
-            self.module.add_function(
-                EXT_ASCII_MASK_FILL_SYMBOL,
-                ptr.fn_type(&[ptr.into()], false),
-                Some(Linkage::External),
-            )
-        });
-        let filled = builder
-            .build_call(fill_fn, &[set.into()], &format!("{name}_filled"))
-            .expect("build_call should not fail for pycc_ext_ascii_mask_fill")
-            .try_as_basic_value()
-            .expect_basic("pycc_ext_ascii_mask_fill returns its entry")
-            .into_pointer_value();
-        builder.build_unconditional_branch(found).expect("branch");
         builder.position_at_end(found);
         let entry = builder.build_phi(ptr, &format!("{name}_mask")).expect("phi");
-        entry.add_incoming(&[(&first, entry_block), (&second, try_second), (&filled, fill)]);
+        entry.add_incoming(&[(&first, entry_block), (&second, try_second)]);
         let entry = entry.as_basic_value().into_pointer_value();
         let usable = self
             .load(i64_type.into(), self.at(entry, MASK_USABLE, &format!("{name}_usable_at")), false, &format!("{name}_usable"))
@@ -651,7 +637,6 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         let usable = builder
             .build_int_compare(IntPredicate::NE, usable, self.i64(0), &format!("{name}_is_usable"))
             .expect("icmp");
-        self.require(usable, &format!("{name}_usable"));
         let word_index = builder
             .build_right_shift(byte, self.i64(6), false, &format!("{name}_word_index"))
             .expect("lshr");
@@ -664,8 +649,40 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         let bit = builder.build_and(byte, self.i64(63), &format!("{name}_bit")).expect("and");
         let shifted = builder.build_right_shift(word, bit, false, &format!("{name}_word_shifted")).expect("lshr");
         let member = builder.build_and(shifted, self.i64(1), &format!("{name}_member")).expect("and");
+        let cached = builder
+            .build_select(usable, member, i64_type.const_all_ones(), &format!("{name}_cached"))
+            .expect("select")
+            .into_int_value();
+        let done = self.context.append_basic_block(self.function, &format!("{name}_done"));
+        builder.build_unconditional_branch(done).expect("branch");
+        // A miss answers from the entry it computes, before the evicted set
+        // is released: that release may run Python code (a weakref
+        // callback) that refills this very bucket.
+        builder.position_at_end(fill);
+        let fill_fn = self.module.get_function(EXT_ASCII_MASK_FILL_SYMBOL).unwrap_or_else(|| {
+            self.module.add_function(
+                EXT_ASCII_MASK_FILL_SYMBOL,
+                i64_type.fn_type(&[ptr.into(), i64_type.into()], false),
+                Some(Linkage::External),
+            )
+        });
+        let filled = builder
+            .build_call(fill_fn, &[set.into(), byte.into()], &format!("{name}_filled"))
+            .expect("build_call should not fail for pycc_ext_ascii_mask_fill")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_ascii_mask_fill returns the answer")
+            .into_int_value();
+        builder.build_unconditional_branch(done).expect("branch");
+        builder.position_at_end(done);
+        let status = builder.build_phi(i64_type, &format!("{name}_answer")).expect("phi");
+        status.add_incoming(&[(&cached, found), (&filled, fill)]);
+        let status = status.as_basic_value().into_int_value();
+        let known = builder
+            .build_int_compare(IntPredicate::SGE, status, self.i64(0), &format!("{name}_known"))
+            .expect("icmp");
+        self.require(known, &format!("{name}_known"));
         builder
-            .build_int_truncate(member, self.context.i32_type(), &format!("{name}_status"))
+            .build_int_truncate(status, self.context.i32_type(), &format!("{name}_status"))
             .expect("trunc")
     }
 

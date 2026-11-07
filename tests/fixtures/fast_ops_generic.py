@@ -11,6 +11,7 @@ mask's size limit, and after its cache entries are evicted.
 """
 
 import sys
+import weakref
 
 LIMIT = 3
 CHARS = frozenset("abc")
@@ -167,6 +168,35 @@ def masks():
     # More sets than the cache holds, each queried twice, evicting the
     # entries of the earlier ones.
     print(count_members([frozenset(chr(48 + k) for k in range(i % 70)) for i in range(400)]))
+    print(evicted_callback())
+
+
+def evicted_callback():
+    """A miss whose eviction releases the last reference to a set with a
+    weakref callback, the callback refilling the same cache bucket with a
+    set that lacks the item: the miss must still answer for its own set."""
+    # Which sets hold "q" must not follow the allocation stride.
+    pool = [frozenset({"q" if (i * 7919) % 13 < 6 else "z", "n%d" % i}) for i in range(2000)]
+    buckets = {}
+    for s in pool:
+        buckets.setdefault((id(s) >> 4) & 63, []).append(s)
+    for group in buckets.values():
+        with_q = [s for s in group if "q" in s]
+        without = [s for s in group if "q" not in s]
+        if len(with_q) >= 2 and len(without) >= 2:
+            break
+    else:
+        return "no bucket"
+    target, victim = with_q[0], with_q[1]
+    other, refill = without[0], without[1]
+    del pool, buckets, group, with_q, without, s
+    seen = []
+    ref = weakref.ref(victim, lambda _: seen.append(member("q", refill)))
+    member("q", victim)
+    member("q", other)
+    del victim
+    answer = member("q", target)
+    return answer, seen, ref() is None
 
 
 def count_members(sets):

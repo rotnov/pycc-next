@@ -187,9 +187,10 @@ static void pycc_ext_fast_init(void)
  * lookup may call) or with more than `PYCC_ASCII_MASK_LIMIT` members is
  * recorded as not `usable`, without a reference: should its address be
  * reused, the new set merely takes the generic lookup until the entry is
- * evicted. Releasing an evicted set runs no Python code, every member being
- * an exact `str`. The generated code reads the layout by byte offset
- * (`fast_ops.rs`: `MASK_*`). */
+ * evicted. Releasing an evicted set can run Python code (a weakref
+ * callback on the set), which may refill the same bucket, so a miss returns
+ * its answer from the entry it computed, not from the cache. The generated
+ * code reads the layout by byte offset (`fast_ops.rs`: `MASK_*`). */
 typedef struct {
     PyObject *set;
     uint64_t bits[2];
@@ -206,11 +207,15 @@ static PyccAsciiMask pycc_ext_ascii_masks[PYCC_ASCII_MASK_WAYS * 2];
  * with `ctypes`). */
 static long long pycc_ext_ascii_mask_fills = 0;
 
-/* The entry for the exact `frozenset` `s` after a miss in both ways: its
- * mask computed into the first way, the first moved to the second, and the
- * second's set released. Never fails: an error while reading the set (none
- * is expected of a `frozenset`) records it as not usable. */
-static PyccAsciiMask *pycc_ext_ascii_mask_fill(PyObject *s)
+/* After a miss in both ways for the exact `frozenset` `s`: computes its
+ * entry into the first way (the first moving to the second, the second's
+ * set released) and returns whether the ASCII character `c` is a member, 1
+ * or 0, or -1 when the set is not usable. The answer comes from the entry
+ * computed here, before the evicted set is released: that release may run
+ * Python code (a weakref callback, a finalizer) which refills this bucket,
+ * so nothing is read from the cache after it. Never fails: an error while
+ * reading the set (none is expected of a `frozenset`) makes it not usable. */
+static long long pycc_ext_ascii_mask_fill(PyObject *s, long long c)
 {
     PyccAsciiMask *way = &pycc_ext_ascii_masks[PYCC_ASCII_MASK_INDEX(s) * 2];
     PyccAsciiMask fresh = {s, {0, 0}, 0};
@@ -218,6 +223,7 @@ static PyccAsciiMask *pycc_ext_ascii_mask_fill(PyObject *s)
     Py_ssize_t size = PySet_Size(s);
     PyObject *it;
     PyObject *member;
+    long long answer;
     int usable = size >= 0 && size <= PYCC_ASCII_MASK_LIMIT;
 
     it = usable ? PyObject_GetIter(s) : NULL;
@@ -226,10 +232,10 @@ static PyccAsciiMask *pycc_ext_ascii_mask_fill(PyObject *s)
         if (Py_TYPE(member) != &PyUnicode_Type) {
             usable = 0;
         } else if (PyUnicode_GetLength(member) == 1) {
-            Py_UCS4 c = PyUnicode_ReadChar(member, 0);
+            Py_UCS4 m = PyUnicode_ReadChar(member, 0);
 
-            if (c < 128) {
-                fresh.bits[c >> 6] |= (uint64_t)1 << (c & 63);
+            if (m < 128) {
+                fresh.bits[m >> 6] |= (uint64_t)1 << (m & 63);
             }
         }
         Py_DECREF(member);
@@ -244,12 +250,13 @@ static PyccAsciiMask *pycc_ext_ascii_mask_fill(PyObject *s)
         Py_INCREF(s);
     }
     pycc_ext_ascii_mask_fills++;
+    answer = usable ? (long long)((fresh.bits[(c >> 6) & 1] >> (c & 63)) & 1) : -1;
     way[1] = way[0];
     way[0] = fresh;
     if (evicted.usable) {
         Py_DECREF(evicted.set);
     }
-    return &way[0];
+    return answer;
 }
 
 long long pycc_ext_ascii_mask_fill_count(void)
