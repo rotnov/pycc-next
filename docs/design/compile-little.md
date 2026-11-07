@@ -400,13 +400,17 @@ interpreter does, and calls its helper only when the check fails
 | `c in s` | an exact `str` in an exact `set` or `frozenset`: `PySet_Contains`, the item unpacked | `CONTAINS_OP_SET` |
 | `isinstance(o, dict)` (a builtin class) | `o` exactly of that class: `True` | |
 | a module global | a per-site cache of the namespace dict, its version and the value | `LOAD_GLOBAL_MODULE` |
-| a release | a mortal object that stays alive is decremented inline; the rest out of line | `Py_DECREF` |
 
 The layouts these read are checked at module exec (`src/ext/module/fast_ops.c`), which
 publishes the type pointers the checks compare with only when every check passes; on any
 other build, and with `PYCC_NO_FAST_OPS=1`, every check fails. The loads of an object's
 type and of an `int`'s or `str`'s value are `!invariant.load`, so a check on a value a
 loop does not rebind is loop-invariant.
+
+A release stays one call into the module's own out-of-line copy (`object_rc.rs`):
+inlining its common case (a mortal object that stays alive) took 1.5% of tomli's
+instructions and 0.5% of mistune's, for 23% more `.text` and 17% more build time on
+mistune.
 
 `specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
 reasons:

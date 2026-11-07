@@ -32,8 +32,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   exact `int`s and `str`s at their operations, as CPython's specializing interpreter does:
   compact-`int` `+`, `-`, `&`, `|`, `^` and comparisons, `str[int]` through the cached
   one-character strings, `bytes`/`bytearray` item reads and `bytearray` item stores, `str == "lit"` and `str == str` quick answers, `str in set`, exact-class
-  `isinstance` against a builtin, a per-site cache for module globals, and an inline
-  release of an object that stays alive (`docs/design/compile-little.md`, section 2.5).
+  `isinstance` against a builtin, and a per-site cache for module globals
+  (`docs/design/compile-little.md`, section 2.5).
   Anything else takes the helper call as before; `PYCC_NO_FAST_OPS=1` turns them off.
 - A keyword method call from compiled code (`self.m(x, key=y)`) loads the method without
   making a bound method, and a call whose keywords name the parameters in order goes
