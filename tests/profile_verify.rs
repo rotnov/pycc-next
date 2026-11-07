@@ -433,3 +433,22 @@ fn an_exclude_the_winning_set_was_not_measured_with_selects_nothing() {
     let (compiled, stderr) = build_compiled(&pkg, &pkg.join("__init__"), &out, &["--exclude", "b"]);
     assert_eq!(compiled, ["pkg.a:work_a"], "{stderr}");
 }
+
+/// Pass 3's copy holds the project's `pyproject.toml`, and with it a
+/// `[tool.pycc] compile` list: its builds still compile exactly the set
+/// measured, so the winner recorded is that set and nothing the project
+/// adds to a build.
+#[test]
+fn a_projects_compile_list_does_not_enter_a_measured_set() {
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = package(&dir, "from pkg import m\nfor i in range(60):\n    m.work(20000)\n");
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"pkg\"\n\n[tool.pycc]\ncompile = [\"pkg.m:leaf\"]\n").unwrap();
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(!stderr.contains("not asked for"), "{stderr}");
+    assert!(stderr.contains("pass 3: 1 functions compiled: "), "{stderr}");
+    assert_eq!(winner(&out), ["pkg.m:work"], "{stderr}");
+}

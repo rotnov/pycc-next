@@ -101,6 +101,11 @@ pub struct SelectFlags {
     /// an exception in its frame must be under this.
     #[arg(long, value_name = "SHARE", requires = "ext")]
     pub select_handled: Option<f64>,
+    /// Internal (pass 3's builds): ignore `[tool.pycc]`'s `profile`,
+    /// `compile` and `exclude-functions`, so the build compiles exactly the
+    /// `--compile` functions it is given.
+    #[arg(long, hide = true, requires = "ext")]
+    pub no_project_select: bool,
     /// Internal (the package build's member builds): the member's selected
     /// functions, one `FIRSTLINENO QUALNAME` per line.
     #[arg(long, value_name = "PATH", hide = true, requires = "package_member")]

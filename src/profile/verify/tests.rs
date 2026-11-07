@@ -481,3 +481,192 @@ fn an_earlier_winning_set_is_in_every_set_measured_and_stays_when_nothing_wins()
     assert_eq!(verdicts[&k("x")], earlier);
     assert!(!verdicts[&k("a_hot")].compiled);
 }
+
+/// A carried winning set one of whose members a build now refuses is
+/// invalid whole: with nothing new winning, nothing is selected, never the
+/// part of it left (which was never timed alone).
+#[test]
+fn a_carried_set_with_a_refused_member_is_invalid_whole() {
+    let won = Measured {
+        compiled: true,
+        with: 2,
+        cpython_ns: [90, 100, 110],
+        compiled_ns: [80, 85, 90],
+        instructions: None,
+        refused: None,
+        without: None,
+    };
+    let base: BTreeMap<FunctionKey, Measured> = [(k("a"), won.clone()), (k("b"), won)].into_iter().collect();
+    let candidates = vec![k("c")];
+    let regions = vec![candidates.clone()];
+    let core: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
+    let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+        if set.contains(&k("b")) {
+            return Ok(Err([(k("b"), "refused".to_string())].into_iter().collect()));
+        }
+        Ok(Ok(Check { cpython: [90, 100, 110], compiled: [119, 120, 121], instructions: None }))
+    };
+    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, &mut run).unwrap();
+    assert!(compiled(&verdicts).is_empty(), "{verdicts:?}");
+    assert_eq!(verdicts[&k("b")].refused.as_deref(), Some("refused"));
+}
+
+/// A build that compiles a function it was not asked for (a project's
+/// `[tool.pycc] compile`, say) refuses that measurement: it is never timed
+/// nor selected.
+#[test]
+fn a_build_that_compiles_more_than_asked_refuses_the_measurement() {
+    let set: BTreeSet<FunctionKey> = [k("a")].into_iter().collect();
+    let report = "compiled: m:a\ncompiled: m:extra\n";
+    let differs = refusals(&set, report);
+    assert_eq!(differs.keys().collect::<Vec<_>>(), [&("m".to_string(), "extra".to_string(), 0)]);
+    assert!(refusals(&set, "compiled: m:a\n").is_empty());
+    let candidates = vec![k("a")];
+    let regions = vec![candidates.clone()];
+    let mut asked = 0;
+    let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+        asked += 1;
+        Ok(Err(refusals(set, report)))
+    };
+    let (verdicts, builds) = decide(&candidates, &regions, &BTreeSet::new(), &BTreeMap::new(), 8, &mut run).unwrap();
+    assert_eq!(builds, 1);
+    assert!(compiled(&verdicts).is_empty(), "{verdicts:?}");
+}
+
+/// A small deterministic generator (xorshift64*), for the property test.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// Over thousands of random runs (each build wins, loses, refuses some of
+/// its members or compiles more than asked; with or without a carried
+/// winning set; budgets from 1 to 9 builds; a key that may then change):
+/// the selection is always exactly one set that was timed whole, won and
+/// had no member refused since, or nothing; and the build compiles exactly
+/// the selection, or nothing once the key fails.
+#[test]
+fn the_selection_is_always_one_valid_measured_winner_and_the_build_compiles_it() {
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    for case in 0..4000 {
+        let names: Vec<String> = (0..1 + rng.below(4)).map(|r| ((b'a' + r as u8) as char).to_string()).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let (candidates, regions, core) = regions_of(&names);
+        let carried = rng.below(3) == 0;
+        let won = Measured {
+            compiled: true,
+            with: 2,
+            cpython_ns: [90, 100, 110],
+            compiled_ns: [80 + rng.below(20), 99, 100],
+            instructions: None,
+            refused: None,
+            without: None,
+        };
+        let won = Measured { compiled_ns: [won.compiled_ns[0] - 1, won.compiled_ns[0], won.compiled_ns[0] + 1], ..won };
+        let base: BTreeMap<FunctionKey, Measured> = if carried {
+            [(k("x1"), won.clone()), (k("x2"), won.clone())].into_iter().collect()
+        } else {
+            BTreeMap::new()
+        };
+        let budget = 1 + rng.below(9) as usize;
+        // Every set timed, whether it won; every function refused.
+        let mut timed: Vec<(BTreeSet<FunctionKey>, bool)> = Vec::new();
+        let mut refused: BTreeSet<FunctionKey> = BTreeSet::new();
+        let mut seed = Rng(rng.next() | 1);
+        let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+            match seed.below(5) {
+                0 => {
+                    let gone: BTreeMap<FunctionKey, String> = set
+                        .iter()
+                        .filter(|_| seed.below(3) == 0)
+                        .map(|key| (key.clone(), "refused".to_string()))
+                        .collect();
+                    if !gone.is_empty() {
+                        refused.extend(gone.keys().cloned());
+                        return Ok(Err(gone));
+                    }
+                }
+                1 => return Ok(Err([(("m".into(), "extra".into(), 0), "extra".to_string())].into_iter().collect())),
+                _ => {}
+            }
+            let ms = 60 + seed.below(60);
+            timed.push((set.clone(), ms < 90));
+            Ok(Ok(Check { cpython: [90, 100, 110], compiled: [ms - 1, ms, ms + 1], instructions: None }))
+        };
+        let (verdicts, builds) = decide(&candidates, &regions, &core, &base, budget, &mut run).unwrap();
+        assert!(builds <= budget, "case {case}");
+        let selected = compiled(&verdicts);
+        let base_set: BTreeSet<FunctionKey> = base.keys().cloned().collect();
+        let valid = |set: &BTreeSet<FunctionKey>| set.is_disjoint(&refused);
+        if !selected.is_empty() {
+            let measured = timed.iter().any(|(set, won)| *won && *set == selected && valid(set))
+                || (carried && selected == base_set && valid(&base_set));
+            assert!(measured, "case {case}: {selected:?} was not a valid winner: {timed:?}, refused {refused:?}");
+        }
+        assert!(selected.is_disjoint(&refused), "case {case}");
+        // The build of the recorded profile compiles exactly the selection.
+        let mut p = profile(
+            candidates
+                .iter()
+                .chain(base.keys())
+                .map(|key| {
+                    let mut e = entry(&key.1, 100, &[]);
+                    e.measured = verdicts.get(key).cloned();
+                    e
+                })
+                .collect(),
+        );
+        p.verified = true;
+        p.total_ns = 1000;
+        record_winner(&mut p, &[]);
+        let changed = rng.below(4) == 0 && !selected.is_empty();
+        let sources: Vec<crate::profile::Function> = p
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(i, e)| crate::profile::Function {
+                module: e.module.clone(),
+                qualname: e.qualname.clone(),
+                firstlineno: e.firstlineno,
+                sha256: if changed && i == 0 { "changed".into() } else { e.sha256.clone() },
+                lines: 10,
+                eligible: true,
+                excluded: false,
+            })
+            .collect();
+        let valid = p.winner_valid(&crate::profile::Scope { sources: &sources, python: &p.python, excludes: Some(&[]), module: None });
+        let mut input: Vec<crate::profile::Candidate> = p
+            .functions
+            .iter()
+            .map(|e| crate::profile::Candidate {
+                entry: e,
+                eligible: true,
+                excluded: false,
+                lines: 10,
+                winning: crate::profile::Winning::No,
+            })
+            .collect();
+        p.mark(&mut input, &valid);
+        let built: BTreeSet<FunctionKey> = crate::profile::select(p.total_ns, &input, p.rule(Rule::default()))
+            .into_iter()
+            .filter(|d| d.rejected.is_none())
+            .map(|d| (d.entry.module.clone(), d.entry.qualname.clone(), d.entry.firstlineno))
+            .collect();
+        let member_changed = changed && selected.contains(&(p.functions[0].module.clone(), p.functions[0].qualname.clone(), 1));
+        if member_changed {
+            assert!(built.is_empty(), "case {case}: a changed member still built {built:?}");
+        } else {
+            assert_eq!(built, selected, "case {case}");
+        }
+    }
+}

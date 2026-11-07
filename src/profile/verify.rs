@@ -294,7 +294,12 @@ pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 
 /// hot core, most self time first; then the regions that won, together.
 /// One build of the budget is reserved for that last check before any
 /// region is measured. When it cannot run, or loses, the best set that won
-/// as a whole is selected: one region, a core, or nothing.
+/// as a whole is selected: one region, a core, or nothing. Structurally:
+/// the measurements form an append-only list ([`Measurement`]) and the
+/// selection is one valid entry of it, whole, or nothing; a refusal
+/// invalidates every entry holding the refused function, the carried set
+/// included, and a build that compiles anything it was not asked for
+/// ([`refusals`]) is never timed.
 pub(super) fn decide(
     candidates: &[FunctionKey],
     regions: &[Vec<FunctionKey>],
@@ -303,15 +308,7 @@ pub(super) fn decide(
     budget: usize,
     run: &mut Run<'_>,
 ) -> Result<(BTreeMap<FunctionKey, Measured>, usize), String> {
-    let mut pass = Pass {
-        run,
-        base: base.clone(),
-        builds: 0,
-        verdicts: BTreeMap::new(),
-        winners: Vec::new(),
-        sets: Vec::new(),
-        last: BTreeMap::new(),
-    };
+    let mut pass = Pass::new(run, base);
     let all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
     if pass.best_of(&all, core, budget)?.is_none() && regions.len() > 1 {
         // The build for the regions that win, together.
@@ -324,155 +321,210 @@ pub(super) fn decide(
             }
             let set: BTreeSet<FunctionKey> = region.iter().cloned().collect();
             if let Some(winner) = pass.best_of(&set, core, limit)? {
-                union.extend(winner);
+                union.extend(pass.entries[winner].set.iter().cloned());
                 won += 1;
             }
         }
-        if won > 1
-            && let Some((union, c)) = pass.measure(union, budget)?
-        {
-            pass.record(&union, c);
+        if won > 1 {
+            pass.measure(union, budget)?;
         }
     }
     Ok(pass.finish())
 }
 
-/// Records `c`'s outcome on each function of `set`.
-fn record(verdicts: &mut BTreeMap<FunctionKey, Measured>, set: &BTreeSet<FunctionKey>, c: &Check) {
-    for key in set {
-        verdicts.insert(
-            key.clone(),
-            Measured {
-                compiled: c.faster(),
-                with: set.len(),
-                cpython_ns: c.cpython,
-                compiled_ns: c.compiled,
-                instructions: c.instructions,
-                refused: None,
-                without: None,
-            },
-        );
-    }
+/// One set pass 3 measured, as a whole: the selection is one of these,
+/// whole, or nothing.
+#[derive(Debug, Clone)]
+struct Measurement {
+    set: BTreeSet<FunctionKey>,
+    /// Its times; `None` when no build compiled exactly it, so it was never
+    /// timed.
+    check: Option<Check>,
+    /// Whether it can still be selected: it was timed and won, and no
+    /// member of it was refused since (a refusal makes it invalid whole).
+    valid: bool,
 }
 
-/// Pass 3's builds, verdicts and the sets that won so far.
+/// Pass 3's builds, verdicts and its measurements: an append-only list.
 struct Pass<'r, 's> {
     run: &'r mut Run<'s>,
-    /// The earlier profile's winning set, in every set measured, with its
-    /// verdicts.
-    base: BTreeMap<FunctionKey, Measured>,
+    /// The earlier profile's winning set, carried as the first measurement
+    /// when there is one; while it is valid, every set measured includes
+    /// it.
+    carried: Option<usize>,
     builds: usize,
+    /// Per function: its verdict from the last set it was measured in.
     verdicts: BTreeMap<FunctionKey, Measured>,
-    /// Each set measured as a whole that was faster than CPython.
-    winners: Vec<(BTreeSet<FunctionKey>, Check)>,
-    /// Each set measured, and per function the last one it was measured in.
-    sets: Vec<BTreeSet<FunctionKey>>,
+    entries: Vec<Measurement>,
+    /// Per function, the last measurement it was timed in.
     last: BTreeMap<FunctionKey, usize>,
+    /// Every function a build refused: never asked for again, and no
+    /// measurement holding it is selected.
+    refused: BTreeSet<FunctionKey>,
 }
 
-impl Pass<'_, '_> {
-    /// Records `c` on each function of `set`, and `set` as a winner when it
-    /// won.
-    fn record(&mut self, set: &BTreeSet<FunctionKey>, c: Check) {
-        record(&mut self.verdicts, set, &c);
-        for key in set {
-            self.last.insert(key.clone(), self.sets.len());
+impl<'r, 's> Pass<'r, 's> {
+    fn new(run: &'r mut Run<'s>, base: &BTreeMap<FunctionKey, Measured>) -> Self {
+        let mut pass = Pass {
+            run,
+            carried: None,
+            builds: 0,
+            verdicts: base.clone(),
+            entries: Vec::new(),
+            last: BTreeMap::new(),
+            refused: BTreeSet::new(),
+        };
+        // Its members share one check: that check's times.
+        if let Some(m) = base.values().next() {
+            pass.carried = Some(0);
+            pass.entries.push(Measurement {
+                set: base.keys().cloned().collect(),
+                check: Some(Check {
+                    cpython: m.cpython_ns,
+                    compiled: m.compiled_ns,
+                    instructions: m.instructions,
+                }),
+                valid: true,
+            });
         }
-        self.sets.push(set.clone());
-        if c.faster() {
-            self.winners.push((set.clone(), c));
+        pass
+    }
+
+    /// The carried set's members, while it is valid.
+    fn base(&self) -> BTreeSet<FunctionKey> {
+        match self.carried {
+            Some(i) if self.entries[i].valid => self.entries[i].set.clone(),
+            _ => BTreeSet::new(),
         }
     }
 
     /// Checks `set` and, when its hot functions (`set` and `core`) are not
-    /// all of it, those alone, within `limit` builds: the one of the two
-    /// that won with the lower median (the hot ones on a tie), if either
-    /// won.
+    /// all of it, those alone, within `limit` builds: the measurement of
+    /// the two that won with the lower median (the hot ones on a tie), if
+    /// either won.
     fn best_of(
         &mut self,
         set: &BTreeSet<FunctionKey>,
         core: &BTreeSet<FunctionKey>,
         limit: usize,
-    ) -> Result<Option<BTreeSet<FunctionKey>>, String> {
-        let Some((set, whole)) = self.measure(set.clone(), limit)? else {
+    ) -> Result<Option<usize>, String> {
+        let Some(whole) = self.measure(set.clone(), limit)? else {
             return Ok(None);
         };
-        let whole_median = whole.faster().then_some(whole.compiled[1]);
-        self.record(&set, whole);
-        let hot: BTreeSet<FunctionKey> = set.intersection(core).cloned().collect();
-        if hot.is_empty() || hot.len() == set.len() {
-            return Ok(whole_median.map(|_| set));
+        let hot: BTreeSet<FunctionKey> = self.entries[whole].set.intersection(core).cloned().collect();
+        let base = self.base();
+        let new_hot = hot.difference(&base).count();
+        if new_hot == 0 || hot.len() == self.entries[whole].set.len() {
+            return Ok(self.winning(whole).then_some(whole));
         }
-        let Some((hot, alone)) = self.measure(hot, limit)? else {
-            return Ok(whole_median.map(|_| set));
-        };
-        let alone_median = alone.faster().then_some(alone.compiled[1]);
-        self.record(&hot, alone);
-        Ok(match (whole_median, alone_median) {
-            (Some(w), Some(a)) if w < a => Some(set),
-            (_, Some(_)) => Some(hot),
-            (Some(_), None) => Some(set),
+        let alone = self.measure(hot, limit)?;
+        let median = |i: usize| self.winning(i).then(|| self.entries[i].check.as_ref().map(|c| c.compiled[1]));
+        Ok(match (median(whole).flatten(), alone.and_then(|i| median(i).flatten())) {
+            (Some(w), Some(a)) if w < a => Some(whole),
+            (_, Some(_)) => alone,
+            (Some(_), None) => Some(whole),
             (None, None) => None,
         })
     }
 
-    /// Checks `set` within `limit` builds, leaving out every function a
-    /// build refuses (recorded as refused, never timed) until a build
-    /// compiles the whole rest: that rest and its check, or None when no
-    /// build compiles any of it within the limit.
-    fn measure(
-        &mut self,
-        mut set: BTreeSet<FunctionKey>,
-        limit: usize,
-    ) -> Result<Option<(BTreeSet<FunctionKey>, Check)>, String> {
-        set.retain(|key| !self.base.contains_key(key));
+    /// Whether measurement `i` won and is still valid.
+    fn winning(&self, i: usize) -> bool {
+        self.entries[i].valid
+    }
+
+    /// Checks `set` (with the carried set, while valid) within `limit`
+    /// builds. A build that leaves a member bytecode refuses it (recorded,
+    /// never timed): it is left out and the rest built again, and every
+    /// measurement holding it becomes invalid. A build that compiles
+    /// anything it was not asked to refuses the measurement. The
+    /// measurement timed, or None.
+    fn measure(&mut self, mut set: BTreeSet<FunctionKey>, limit: usize) -> Result<Option<usize>, String> {
+        let base = self.base();
+        set.retain(|key| !base.contains(key) && !self.refused.contains(key));
         while !set.is_empty() && self.builds < limit {
             self.builds += 1;
-            let whole: BTreeSet<FunctionKey> = set.iter().chain(self.base.keys()).cloned().collect();
+            let whole: BTreeSet<FunctionKey> = set.iter().chain(&self.base()).cloned().collect();
             match (self.run)(&whole, self.builds)? {
-                Ok(c) => return Ok(Some((whole, c))),
+                Ok(c) => {
+                    let i = self.entries.len();
+                    let with = whole.len();
+                    for key in &whole {
+                        self.last.insert(key.clone(), i);
+                        self.verdicts.insert(
+                            key.clone(),
+                            Measured {
+                                compiled: c.faster(),
+                                with,
+                                cpython_ns: c.cpython,
+                                compiled_ns: c.compiled,
+                                instructions: c.instructions,
+                                refused: None,
+                                without: None,
+                            },
+                        );
+                    }
+                    let valid = c.faster() && whole.is_disjoint(&self.refused);
+                    self.entries.push(Measurement { set: whole, check: Some(c), valid });
+                    return Ok(Some(i));
+                }
+                Err(refused) if refused.keys().any(|key| !whole.contains(key)) => {
+                    // Not the set asked for: never timed, never selected.
+                    let extra: Vec<String> = refused
+                        .keys()
+                        .filter(|key| !whole.contains(*key))
+                        .map(|key| format!("{}:{}", key.0, key.1))
+                        .collect();
+                    eprintln!(
+                        "pycc profile: pass 3: the build compiled {} it was not asked for: not timed",
+                        extra.join(", ")
+                    );
+                    self.entries.push(Measurement { set: whole, check: None, valid: false });
+                    return Ok(None);
+                }
                 Err(refused) => {
                     let with = whole.len();
                     for (key, reason) in refused {
+                        self.refused.insert(key.clone());
+                        for entry in &mut self.entries {
+                            if entry.set.contains(&key) {
+                                entry.valid = false;
+                            }
+                        }
                         set.remove(&key);
-                        self.base.remove(&key);
                         self.verdicts.insert(key, Measured::refused(with, reason));
                     }
+                    // A carried set refused a member is invalid whole: it is
+                    // no longer in the sets measured from now on.
                 }
             }
         }
         Ok(None)
     }
 
-    /// The verdicts, with the selection settled: the winner with the lowest
-    /// median (the smaller on a tie) is compiled, on its own check's times;
-    /// every other function measured is not. One that the winner left out of
-    /// a set it was measured in (the winner is part of that set), or whose
-    /// own set won too, records the winner's times (`without`); any other
-    /// keeps its own check's. The builds made.
-    fn finish(mut self) -> (BTreeMap<FunctionKey, Measured>, usize) {
-        let mut kept: BTreeSet<FunctionKey> = BTreeSet::new();
-        if self.winners.is_empty() {
-            // No new winner: the earlier winning set stays, as measured.
-            for (key, m) in std::mem::take(&mut self.base) {
-                kept.insert(key.clone());
-                self.verdicts.insert(key, m);
-            }
-        }
+    /// The selection, settled: of the measurements still valid (each won as
+    /// a whole), the one with the lowest median (the smaller on a tie) is
+    /// compiled, whole, on its own times; every other function measured is
+    /// not. One that the selection left out of a set it was measured in
+    /// (the selection is part of that set), or whose own set won too,
+    /// records the selection's times (`without`). The verdicts and the
+    /// builds made.
+    fn finish(self) -> (BTreeMap<FunctionKey, Measured>, usize) {
         let best = self
-            .winners
+            .entries
             .iter()
-            .min_by_key(|(set, c)| (c.compiled[1], set.len()))
-            .map(|(set, c)| (set.clone(), c.clone()));
-        for (key, m) in &mut self.verdicts {
-            if m.refused.is_some() || kept.contains(key) {
+            .filter(|m| m.valid)
+            .filter_map(|m| m.check.as_ref().map(|c| (m, c)))
+            .min_by_key(|(m, c)| (c.compiled[1], m.set.len()));
+        let mut verdicts = self.verdicts;
+        for (key, m) in &mut verdicts {
+            if m.refused.is_some() {
                 continue;
             }
-            match &best {
-                Some((set, c)) if set.contains(key) => {
+            match best {
+                Some((set, c)) if set.set.contains(key) => {
                     *m = Measured {
                         compiled: true,
-                        with: set.len(),
+                        with: set.set.len(),
                         cpython_ns: c.cpython,
                         compiled_ns: c.compiled,
                         instructions: c.instructions,
@@ -481,7 +533,7 @@ impl Pass<'_, '_> {
                     };
                 }
                 Some((set, c)) => {
-                    let within = self.last.get(key).is_some_and(|&i| set.is_subset(&self.sets[i]));
+                    let within = self.last.get(key).is_some_and(|&i| set.set.is_subset(&self.entries[i].set));
                     if m.compiled || within {
                         m.without = Some(c.compiled);
                     }
@@ -490,7 +542,7 @@ impl Pass<'_, '_> {
                 None => m.compiled = false,
             }
         }
-        (self.verdicts, self.builds)
+        (verdicts, self.builds)
     }
 }
 
@@ -654,7 +706,7 @@ fn build(
         .arg(copy)
         .arg("-o")
         .arg(&out)
-        .args(["--ext", "--non-strict", "--release", "--select", "none", "--report-fallbacks"]);
+        .args(["--ext", "--non-strict", "--release", "--select", "none", "--report-fallbacks", "--no-project-select"]);
     // Exactly `set`: no selection rule runs again, so leaving the other
     // candidates out changes nothing else.
     for (module, qualname, _) in set {
@@ -678,9 +730,12 @@ fn build(
     Ok(refusals(set, &String::from_utf8_lossy(&output.stderr)))
 }
 
-/// The functions of `set` a build whose report is `report` did not compile,
-/// each with the reason it gives (`not compiled: MODULE:QUALNAME: REASON`),
-/// or that it does not name compiled at all.
+/// How a build whose report is `report` differs from `set`, the set it was
+/// asked to compile, compared as sets: each function of `set` it did not
+/// compile, with the reason it gives (`not compiled: MODULE:QUALNAME:
+/// REASON`, or none), and each function it compiled that is not in `set`
+/// (at line 0, as its report has no line). Empty when it compiled exactly
+/// `set`.
 pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<FunctionKey, String> {
     let mut compiled: BTreeSet<&str> = BTreeSet::new();
     let mut reasons: BTreeMap<&str, &str> = BTreeMap::new();
@@ -699,6 +754,12 @@ pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<Fu
             }
         }
     }
+    let asked: BTreeSet<String> = set.iter().map(|key| format!("{}:{}", key.0, key.1)).collect();
+    let extras = compiled.iter().filter(|name| !asked.contains(**name)).filter_map(|name| {
+        let (module, qualname) = name.split_once(':')?;
+        let key = (module.to_string(), qualname.to_string(), 0);
+        Some((key, "compiled though pass 3 did not ask for it".to_string()))
+    });
     set.iter()
         .filter_map(|key| {
             let name = format!("{}:{}", key.0, key.1);
@@ -710,6 +771,7 @@ pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<Fu
                 .map_or("the build did not compile it", |reason| reason);
             Some((key.clone(), reason.to_string()))
         })
+        .chain(extras)
         .collect()
 }
 

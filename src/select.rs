@@ -235,7 +235,9 @@ pub(crate) fn resolve(
     if mode == SelectMode::Module {
         return Ok(None);
     }
-    let project = Project::read(path)?;
+    // Pass 3's builds compile exactly the set they are given: the copied
+    // project's `[tool.pycc]` must not add to it.
+    let project = if flags.no_project_select { Project::default() } else { Project::read(path)? };
     let profile = flags.profile.clone().or(project.profile);
     let compile: Vec<String> = flags.compile.iter().cloned().chain(project.compile).collect();
     let no_compile: Vec<String> = flags.no_compile.iter().cloned().chain(project.exclude).collect();

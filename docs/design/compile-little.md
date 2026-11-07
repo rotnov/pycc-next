@@ -242,9 +242,22 @@ and won: the winner with the lowest median, the smaller on a tie, never a union 
 measured apart. When the regions together cannot be built within the budget, or lose,
 the best single winner is kept (a region, a core, or nothing). A function the winner
 leaves out of a set it was measured in is rejected ("faster without it",
-`measured.without`). A later profile keeps an earlier winning set that is still valid
-(step 5) inside every set it measures, so its selection is again one set
-measured as a whole. The copy is the project root: the nearest directory at or above the
+`measured.without`). Pass 3 enforces this structurally:
+- **Every build is checked against its request.** The functions a check's build compiled
+  (its `compiled:` report) must equal the set it was asked for, compared as sets. A
+  missing member is refused and the rest built again. An extra (for example from a copied
+  `pyproject.toml`'s `[tool.pycc] compile`, which its builds also ignore with the internal
+  `--no-project-select`) refuses the measurement: it is never timed.
+- **The selection is one entry of an append-only list of measurements, whole, or nothing.**
+  An entry is selectable only if it was timed, won, and no member of it was refused at any
+  point of the run; no subset of an entry is ever derived or restored.
+- **A carried winning set is the first entry.** A later profile carries an earlier winning
+  set that is still valid (step 5) as that entry, inside every set it measures. A refusal
+  of any of its members invalidates it whole.
+
+A seeded property test drives these decisions through thousands of random runs (wins,
+losses, refusals, extras, carried sets, budgets, a changed key) and checks that the
+selection is always one valid winning entry and that the build compiles exactly it. The copy is the project root: the nearest directory at or above the
 package's import root with a `pyproject.toml`, `setup.cfg` or `setup.py`, searched up to
 the first `site-packages` or `dist-packages`, so the workload's tests and data are found
 at the same paths (the workload reads the copy's import root from `PYCC_PROFILE_ROOT`).
