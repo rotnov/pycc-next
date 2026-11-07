@@ -302,3 +302,134 @@ fn a_standalone_module_that_imports_a_module_beside_it_is_measured() {
     assert!(stderr.contains("pass 3 kept 1 of 1 candidates"), "{stderr}");
     assert_eq!(measured(&out, "work")["compiled"], true);
 }
+
+/// A package `pkg` with two modules, `a` and `b`, each with an integer loop
+/// a native body wins on, and a workload that runs both.
+fn two_modules(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let pkg = dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("__init__.py"), "").unwrap();
+    for name in ["a", "b"] {
+        std::fs::write(pkg.join(format!("{name}.py")), MODULE.replace("def work", &format!("def work_{name}"))).unwrap();
+    }
+    let work = dir.join("work.py");
+    std::fs::write(&work, "from pkg import a, b\nfor i in range(60):\n    a.work_a(20000)\n    b.work_b(20000)\n").unwrap();
+    (pkg, work)
+}
+
+/// `pycc build PATH --ext --non-strict --profile PROFILE [EXTRA]`: what it
+/// compiled (`module:qualname`), from its report.
+fn build_compiled(path: &Path, out: &Path, profile: &Path, extra: &[&str]) -> (Vec<String>, String) {
+    let mut args: Vec<&std::ffi::OsStr> = vec![
+        "build".as_ref(),
+        path.as_os_str(),
+        "-o".as_ref(),
+        out.as_os_str(),
+        "--ext".as_ref(),
+        "--non-strict".as_ref(),
+        "--report-fallbacks".as_ref(),
+        "--profile".as_ref(),
+        profile.as_os_str(),
+    ];
+    args.extend(extra.iter().map(std::ffi::OsStr::new));
+    let r = pycc(&args);
+    let stderr = String::from_utf8_lossy(&r.stderr).into_owned();
+    assert!(r.status.success(), "{stderr}");
+    let compiled = stderr
+        .lines()
+        .filter_map(|l| l.strip_prefix("compiled: "))
+        .map(str::to_string)
+        .collect();
+    (compiled, stderr)
+}
+
+/// The members of the winning set a profile records (`module:qualname`).
+fn winner(out: &Path) -> Vec<String> {
+    let p: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(out).unwrap()).unwrap();
+    let mut members: Vec<String> = p["winner"]["members"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{p}"))
+        .iter()
+        .map(|m| format!("{}:{}", m[0].as_str().unwrap(), m[1].as_str().unwrap()))
+        .collect();
+    members.sort();
+    members
+}
+
+/// The winning set is valid package-wide: a build of one module compiles
+/// that module's share of it, and the builds of every module together
+/// compile exactly the set pass 3 measured.
+#[test]
+fn a_build_of_each_module_compiles_its_share_of_the_winning_set() {
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = two_modules(&dir);
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &work);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert_eq!(winner(&out), ["pkg.a:work_a", "pkg.b:work_b"], "{stderr}");
+    let mut union = Vec::new();
+    for name in ["a", "b"] {
+        let (compiled, stderr) = build_compiled(&pkg.join(format!("{name}.py")), &dir.join(name), &out, &[]);
+        assert_eq!(compiled, [format!("pkg.{name}:work_{name}")], "{stderr}");
+        union.extend(compiled);
+    }
+    union.sort();
+    assert_eq!(union, winner(&out));
+}
+
+/// An `--exclude` the winning set was not measured with makes it invalid:
+/// the build selects nothing rather than a set never measured, `--check`
+/// asks for a new profile, and profiling again measures from scratch.
+#[test]
+fn an_exclude_the_winning_set_was_not_measured_with_selects_nothing() {
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = two_modules(&dir);
+    let out = dir.join("p.json");
+    let r = profile(&pkg, &out, &work);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    assert_eq!(winner(&out), ["pkg.a:work_a", "pkg.b:work_b"]);
+    // The whole package, with `b` kept in Python.
+    let (compiled, stderr) = build_compiled(&pkg, &pkg.join("__init__"), &out, &["--exclude", "b"]);
+    assert!(compiled.is_empty(), "{stderr}");
+    assert!(stderr.contains("the profile's winning set is not valid"), "{stderr}");
+    assert!(stderr.contains("profile again to measure it"), "{stderr}");
+    // `--check` under the same `--exclude`.
+    let r = pycc(&[
+        "profile".as_ref(),
+        pkg.as_os_str(),
+        "-o".as_ref(),
+        out.as_os_str(),
+        "--check".as_ref(),
+        "--exclude".as_ref(),
+        "b".as_ref(),
+        "--".as_ref(),
+        &python(),
+    ]);
+    let shown = String::from_utf8_lossy(&r.stdout);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    assert!(shown.contains("invalid: pass 3's winning set is not valid (it was measured with --exclude"), "{shown}");
+    assert!(!shown.contains("selected: "), "{shown}");
+    // Profiled again under it: no verdict is carried, and the new set
+    // leaves `b` out.
+    let r = pycc(&[
+        "profile".as_ref(),
+        pkg.as_os_str(),
+        "-o".as_ref(),
+        out.as_os_str(),
+        "--exclude".as_ref(),
+        "b".as_ref(),
+        "--".as_ref(),
+        &python(),
+        work.as_os_str(),
+    ]);
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(!stderr.contains("keep the verdicts"), "{stderr}");
+    assert!(stderr.contains("pass 3: 1 functions compiled: "), "{stderr}");
+    assert_eq!(winner(&out), ["pkg.a:work_a"]);
+    let (compiled, stderr) = build_compiled(&pkg, &pkg.join("__init__"), &out, &["--exclude", "b"]);
+    assert_eq!(compiled, ["pkg.a:work_a"], "{stderr}");
+}

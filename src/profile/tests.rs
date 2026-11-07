@@ -35,7 +35,27 @@ fn candidate(e: &Entry, eligible: bool) -> Candidate<'_> {
         eligible,
         excluded: false,
         lines: 10,
+        winning: crate::profile::Winning::No,
     }
+}
+
+/// Records `names` as `p`'s winning set, measured with no `--exclude`.
+fn win(p: &mut Profile, names: &[&str]) {
+    let members = p
+        .functions
+        .iter()
+        .filter(|e| names.contains(&e.qualname.as_str()))
+        .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno, e.sha256.clone()))
+        .collect();
+    p.winner = Some(Winner { members, excludes: Vec::new(), python: p.python.clone() });
+}
+
+/// `p`'s candidates, marked by its winning set (taken as valid).
+fn marked(p: &Profile) -> Vec<Candidate<'_>> {
+    static VALID: Result<(), String> = Ok(());
+    let mut input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    p.mark(&mut input, &VALID);
+    input
 }
 
 fn profile(functions: Vec<Entry>) -> Profile {
@@ -48,6 +68,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         functions,
         sampled: true,
         verified: false,
+        winner: None,
     }
 }
 
@@ -104,7 +125,7 @@ fn stale_and_missing_entries_are_dropped_with_a_note() {
         function("pkg.m", "C.x", 21, "get"),
         function("pkg.m", "C.x", 25, "set"),
     ];
-    let (current, notes) = p.current(&sources);
+    let (current, notes) = p.current(&sources, None);
     let kept: Vec<(&str, u32)> = current
         .iter()
         .map(|(e, f)| (e.qualname.as_str(), f.firstlineno))
@@ -331,7 +352,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     let mut p = profile(vec![a, b, c]);
     let rule = Rule { max: 2, ..Rule::default() };
     let picked = |p: &Profile| -> Vec<String> {
-        let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+        let input = marked(p);
         select(p.total_ns, &input, p.rule(rule))
             .into_iter()
             .filter(|d| d.rejected.is_none())
@@ -341,8 +362,9 @@ fn a_verified_profile_selects_only_its_measured_winners() {
     // Unverified (`--no-verify`), the rule alone decides.
     assert_eq!(picked(&p), ["b", "c"]);
     p.verified = true;
+    win(&mut p, &["b"]);
     assert_eq!(picked(&p), ["b"]);
-    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    let input = marked(&p);
     let c = select(p.total_ns, &input, p.rule(rule)).into_iter().find(|d| d.entry.qualname == "c").unwrap();
     assert_eq!(c.rejected.as_deref(), Some("not measured by pass 3 (it was not among the candidates it built)"));
     // The flag is part of the file.
@@ -387,7 +409,8 @@ fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
     let mut p = profile(vec![a, b, c]);
     p.total_ns = 1_000_000;
     p.verified = true;
-    let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    win(&mut p, &["a", "b"]);
+    let input = marked(&p);
     let decided = select(p.total_ns, &input, p.rule(Rule::default()));
     let selected: Vec<&str> = decided
         .iter()
@@ -401,11 +424,13 @@ fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
     let input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
     let decided = select(p.total_ns, &input, p.rule(Rule::default()));
     assert!(decided.iter().find(|d| d.entry.qualname == "a").unwrap().rejected.is_some(), "{decided:?}");
-    // A winning set with a member gone from the sources selects nothing.
+    // A winning set that is not valid selects nothing, and says why.
     p.verified = true;
-    let rest: Vec<Entry> = p.functions.iter().filter(|e| e.qualname != "a").cloned().collect();
-    let input: Vec<Candidate> = rest.iter().map(|e| candidate(e, true)).collect();
+    let invalid: Result<(), String> = Err("its member m:a (line 1) changed or is gone".into());
+    let mut input: Vec<Candidate> = p.functions.iter().map(|e| candidate(e, true)).collect();
+    p.mark(&mut input, &invalid);
     let decided = select(p.total_ns, &input, p.rule(Rule::default()));
-    let b = decided.iter().find(|d| d.entry.qualname == "b").unwrap();
-    assert!(b.rejected.as_deref().unwrap().starts_with("pass 3's winning set of 2 functions is not whole"), "{b:?}");
+    assert!(decided.iter().all(|d| d.rejected.as_deref().unwrap().starts_with(
+        "pass 3's winning set is not valid (its member m:a (line 1) changed or is gone)"
+    )), "{decided:?}");
 }

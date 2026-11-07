@@ -27,6 +27,7 @@ fn profile(functions: Vec<Entry>) -> Profile {
         functions,
         sampled: true,
         verified: false,
+        winner: None,
     }
 }
 
@@ -114,6 +115,7 @@ fn the_rule_rejects_a_function_measured_slower() {
             eligible: true,
             excluded: false,
             lines: 10,
+            winning: crate::profile::Winning::No,
         }
     }
     let decided = crate::profile::select(1000, &[candidate(&a), candidate(&b)], Rule::default());
@@ -159,6 +161,10 @@ fn a_member_is_copied_with_the_packages_above_it() {
     assert!(single.ends_with("two/alone.py"));
     assert!(!dir.join("two/top").exists());
     assert!(!dir.join("two/unrelated.txt").exists());
+    // The path returned is the copy's own canonical path, whatever form the
+    // destination was given in.
+    let roundabout = copy_package(&src.join("alone.py"), &dir.join("two/../three"), &[]).unwrap();
+    assert_eq!(roundabout, dir.join("three").canonicalize().unwrap().join("alone.py"));
 }
 
 /// The workload reads files beside the package by their paths from the
@@ -240,6 +246,7 @@ fn an_installed_package_is_copied_alone() {
 
 /// Whether this process can read a file whose permissions forbid it (it
 /// runs as root): the unreadable-entry tests then prove nothing.
+#[cfg(unix)]
 fn reads_unreadable(dir: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     let probe = dir.join("probe");

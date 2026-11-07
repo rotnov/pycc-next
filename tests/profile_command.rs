@@ -543,12 +543,15 @@ fn a_function_pass_2_did_not_sample_never_takes_a_rejected_one_s_slot() {
     std::fs::write(pkg.join("__init__.py"), "").unwrap();
     std::fs::write(
         pkg.join("m.py"),
-        "def a(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 1\n\n\n\
+        "def a(d):\n    for _ in range(200):\n        pass\n    try:\n        return d[0]\n    except KeyError:\n        return 1\n\n\n\
          def b(d):\n    try:\n        return d[0]\n    except KeyError:\n        return 2\n",
     )
     .unwrap();
     let work = dir.join("work.py");
-    // `a` takes more self time than `b`.
+    // `a` takes far more self time than `b`: twice the calls, each with a
+    // loop of 200 steps before its `try`. With the call count alone the
+    // margin was 2x, and one run's timing noise (a macOS runner measured
+    // `b` slower) let `b` take the one slot.
     std::fs::write(&work, "from pkg import m\nfor i in range(3000):\n    m.a({})\n    m.a({})\n    m.b({})\n").unwrap();
     let out = dir.join("p.json");
     let rule = ["--runs", "1", "--select-share", "0", "--select-max", "1"];

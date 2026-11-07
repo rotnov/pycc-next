@@ -144,7 +144,7 @@ fn main() -> ExitCode {
             // members, which each read their own share.
             let selection = match (&toolchain, &package_member) {
                 (Some(toolchain), None) if mode::non_strict_for(&path) => {
-                    match select::resolve(&path, mode.select, &select, toolchain.interpreter()) {
+                    match select::resolve(&path, mode.select, &select, toolchain.interpreter(), path.is_dir().then_some(excludes.as_slice())) {
                         Ok(selection) => selection,
                         Err(message) => {
                             eprintln!("error: {message}");

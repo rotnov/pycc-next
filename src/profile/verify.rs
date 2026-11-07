@@ -64,6 +64,9 @@ pub(crate) struct Options {
 /// What pass 3 works with.
 pub(super) struct Context<'a> {
     pub(super) driver: &'a Driver<'a>,
+    /// The modules kept in Python (`--exclude`), which the winning set's
+    /// key records.
+    pub(super) excludes: &'a [String],
     pub(super) workload: &'a [OsString],
     pub(super) scratch: &'a Path,
     pub(super) options: Options,
@@ -231,6 +234,7 @@ pub(super) fn verify(
         eprintln!("pycc profile: pass 3: {carried} candidates keep the verdicts an earlier profile recorded");
     }
     if candidates.is_empty() {
+        record_winner(profile, cx.excludes);
         return Ok(());
     }
     let started = Instant::now();
@@ -248,7 +252,24 @@ pub(super) fn verify(
         candidates.len(),
         started.elapsed().as_secs_f64()
     );
+    record_winner(profile, cx.excludes);
     Ok(())
+}
+
+/// Records the winning set's key on `profile` (its members, now marked
+/// compiled, with their sources; `excludes`; the interpreter's version).
+fn record_winner(profile: &mut Profile, excludes: &[String]) {
+    let members = profile
+        .functions
+        .iter()
+        .filter(|e| e.measured.as_ref().is_some_and(|m| m.compiled))
+        .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno, e.sha256.clone()))
+        .collect();
+    profile.winner = Some(super::Winner {
+        members,
+        excludes: super::normalized(excludes),
+        python: profile.python.clone(),
+    });
 }
 
 /// The outcome of a check's build and timing: the check, or the functions
@@ -738,7 +759,11 @@ pub(crate) fn copy_package(pkg: &Path, root: &Path, include: &[PathBuf]) -> Resu
     let top = top.canonicalize().map_err(|e| format!("{}: {e}", top.display()))?;
     let pkg = pkg.canonicalize().map_err(|e| format!("{}: {e}", pkg.display()))?;
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    // Canonical, as the paths copied from are (a temporary directory is a
+    // link on macOS: `/var` is `/private/var`), so the path returned is the
+    // copy's own whatever form `root` was given in, relative included.
     let skip = root.canonicalize().map_err(|e| e.to_string())?;
+    let root = skip.as_path();
     let installed = base.ancestors().any(installed_dir);
     let project = if installed {
         None

@@ -165,6 +165,55 @@ pub(crate) struct Profile {
     /// winners are selected ([`Rule::measured_only`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) verified: bool,
+    /// The set pass 3 measured as the winner, and what it was measured
+    /// under: the selection of a verified profile, valid only as a whole
+    /// ([`Profile::winner_valid`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) winner: Option<Winner>,
+}
+
+/// The identity of pass 3's winning set: its members, each with the source
+/// it was measured with, and the `--exclude` list and the interpreter
+/// version it was measured under. A build compiles it only when all of
+/// them still hold, and then exactly its members.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Winner {
+    /// Module, qualified name, first line and source hash of each member.
+    pub(crate) members: Vec<(String, String, u32, String)>,
+    /// The modules kept in Python (`--exclude`), sorted.
+    pub(crate) excludes: Vec<String>,
+    /// The interpreter's version (`platform.python_version()`).
+    pub(crate) python: String,
+}
+
+/// What a check of a profile's winning set compares it with: the whole
+/// package's current sources (every module, whichever one a build
+/// compiles), the interpreter's version, and the build's `--exclude` list
+/// (`None` for a build of one module, which has none: then only its own
+/// module must not be one the set was measured without).
+pub(crate) struct Scope<'a> {
+    pub(crate) sources: &'a [Function],
+    pub(crate) python: &'a str,
+    pub(crate) excludes: Option<&'a [String]>,
+    /// The module a single-module build compiles.
+    pub(crate) module: Option<&'a str>,
+}
+
+/// `excludes` as a [`Winner`] records them.
+pub(crate) fn normalized(excludes: &[String]) -> Vec<String> {
+    let set: BTreeSet<&String> = excludes.iter().collect();
+    set.into_iter().cloned().collect()
+}
+
+/// Whether a function is in pass 3's winning set, as [`select`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Winning<'p> {
+    /// Not a member (or no set was measured).
+    No,
+    /// A member of a valid winning set.
+    Member,
+    /// A member of a set that is no longer valid, and why.
+    Invalid(&'p str),
 }
 
 /// One function of the package's current sources (the driver's `index`).
@@ -193,6 +242,7 @@ impl Function {
             eligible: self.eligible,
             excluded: self.excluded,
             lines: self.lines,
+            winning: Winning::No,
         }
     }
 }
@@ -272,6 +322,91 @@ impl Profile {
         }
     }
 
+    /// Whether the winning set pass 3 measured is still valid in `scope`:
+    /// every member has the source it was measured with somewhere in the
+    /// package, and the interpreter and the `--exclude` list are the ones
+    /// it was measured under; else why not. A profile pass 3 has not run on
+    /// has no set, which is valid.
+    pub(crate) fn winner_valid(&self, scope: &Scope<'_>) -> Result<(), String> {
+        if !self.verified {
+            return Ok(());
+        }
+        let Some(winner) = &self.winner else {
+            return Err("the profile records no winning set (a profile of an older pycc)".to_string());
+        };
+        let minor = |v: &str| v.split('.').take(2).collect::<Vec<_>>().join(".");
+        if minor(&winner.python) != minor(scope.python) {
+            return Err(format!(
+                "it was measured with Python {}, and this build uses Python {}",
+                winner.python, scope.python
+            ));
+        }
+        match scope.excludes {
+            Some(excludes) if normalized(excludes) != winner.excludes => {
+                return Err(format!(
+                    "it was measured with --exclude {:?}, and this run has --exclude {:?}",
+                    winner.excludes,
+                    normalized(excludes)
+                ));
+            }
+            _ => {}
+        }
+        if let Some(module) = scope.module
+            && let Some(package) = module.split('.').next()
+            && winner.excludes.iter().any(|e| {
+                let relative = module.strip_prefix(package).and_then(|r| r.strip_prefix('.')).unwrap_or("");
+                crate::package_build::excluded(package, relative, std::slice::from_ref(e))
+            })
+        {
+            return Err(format!("it was measured with `{module}` kept in Python (--exclude)"));
+        }
+        for (module, qualname, line, sha256) in &winner.members {
+            let found = scope
+                .sources
+                .iter()
+                .find(|f| &f.module == module && &f.qualname == qualname && &f.sha256 == sha256);
+            match found {
+                Some(f) if f.excluded => {
+                    return Err(format!("its member {module}:{qualname} is kept in Python (--exclude)"));
+                }
+                Some(_) => {}
+                None => {
+                    return Err(format!(
+                        "its member {module}:{qualname} (line {line}) changed or is gone"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Marks each of `candidates` that is a member of the winning set (by
+    /// module, qualified name and source hash), a member of a valid one
+    /// when `valid` is `Ok`.
+    pub(crate) fn mark<'p>(&self, candidates: &mut [Candidate<'p>], valid: &'p Result<(), String>) {
+        // An invalid set selects nothing: every candidate says why.
+        if let Err(why) = valid {
+            for c in candidates {
+                c.winning = Winning::Invalid(why.as_str());
+            }
+            return;
+        }
+        let Some(winner) = &self.winner else {
+            return;
+        };
+        let members: BTreeSet<(&str, &str, &str)> = winner
+            .members
+            .iter()
+            .map(|(m, q, _, sha)| (m.as_str(), q.as_str(), sha.as_str()))
+            .collect();
+        for c in candidates {
+            let e = c.entry;
+            if members.contains(&(e.module.as_str(), e.qualname.as_str(), e.sha256.as_str())) {
+                c.winning = Winning::Member;
+            }
+        }
+    }
+
     /// The file's text: pretty JSON, entries sorted, a final newline.
     pub(crate) fn to_json(&self) -> String {
         let mut sorted = self.clone();
@@ -304,10 +439,12 @@ impl Profile {
     /// entry dropped: its function changed or is gone. Functions are matched
     /// by module, qualified name and source hash, so a function that only
     /// moved stays current, and of two `def`s with one qualified name (a
-    /// property's getter and setter) each keeps its own entry.
+    /// property's getter and setter) each keeps its own entry. With `module`
+    /// (a build of that module alone), only its entries are considered.
     pub(crate) fn current<'p, 'f>(
         &'p self,
         sources: &'f [Function],
+        module: Option<&str>,
     ) -> (Vec<(&'p Entry, &'f Function)>, Vec<String>) {
         let mut by_name: BTreeMap<(&str, &str), Vec<&Function>> = BTreeMap::new();
         for f in sources {
@@ -319,6 +456,11 @@ impl Profile {
         let mut current = Vec::new();
         let mut notes = Vec::new();
         for e in &self.functions {
+            // A build of one module indexes that module alone: the entries
+            // of the package's other modules are not its to drop.
+            if module.is_some_and(|m| m != e.module) {
+                continue;
+            }
             let same = by_name
                 .get(&(e.module.as_str(), e.qualname.as_str()))
                 .and_then(|fs| fs.iter().find(|f| f.sha256 == e.sha256));
@@ -349,6 +491,8 @@ pub(crate) struct Candidate<'p> {
     pub(crate) eligible: bool,
     /// Its module is kept in Python (`--exclude`).
     pub(crate) excluded: bool,
+    /// Its place in pass 3's winning set ([`Profile::winning`]).
+    pub(crate) winning: Winning<'p>,
     pub(crate) lines: u32,
 }
 
@@ -372,8 +516,9 @@ pub(crate) struct Candidate<'p> {
 /// 5. once pass 3 has run (`rule.measured_only`), in the set it measured
 ///    as the winner. That set is the selection, member for member, and
 ///    steps 2 to 4 are not applied to it again: they choose the candidates
-///    pass 3 measures, not its result. A winning set that is not whole in
-///    the current sources (a member changed or is gone) selects nothing.
+///    pass 3 measures, not its result. A winning set that is not valid
+///    ([`Profile::winner_valid`]: a member changed, is gone or is kept in
+///    Python, or the excludes or the interpreter differ) selects nothing.
 ///
 /// Steps 2 to 4 repeat until no function changes: a rejection can shrink a
 /// region below its threshold or turn its callers' calls into crossings.
@@ -508,30 +653,21 @@ pub(crate) fn select<'p>(total_ns: u64, entries: &[Candidate<'p>], rule: Rule) -
     // for member: the steps above chose what pass 3 measured, and are not
     // applied to its result again.
     if rule.measured_only {
-        let winners: Vec<usize> = (0..decided.len())
-            .filter(|&i| decided[i].entry.measured.as_ref().is_some_and(|m| m.compiled))
-            .collect();
-        let whole = winners
-            .first()
-            .and_then(|&i| decided[i].entry.measured.as_ref())
-            .map_or(0, |m| m.with);
-        let intact = winners.len() == whole
-            && winners
-                .iter()
-                .all(|&i| decided[i].entry.measured.as_ref().is_some_and(|m| m.with == whole));
-        for (i, d) in decided.iter_mut().enumerate() {
-            if winners.contains(&i) {
-                d.rejected = (!intact).then(|| {
-                    format!(
-                        "pass 3's winning set of {whole} functions is not whole in the current sources \
-                         (one changed or is gone): profile again"
-                    )
-                });
-            } else if d.rejected.is_none() {
-                d.rejected = Some(match &d.entry.measured {
-                    None => "not measured by pass 3 (it was not among the candidates it built)".to_string(),
-                    Some(_) => "not in the set pass 3 measured as the winner".to_string(),
-                });
+        for (d, c) in decided.iter_mut().zip(&order) {
+            match c.winning {
+                Winning::Member => d.rejected = None,
+                Winning::Invalid(why) => {
+                    d.rejected = Some(format!(
+                        "pass 3's winning set is not valid ({why}): profile again to measure it"
+                    ));
+                }
+                Winning::No if d.rejected.is_none() => {
+                    d.rejected = Some(match &d.entry.measured {
+                        None => "not measured by pass 3 (it was not among the candidates it built)".to_string(),
+                        Some(_) => "not in the set pass 3 measured as the winner".to_string(),
+                    });
+                }
+                Winning::No => {}
             }
         }
     }
@@ -809,6 +945,15 @@ pub(crate) fn index_excluding(python: &OsStr, pkg: &Path, excludes: &[String]) -
     Ok(functions)
 }
 
+/// `python`'s version (`platform.python_version()`).
+pub(crate) fn python_version(python: &OsStr) -> Result<String, String> {
+    let output = std::process::Command::new(python)
+        .args(["-I", "-c", "import platform; print(platform.python_version())"])
+        .output()
+        .map_err(|e| format!("cannot run {}: {e}", python.to_string_lossy()))?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn index_all(python: &OsStr, pkg: &Path) -> Result<Vec<Function>, String> {
     let scratch = pycc_scratch::ScratchDir::new("profile").map_err(|e| e.to_string())?;
     let script = scratch.join("driver.py");
@@ -841,11 +986,22 @@ pub(crate) fn check_profile(
     };
     let profile = Profile::read(profile_path)?;
     let sources = index_excluding(python, pkg, excludes)?;
-    let (current, notes) = profile.current(&sources);
+    let (current, notes) = profile.current(&sources, None);
     for note in &notes {
         eprintln!("{note}");
     }
-    let decided: Vec<Candidate> = current.iter().map(|(e, f)| f.candidate(e)).collect();
+    let version = python_version(python)?;
+    let valid = profile.winner_valid(&Scope {
+        sources: &sources,
+        python: &version,
+        excludes: Some(excludes),
+        module: None,
+    });
+    if let Err(why) = &valid {
+        println!("invalid: pass 3's winning set is not valid ({why}): profile again to measure it");
+    }
+    let mut decided: Vec<Candidate> = current.iter().map(|(e, f)| f.candidate(e)).collect();
+    profile.mark(&mut decided, &valid);
     for d in select(profile.total_ns, &decided, profile.rule(rule)) {
         let e = d.entry;
         match &d.rejected {
@@ -925,15 +1081,29 @@ pub(crate) fn run_profile(
             })
         })
         .collect();
+    let version = python_version(python)?;
     // A function an earlier profile in `out` measured keeps its verdict while
-    // its source is unchanged (pass 3).
+    // its source is unchanged (pass 3), and while the winning set that
+    // profile measured is still valid under this run's interpreter and
+    // `--exclude`: else every function is measured again.
+    let scope = Scope {
+        sources: &sources,
+        python: &version,
+        excludes: Some(excludes),
+        module: None,
+    };
     if let Ok(old) = Profile::read(out) {
-        let mut carried = Profile {
-            functions: std::mem::take(&mut functions),
-            ..old.clone()
-        };
-        verify::carry_verdicts(&mut carried, &old);
-        functions = carried.functions;
+        match old.winner_valid(&scope) {
+            Ok(()) => {
+                let mut carried = Profile {
+                    functions: std::mem::take(&mut functions),
+                    ..old.clone()
+                };
+                verify::carry_verdicts(&mut carried, &old);
+                functions = carried.functions;
+            }
+            Err(why) => eprintln!("pycc profile: the earlier profile's verdicts are not kept: its winning set is not valid ({why})"),
+        }
     }
     // Every entry has its function: `functions` holds only those `by_key` has.
     fn candidate<'p>(by_key: &BTreeMap<(&str, &str, u32), &Function>, e: &'p Entry) -> Candidate<'p> {
@@ -969,13 +1139,9 @@ pub(crate) fn run_profile(
             }
         }
     }
-    let version = std::process::Command::new(python)
-        .args(["-I", "-c", "import platform; print(platform.python_version())"])
-        .output()
-        .map_err(|e| e.to_string())?;
     let mut profile = Profile {
         version: VERSION,
-        python: String::from_utf8_lossy(&version.stdout).trim().to_string(),
+        python: version.clone(),
         workload: rest
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -986,6 +1152,7 @@ pub(crate) fn run_profile(
         functions,
         sampled: !candidates.is_empty(),
         verified: false,
+        winner: None,
     };
     // Pass 2's samples can reject a candidate (and with it its callers),
     // never admit one it did not sample; pass 3 keeps only the measured
@@ -1010,6 +1177,7 @@ pub(crate) fn run_profile(
             .collect();
         let cx = verify::Context {
             driver: &driver,
+            excludes,
             workload: rest,
             scratch: &scratch,
             options,
@@ -1018,7 +1186,9 @@ pub(crate) fn run_profile(
     }
     std::fs::write(out, profile.to_json())
         .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
-    let decided: Vec<Candidate> = profile.functions.iter().map(|e| candidate(&by_key, e)).collect();
+    let valid = profile.winner_valid(&scope);
+    let mut decided: Vec<Candidate> = profile.functions.iter().map(|e| candidate(&by_key, e)).collect();
+    profile.mark(&mut decided, &valid);
     let selected = select(total_ns, &decided, profile.rule(rule))
         .iter()
         .filter(|d| d.rejected.is_none())

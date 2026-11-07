@@ -200,8 +200,15 @@ function, its calls to Python functions by callee (section 2.2), and the rule
 5. **Pass 3's evidence**, once pass 3 has run: the set pass 3 measured as the winner is
    the selection, member for member. Steps 2 to 4 chose the candidates pass 3 measured
    and are not applied to its result again, so a build compiles exactly the set that was
-   timed. A winning set with a member that changed or is gone selects nothing until the
-   package is profiled again.
+   timed. The profile records the set's key (`winner`): each member with the source hash
+   it was measured with, the `--exclude` list and the interpreter's version. The set is
+   valid only while all of them hold, checked against the whole package's sources
+   whichever module a build compiles: a build of one module compiles that module's share
+   of it, so the builds of every module together compile exactly the measured set. A
+   member that changed, is gone or is now excluded, a different `--exclude` list, or
+   another interpreter version makes the set invalid: it selects nothing (an exclusion
+   never yields to an old verdict), `--check` reports it, and the next profile measures
+   from scratch.
 
 Steps 2 to 4 repeat until no function changes. A rejection names the first step the
 function failed: a function its region or its crossings reject says so in a verified
@@ -235,8 +242,8 @@ and won: the winner with the lowest median, the smaller on a tie, never a union 
 measured apart. When the regions together cannot be built within the budget, or lose,
 the best single winner is kept (a region, a core, or nothing). A function the winner
 leaves out of a set it was measured in is rejected ("faster without it",
-`measured.without`). A later profile keeps an earlier winning set that is still whole
-(no member changed) inside every set it measures, so its selection is again one set
+`measured.without`). A later profile keeps an earlier winning set that is still valid
+(step 5) inside every set it measures, so its selection is again one set
 measured as a whole. The copy is the project root: the nearest directory at or above the
 package's import root with a `pyproject.toml`, `setup.cfg` or `setup.py`, searched up to
 the first `site-packages` or `dist-packages`, so the workload's tests and data are found
