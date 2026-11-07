@@ -256,3 +256,17 @@ fn synthesized_statements_have_the_expected_shape() {
         matches!(assign.value.as_ref(), Expr::StringLiteral(s) if s.value.to_str() == "pkg.sub")
     );
 }
+
+#[test]
+fn a_walrus_in_a_comprehension_binds_in_the_containing_scope() {
+    let module = parse(
+        "[y for x in xs if (y := x)]\n\
+         {k: (v := k) for k in [w for w in ks if (u := w)]}\n\
+         [(lambda: (z := 1)) for t in ts]\n\
+         [s for s in ss]\n",
+    );
+    let bound: Vec<String> = bound_names(&module.body).into_iter().collect();
+    // The walruses' targets, nested comprehensions included; not a
+    // comprehension's own targets, nor a walrus inside a lambda.
+    assert_eq!(bound, ["u", "v", "y"]);
+}
