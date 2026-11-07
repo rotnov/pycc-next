@@ -78,7 +78,7 @@ fn compiled_and_fallback_code_match_cpython_in_a_native_build() {
     let dir = ScratchDir::new("fallback_native").expect("scratch");
     let source = fixture(&dir, "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "all", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -106,7 +106,14 @@ fn compiled_and_fallback_code_match_cpython_in_an_ext_module() {
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
-    assert_report(&text(&pycc_scratch::lf(&build.stderr)));
+    let report = text(&pycc_scratch::lf(&build.stderr));
+    // `--select all`: what pycc cannot compile is not compiled, the rest is.
+    for name in ["boom", "bump", "describe"] {
+        assert!(report.contains(&format!("not compiled: fbm:{name}: ")), "{name}:\n{report}");
+    }
+    for name in ["scale", "fails", "guarded"] {
+        assert!(report.contains(&format!("compiled: fbm:{name}\n")), "{name}:\n{report}");
+    }
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("fallback_ext_src").expect("scratch");
     fixture(&plain, "fbm.py");
@@ -137,7 +144,7 @@ fn a_function_the_boundary_cannot_publish_falls_back() {
     .expect("write");
     let input = "1\n2\n3 4\n";
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "all", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -177,7 +184,7 @@ fn a_module_level_fallback_block_shares_globals_with_compiled_code() {
     )
     .expect("write");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "all", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))

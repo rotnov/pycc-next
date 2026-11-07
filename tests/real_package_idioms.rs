@@ -106,7 +106,8 @@ fn non_strict_rebinding_matches_cpython() {
 
 /// Builds `typed_pkg`'s `_core`, `_types` and `__init__` in place under
 /// `<dir>/ext`, next to an untouched copy under `<dir>/src`; returns the
-/// build reports.
+/// build reports. The sources stay: a module with no selected function
+/// gets no extension, and CPython imports its source.
 fn build_typed_pkg(dir: &Path) -> String {
     let (ext, src) = (dir.join("ext"), dir.join("src"));
     copy_tree(&fixture("typed_pkg"), &ext);
@@ -122,9 +123,6 @@ fn build_typed_pkg(dir: &Path) -> String {
         report.push_str(&text(&pycc_scratch::lf(&build.stderr)));
         assert!(build.status.success(), "{module}: {report}");
     }
-    for module in ["_core", "_types", "__init__"] {
-        std::fs::remove_file(ext.join("pkg").join(format!("{module}.py"))).expect("rm");
-    }
     report
 }
 
@@ -133,28 +131,19 @@ fn build_typed_pkg(dir: &Path) -> String {
 fn a_typed_package_builds_unchanged_and_matches_cpython() {
     let dir = ScratchDir::new("real_package_idioms_typed_pkg").expect("scratch");
     let report = build_typed_pkg(&dir);
-    // The parser's functions all compile: none falls back.
+    // The parser's functions all compile.
     for function in [
         "skip_chars",
+        "skip_until",
         "parse_key",
         "parse_string",
         "parse_value",
         "loads",
         "describe",
-        "Table",
+        "Table.__init__",
     ] {
-        // (An `__init__` re-export that names one runs in CPython anyway.)
-        assert!(
-            !report.lines().any(|line| {
-                (line.starts_with("fallback: function") || line.starts_with("fallback: class"))
-                    && line.contains(&format!("`{function}`"))
-            }),
-            "{function}\n{report}"
-        );
+        assert!(report.contains(&format!("compiled: pkg._core:{function}\n")), "{function}\n{report}");
     }
-    // A function whose signature the boundary cannot carry is compiled for
-    // the module's own callers and runs in CPython for Python's.
-    assert!(report.contains("twin: function `skip_until`"), "{report}");
     let run = |side: &str| {
         Command::new(python())
             .arg("driver.py")

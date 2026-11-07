@@ -1,8 +1,8 @@
 //! Non-strict `--ext`: a CPython object returned from, or passed to, a
 //! compiled function as `int | None`, `float | None`, `bool | None` or
-//! `str | None` is `None` or converted to the scalar, instead of the function
-//! falling back; any other object is a `TypeError`
-//! (`docs/DEVIATIONS.md`). The oracle is CPython running the fixture.
+//! `str | None` passes as in CPython: the functions compile, and an object
+//! of another type is returned unchecked, as CPython does not enforce the
+//! annotation. The oracle is CPython running the fixture.
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -32,7 +32,7 @@ fn an_object_reaches_an_optional_scalar_slot() {
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     for name in ["lookup", "name_of", "ratio", "flag", "via"] {
-        assert!(!report.contains(&format!("function `{name}`")), "{report}");
+        assert!(report.contains(&format!("compiled: optional_coerced:{name}\n")), "{report}");
     }
     let oracle = python()
         .arg(&source)
@@ -42,8 +42,8 @@ fn an_object_reaches_an_optional_scalar_slot() {
     let ours = python()
         .args([
             "-c",
-            "import optional_coerced\noptional_coerced.main()\ntry:\n    \
-             optional_coerced.lookup({'k': 'v'}, 'k')\nexcept TypeError as e:\n    print(e)\n",
+            "import optional_coerced\noptional_coerced.main()\n\
+             print(optional_coerced.lookup({'k': 'v'}, 'k'))\n",
         ])
         .current_dir(&*dir)
         .output()
@@ -51,7 +51,7 @@ fn an_object_reaches_an_optional_scalar_slot() {
     assert_eq!(
         text(&pycc_scratch::lf(&ours.stdout)),
         format!(
-            "{}return value must be int, not str\n",
+            "{}v\n",
             text(&pycc_scratch::lf(&oracle.stdout))
         ),
         "{}",

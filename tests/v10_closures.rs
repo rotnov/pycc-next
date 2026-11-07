@@ -133,7 +133,7 @@ fn output_matches(name: &str) {
     let dir = ScratchDir::new(name).expect("scratch");
     let source = fixture(name, &dir, "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "all"])
+        .args(["build", "--non-strict"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))

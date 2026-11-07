@@ -136,7 +136,7 @@ fn issue_8_without_fallback_code_every_class_stays_native() {
          return self.v\n\n\nprint(Loose(3).get())\n",
     )
     .unwrap();
-    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "all"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict"]);
     assert!(!report.contains("fallback:"), "{report}");
     let ours = Command::new(dir.join("app")).output().expect("run the build");
     assert_eq!(text(&ours.stdout), "3\n", "{}", text(&ours.stderr));

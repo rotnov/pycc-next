@@ -98,7 +98,7 @@ fn reaching_globals_by_a_string_keeps_a_project_import_compiled() {
     let dir = ScratchDir::new("issue_20_project").expect("scratch");
     let source = fixture("issue_20_project_main", &dir, "main.py");
     fixture("issue_20_project_helper", &dir, "helper.py");
-    let report = build(&source, &dir.join("app"), &["--non-strict", "--select", "all"]);
+    let report = build(&source, &dir.join("app"), &["--non-strict"]);
     // Only the report's own lines: the build may also print linker
     // warnings (macOS `ld`).
     let fallbacks = report

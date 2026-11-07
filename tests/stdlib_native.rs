@@ -63,7 +63,7 @@ fn assert_matches_cpython(name: &str) {
         .output()
         .expect("python3 spawns");
     let dir = ScratchDir::new(name).expect("scratch");
-    for (mode, flags) in [("strict", &[][..]), ("non-strict", &["--non-strict", "--select", "all"][..])] {
+    for (mode, flags) in [("strict", &[][..]), ("non-strict", &["--non-strict"][..])] {
         let binary = dir.join(format!("app-{mode}"));
         let mut args: Vec<&std::ffi::OsStr> = vec![
             "build".as_ref(),

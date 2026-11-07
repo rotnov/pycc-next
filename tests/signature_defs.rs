@@ -1,12 +1,9 @@
-//! An `--ext` module's published signature wrapper (#1194,
-//! `src/ext_build/signatures.rs`): importing the module runs each wrapper's
-//! factory `_pycc_make` from the code the build compiled, and everything
-//! Python sees of the wrapper is the source's: name, qualified name, module,
-//! defaults, keyword defaults (a dict of its own per function), the
+//! A non-strict `--ext` module's patched functions (`--select all`): the
+//! function objects are CPython's, so everything Python sees of them is the
+//! source's: name, qualified name, module, defaults, keyword defaults, the
 //! parameters `inspect` reads, the arguments bound and the `TypeError` of a
 //! call that cannot bind, and the traceback of an exception the compiled
-//! body raises. (What the wrappers leave out, their annotations among it, is
-//! in `docs/DEVIATIONS.md`.)
+//! body raises; no factory or wrapper runs at import.
 //!
 //! The oracle is `python3` (or `PYCC_PYTHON`) importing the source itself.
 
@@ -114,11 +111,8 @@ except ZeroDivisionError as e:
 "#;
 
 /// A module whose `object` rebinds the module's `tuple` when it is called:
-/// a wrapper's factory calls it for its `_pycc_missing=object()` default
-/// before it reads `tuple` for `_pycc_tuple=tuple`, so the wrapper of
-/// `tags` (which passes its `**extra` through `_pycc_tuple`) sees the
-/// rebound `tuple`, made directly or not. CPython never calls it; the
-/// calls bind the same either way.
+/// nothing the build adds calls it, as CPython never does, and the calls
+/// bind the same.
 const SHADOWED: &str = r#"import builtins
 
 used = []
@@ -158,9 +152,9 @@ fn import(dir: &Path, driver: &str) -> Output {
 }
 
 /// Builds the module as an `--ext` module, imports it and the source, and
-/// checks the same stdout; returns the first line the compiled side's
-/// `driver` writes to stderr.
-fn check(label: &str, module: &str, driver: &str) -> String {
+/// checks the same stdout and the same first line `driver` writes to
+/// stderr.
+fn check(label: &str, module: &str, driver: &str) {
     let compiled = ScratchDir::new(label).expect("scratch");
     let path = compiled.join("m.py");
     std::fs::write(&path, module).expect("write the module");
@@ -179,17 +173,16 @@ fn check(label: &str, module: &str, driver: &str) -> String {
     assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
     assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
     assert_eq!(oracle.status.code(), Some(0), "{}", text(&oracle.stderr));
-    text(&ours.stderr).lines().next().unwrap_or_default().to_string()
+    let first = |out: &Output| text(&out.stderr).lines().next().unwrap_or_default().to_string();
+    assert_eq!(first(&ours), first(&oracle));
 }
 
 #[test]
-fn every_wrapper_runs_its_factory_and_behaves_as_the_source() {
-    // One factory per published wrapper: the seven functions and two
-    // methods the driver reads.
-    assert_eq!(check("signature_defs", MODULE, DRIVER), "factories run at import: 9");
+fn every_patched_function_behaves_as_the_source() {
+    check("signature_defs", MODULE, DRIVER);
 }
 
 #[test]
 fn a_shadowed_object_is_called_before_the_later_defaults_are_read() {
-    assert_eq!(check("signature_defs_object", SHADOWED, SHADOWED_DRIVER), "rebound tuple used: True");
+    check("signature_defs_object", SHADOWED, SHADOWED_DRIVER);
 }

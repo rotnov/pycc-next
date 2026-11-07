@@ -19,11 +19,14 @@ class MyInt(int):
     pass
 
 
-def index(seq: Any, i: int) -> Any:
-    try:
-        return seq[i]
-    except IndexError as exc:
-        return ("IndexError", str(exc))
+def indexes(seq: Any) -> Any:
+    out = []
+    for i in (0, 1, 2, 3, -1, -3, -4):
+        try:
+            out.append(seq[i])
+        except IndexError as exc:
+            out.append(("IndexError", str(exc)))
+    return out
 
 
 def kinds(v: Any) -> Any:
@@ -46,7 +49,7 @@ def library(v: Any) -> Any:
 
 def main() -> None:
     for seq in [(1, 2, 3), [1, 2, 3], (), [], MyList([5, 6])]:
-        print([index(seq, i) for i in [0, 1, 2, 3, -1, -3, -4]])
+        print(indexes(seq))
     for v in [0, 1, True, False, MyInt(3), "s", 1.5, [1], {"a": 1}, (1,), {1}, frozenset(), None, b"x"]:
         print(type(v).__name__, kinds(v))
     for v in [[3, 1, 2], (5, 4), [], [2.5, 1.0]]:

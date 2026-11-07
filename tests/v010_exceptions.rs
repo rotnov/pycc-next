@@ -234,12 +234,8 @@ fn build_package(dir: &str, package: &str, flags: &[&str]) -> (String, ScratchDi
         .expect("pycc should spawn");
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
-    for entry in std::fs::read_dir(&tree).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.extension().is_some_and(|ext| ext == "py") {
-            std::fs::remove_file(&path).expect("remove a source");
-        }
-    }
+    // The sources stay: CPython imports a module with no selected function
+    // from its source.
     (report, built)
 }
 

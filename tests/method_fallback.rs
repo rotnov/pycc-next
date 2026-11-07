@@ -45,9 +45,22 @@ fn assert_matches(ours: &Output, oracle: &Output) {
 }
 
 /// What runs in CPython, from `--report-fallbacks`: only the methods using
-/// what pycc cannot compile, never a whole class's methods. In an `--ext`
-/// module `Bag` stays a compiled class, its failing method attached to it.
+/// what pycc cannot compile, never a whole class's methods. An `--ext`
+/// module (`--select all`) compiles every other function and method, its
+/// classes CPython's.
 fn assert_report(report: &str, ext: bool) {
+    if ext {
+        for method in ["Bag.ranked", "Rich.ordered"] {
+            assert!(report.contains(&format!("not compiled: m:{method}: ")), "{method} should not compile:\n{report}");
+        }
+        for method in [
+            "Bag.total", "Bag.add", "Bag.tagged", "Bag.checked", "Rich.total", "Rich.add",
+            "Rich.secret", "Rich.size", "Rich.of", "Rich.describe", "Labeled.total", "summed",
+        ] {
+            assert!(report.contains(&format!("compiled: m:{method}\n")), "{method} should compile:\n{report}");
+        }
+        return;
+    }
     for method in ["Bag.ranked", "Rich.ordered"] {
         assert!(
             report.contains(&format!("fallback: method `{method}` at ")),
@@ -63,19 +76,14 @@ fn assert_report(report: &str, ext: bool) {
             "{method} should compile:\n{report}"
         );
     }
-    if ext {
-        assert!(!report.contains("class `Bag`"), "{report}");
-        assert!(report.contains("the method attached to it"), "{report}");
-        assert!(!report.contains("method `Rich.evens`"), "{report}");
-    }
     assert!(report.contains("lifted: function `summed`"), "{report}");
 }
 
 fn build(source: &Path, out: &Path, ext: bool) -> String {
     let mut command = pycc();
-    command.args(["build", "--non-strict", "--select", "all", "--report-fallbacks"]);
+    command.args(["build", "--non-strict", "--report-fallbacks"]);
     if ext {
-        command.arg("--ext");
+        command.args(["--ext", "--select", "all"]);
     }
     let build = command
         .arg(source)
@@ -110,7 +118,10 @@ fn only_the_failing_methods_run_in_cpython_in_an_ext_module() {
     fixture(&plain, "m.py");
     let run = |dir: &Path| {
         python()
-            .args(["-c", "import m\nm.r.add(1000)"])
+            // `summed` (decorated) and `in_block` (bound in a block) are
+            // selected but not where the patch looks, so they run as
+            // bytecode and the import warns (compile-little.md, section 2.4).
+            .args(["-W", "ignore::RuntimeWarning", "-c", "import m\nm.r.add(1000)"])
             .current_dir(dir)
             .output()
             .expect("python should spawn")
@@ -151,7 +162,10 @@ fn python_code_subclasses_a_class_with_compiled_methods() {
     fixture(&plain, "m.py");
     let run = |dir: &Path| {
         python()
-            .args(["-c", SUBCLASS])
+            // `summed` (decorated) and `in_block` (bound in a block) are
+            // selected but not where the patch looks, so they run as
+            // bytecode and the import warns (compile-little.md, section 2.4).
+            .args(["-W", "ignore::RuntimeWarning", "-c", SUBCLASS])
             .current_dir(dir)
             .output()
             .expect("python should spawn")
@@ -177,7 +191,7 @@ fn lifted_methods_run_in_constant_memory() {
              a = Acc()\nfor i in range({n}):\n    a.add(i)\nprint(a.total, a.keyed())\n"
         );
         let name = format!("acc_{n}");
-        let bin = memory_support::build_with(&dir, &name, &source, &["--non-strict", "--select", "all"]);
+        let bin = memory_support::build_with(&dir, &name, &source, &["--non-strict"]);
         let (out, peak) = memory_support::run_measured(&bin);
         assert_eq!(
             text(&out),

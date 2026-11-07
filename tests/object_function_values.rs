@@ -29,7 +29,7 @@ fn function_values_and_constant_displays_match_cpython() {
     let native = run_native(
         "object_function_values",
         &source,
-        &["--release", "--non-strict", "--select", "all"],
+        &["--release", "--non-strict"],
     );
     assert_eq!(native, expected, "--non-strict");
     let dir = ScratchDir::new("object_function_values_ext").expect("scratch");

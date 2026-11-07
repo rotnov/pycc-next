@@ -51,8 +51,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   before (`--select module`) is gone: the tests build with `--select all`, CI's package
   checks with a profile of each package's own suite (`--instructions` with `--select
   all`, whose counts do not depend on pass 3's timings). The export twins and the
-  `--ext` branches of the fallback loop that only it used are deleted. The selection rule also leaves out a function that catches an
-  exception in half of its calls or more (`--select-handled`; `pycc profile` records
+  `--ext` branches of the fallback loop that only it used are deleted. The guessed
+  specializations of unannotated functions, which only it produced, are no longer made
+  (their `DEVIATIONS` row is gone; their code is section 7 item 19); a `range()` argument beyond 2**61 in a selected function raises the compiled
+  range's own `OverflowError` message. The selection rule also leaves out a function that
+  catches an exception in half of its calls or more (`--select-handled`; `pycc profile` records
   `handled`). **Only measured winners are selected**: `pycc profile` now builds the
   rule's candidates and times the workload with them compiled against the sources
   (pass 3; `--verify-rounds`, `--no-verify`, `--verify-instructions`), records the

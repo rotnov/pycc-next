@@ -43,7 +43,7 @@ fn proven_smallint_locals_match_cpython_in_every_mode() {
     for (mode, flags) in [
         ("debug", &[][..]),
         ("strict", &["--release"][..]),
-        ("non-strict", &["--release", "--non-strict", "--select", "all"][..]),
+        ("non-strict", &["--release", "--non-strict"][..]),
     ] {
         let binary = dir.join(format!("app-{mode}"));
         let build = pycc()
@@ -145,9 +145,11 @@ fn an_ext_module_called_with_other_types_matches_cpython() {
     for flags in [&["--release"][..], &["--release", "--non-strict", "--select", "all"][..]] {
         let dir = ScratchDir::new("int_ranges_ext").expect("scratch");
         ext_and_source(&dir, flags);
+        let non_strict = if flags.contains(&"--non-strict") { "1" } else { "0" };
         let run = |d: &str| {
             Command::new(python())
                 .arg("d.py")
+                .env("INT_RANGES_NON_STRICT", non_strict)
                 .current_dir(dir.join(d))
                 .output()
                 .expect("python3 runs")

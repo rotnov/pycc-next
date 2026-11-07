@@ -282,8 +282,8 @@ mod peak_rss {
 
     #[test]
     fn tuple_operations_do_not_grow_with_the_trip_count() {
-        let small = probe(20_000, &["--non-strict", "--select", "all"]);
-        let large = probe(220_000, &["--non-strict", "--select", "all"]);
+        let small = probe(20_000, &["--non-strict"]);
+        let large = probe(220_000, &["--non-strict"]);
         assert!(
             large - small < GROWTH_LIMIT_KB,
             "peak grew {} kB from 20 000 to 220 000 iterations ({small} -> {large})",

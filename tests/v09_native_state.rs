@@ -188,9 +188,9 @@ fn closure_values_ext_release() {
     ext("v09_closure_values", &["--release"]);
 }
 
-/// Raising a compiled exception class with a CPython object argument
-/// (`raise MissingError(name)`) is built by CPython, which keeps the object
-/// in `args`: the function raising it runs in CPython (it failed codegen).
+/// Raising a module's exception class with a CPython object argument
+/// (`raise MissingError(name)`) from a compiled function keeps the object in
+/// `args`, and the compiled caller catches it, as in CPython.
 #[test]
 fn raise_of_a_compiled_exception_with_an_object_argument_ext() {
     let compiled = ScratchDir::new("v09_raise_object_ext").expect("scratch");
@@ -204,10 +204,9 @@ fn raise_of_a_compiled_exception_with_an_object_argument_ext() {
         .expect("pycc should spawn");
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    assert!(
-        report.contains("raising `MissingError` with a CPython object argument"),
-        "{report}"
-    );
+    for name in ["lookup", "safe"] {
+        assert!(report.contains(&format!("compiled: m:{name}\n")), "{name}\n{report}");
+    }
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("v09_raise_object_src").expect("scratch");
     fixture("v09_raise_object", &plain, "m.py");

@@ -48,10 +48,7 @@ fn a_type_variable_is_made_once() {
         .expect("pycc should spawn");
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
-    assert!(
-        report.contains("`TypeVar` runs in CPython, so the type variable is made there"),
-        "{report}"
-    );
+    assert!(report.contains("compiled: api:first\n"), "{report}");
     std::fs::remove_file(compiled.join("api.py")).expect("import the artifact, not the source");
     let plain = ScratchDir::new("v011_type_vars_src").expect("scratch");
     fixtures(&plain);

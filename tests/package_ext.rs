@@ -92,9 +92,9 @@ fn build_package(dir: &Path) -> String {
         );
         report.push_str(&text(&pycc_scratch::lf(&build.stderr)));
     }
-    for module in MODULES {
-        std::fs::remove_file(package.join(format!("{module}.py"))).expect("remove a source");
-    }
+    // A module with no function to compile gets no extension: CPython
+    // imports its source, which stays.
+    std::fs::remove_file(package.join("core.py")).expect("remove a source");
     report
 }
 
@@ -106,17 +106,12 @@ fn a_package_built_module_by_module_matches_cpython() {
     copy_package(&built);
     copy_package(&plain);
     let report = build_package(&built);
-    // Every function and class compiles; only `__init__`'s re-exporting
-    // imports run in CPython too, as the CPython imports they are.
-    assert!(!report.contains("fallback: function"), "{report}");
-    assert!(!report.contains("fallback: class"), "{report}");
+    // Every function compiles (`--select all`); `__init__` and `version`
+    // define none, so they stay sources CPython imports.
+    assert!(!report.contains("not compiled:"), "{report}");
     for module in MODULES {
         let artifact = built.join("textkit").join(format!("{module}.abi3.so"));
-        assert!(
-            artifact.exists() || cfg!(windows),
-            "{} is missing",
-            artifact.display()
-        );
+        assert_eq!(artifact.exists(), module == "core" && !cfg!(windows), "{}", artifact.display());
     }
     let ours = run_driver(&built);
     let theirs = run_driver(&plain);

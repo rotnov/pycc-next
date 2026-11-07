@@ -247,8 +247,9 @@ fn class_of_self_and_declarations_ext() {
 /// A package built one extension per module (`--foreign-relative-imports`):
 /// a container attribute of a compiled class that another module of the
 /// package uses is a CPython object both modules share (an `append` or a
-/// store in one is seen by the other, as in CPython), while the class stays
-/// a native type with compiled methods.
+/// store in one is seen by the other, as in CPython). The class is the one
+/// CPython creates, with its methods' bodies compiled, so `S.put` is a
+/// plain function, as in CPython.
 #[test]
 fn container_attributes_another_module_uses_are_shared() {
     let dir = ScratchDir::new("v08_external_reads").expect("scratch");
@@ -297,6 +298,6 @@ fn container_attributes_another_module_uses_are_shared() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    let expected = text(&pycc_scratch::lf(&oracle.stdout)).replace("\nfunction\n", "\nmethod_descriptor\n");
+    let expected = text(&pycc_scratch::lf(&oracle.stdout));
     assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), expected, "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }

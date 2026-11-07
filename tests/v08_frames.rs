@@ -94,7 +94,7 @@ fn an_embedded_programs_traceback_matches_cpython() {
     .unwrap();
     let build = pycc()
         .current_dir(&*dir)
-        .args(["build", "--non-strict", "--select", "all", "app.py", "-o"])
+        .args(["build", "--non-strict", "app.py", "-o"])
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");

@@ -112,9 +112,8 @@ fn a_lazy_import_fallback_code_binds_is_resolved_when_compiled_code_reads_it() {
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&build.stderr));
-    for source in ["pkg/__init__.py", "pkg/_re.py"] {
-        std::fs::remove_file(compiled.join(source)).expect("import the artifact, not the source");
-    }
+    // `pkg/_re.py` has no selected function: CPython imports its source.
+    std::fs::remove_file(compiled.join("pkg/__init__.py")).expect("import the artifact, not the source");
     let plain = ScratchDir::new("fallback_lazy_import_src").expect("scratch");
     write(&plain);
     let driver = "import pkg\nprint(pkg.first('abc1'), pkg.first('1'), pkg.KIND)\n";

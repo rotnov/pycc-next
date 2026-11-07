@@ -1,10 +1,9 @@
 //! An exception class with a constructor of its own (`class MissingRef(
 //! Exception)` with an `__init__` keeping a field) in a non-strict `--ext`
-//! module: pycc raises a compiled exception by its type and message only,
-//! so the class runs in CPython, and the functions raising and catching it
-//! stay compiled (`src/fallback.rs`'s `exception_with_constructor`), as
-//! does `isinstance` of a caught exception against a builtin exception
-//! class. The oracle is CPython running the fixture.
+//! module: the functions raising and catching it, and its constructor, are
+//! compiled (`--select all`) and give CPython's results, as does
+//! `isinstance` of a caught exception against a builtin exception class.
+//! The oracle is CPython running the fixture.
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -34,13 +33,8 @@ fn functions_raising_an_exception_class_with_a_constructor_stay_compiled() {
         .expect("pycc should spawn");
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    assert!(
-        report.contains("class `MissingRef` at ")
-            && report.contains("an exception class with a constructor of its own"),
-        "{report}"
-    );
-    for function in ["find", "lookup_len", "kinds", "main"] {
-        assert!(!report.contains(&format!("function `{function}`")), "{report}");
+    for function in ["MissingRef.__init__", "find", "lookup_len", "kinds", "main"] {
+        assert!(report.contains(&format!("compiled: excmod:{function}\n")), "{report}");
     }
     let oracle = python()
         .arg(&source)

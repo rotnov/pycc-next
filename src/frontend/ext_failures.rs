@@ -49,12 +49,11 @@ pub(super) fn export_gaps_as_failures(
     };
     // An embedded build publishes no inferred function: fallback code that
     // calls one makes it fall back instead (`crate::fallback`).
-    let inferred = if ext_module {
+    let excluded = if ext_module {
         std::collections::BTreeSet::new()
     } else {
         crate::fallback::inferred_functions(&source)
     };
-    let excluded = inferred;
     if ext_module && let Some(refusals) = unattachable_methods(typed) {
         let (diagnostics, origins) = refusals.into_iter().unzip();
         return Err(FrontendFailure::Compile {

@@ -5,8 +5,8 @@
 //! `except` clauses naming a CPython object, an object tested against a
 //! tuple of scalars, a standard-library function called with an object, a
 //! builtin exception class as a value and builtin calls inside generators.
-//! Built `--ext --non-strict`, the functions holding them compile
-//! (`--report-fallbacks` lists none of them) and, called from CPython with
+//! Built `--ext --non-strict --select all`, the functions holding them
+//! compile (`--report-fallbacks` reports each `compiled:`) and, called from CPython with
 //! the arguments they expect and with others, print what CPython prints
 //! for the source; repeated calls leak nothing. Built as a non-strict
 //! program, the fixture prints what CPython prints; strict mode keeps
@@ -39,7 +39,7 @@ fn run_python(dir: &Path, script: &str) -> Output {
         .expect("python")
 }
 
-/// The functions of the fixture that must compile (not fall back).
+/// The functions of the fixture that must compile.
 const COMPILED: &[&str] = &[
     "tag",
     "literals",
@@ -53,9 +53,10 @@ const COMPILED: &[&str] = &[
     "filter_kind",
     "row_count",
     "warn_if",
-    "decompress",
     "pick",
     "apply",
+    "Decoder.parse",
+    "Decoder.rows",
 ];
 
 /// Builds the fixture `untyped_classes.py` as the extension `m` in
@@ -96,12 +97,8 @@ fn untyped_constructs_compile_with_cpython_results() {
         let dir = ScratchDir::new("untyped_classes").expect("scratch");
         let report = build(&dir, "untyped_classes_driver.py", flags);
         for name in COMPILED {
-            assert!(
-                !report.contains(&format!("fallback: function `{name}`")),
-                "{name}\n{report}"
-            );
+            assert!(report.contains(&format!("compiled: m:{name}\n")), "{name}\n{report}");
         }
-        assert!(!report.contains("fallback: class `Decoder`"), "{report}");
         let ours = run_python(&dir.join("ext"), "d.py");
         let oracle = run_python(&dir.join("src"), "d.py");
         assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
@@ -122,19 +119,15 @@ fn untyped_constructs_leak_nothing() {
 
 /// `tests/fixtures/untyped_readers.py`: a binary format reader's shapes
 /// (handlers looked up by name, generator methods, byte buffers, `None`
-/// defaults, an attribute snapshot in a specialization) compile with no
-/// fallback, and compare with CPython from a driver passing other types.
+/// defaults, an attribute read in a loop) compile, and compare with CPython from a driver passing other types.
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle and Python.h (PYCC_PYTHON, default python3)"]
 fn a_reader_compiles_with_cpython_results() {
     for flags in [&[][..], &["--release"][..]] {
         let dir = ScratchDir::new("untyped_readers").expect("scratch");
         let report = build_module(&dir, "untyped_readers.py", "untyped_readers_driver.py", flags);
-        assert!(!report.contains("fallback:"), "{report}");
-        assert!(
-            report.contains("`Reader._values` runs natively when called with bs: bytearray, self.depth: int"),
-            "{report}"
-        );
+        assert!(!report.contains("not compiled:"), "{report}");
+        assert!(report.contains("compiled: m:Reader._values\n"), "{report}");
         let ours = run_python(&dir.join("ext"), "d.py");
         let oracle = run_python(&dir.join("src"), "d.py");
         assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
@@ -166,7 +159,7 @@ fn run_as_program(module: &str) {
     let source = dir.join("prog.py");
     std::fs::copy(fixture(module), &source).expect("source");
     let out = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--non-strict", "--select", "all", "--release"])
+        .args(["build", "--non-strict", "--release"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("prog"))

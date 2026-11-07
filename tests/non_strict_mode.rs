@@ -53,7 +53,7 @@ fn untyped_program_matches_cpython_in_a_native_build() {
     let dir = ScratchDir::new("non_strict_native").expect("scratch");
     let source = copy_into(&dir, "non_strict_untyped.py", "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "all"])
+        .args(["build", "--non-strict"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
