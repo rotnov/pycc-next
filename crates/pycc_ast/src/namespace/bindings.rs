@@ -12,7 +12,8 @@ use std::collections::BTreeSet;
 
 /// The names `body` binds in the scope it runs in, without descending into
 /// nested function, lambda, class or comprehension scopes (a nested `def`
-/// or `class` binds its own name here). Names declared `global` are
+/// or `class` binds its own name here, and a walrus in a comprehension its
+/// target, PEP 572). Names declared `global` are
 /// included: from the module's point of view they are bound too.
 pub fn bound_names(body: &[Stmt]) -> BTreeSet<String> {
     let mut collector = Binder::default();
@@ -104,6 +105,26 @@ pub fn bound_anywhere(body: &[Stmt]) -> BTreeSet<String> {
     anywhere.0
 }
 
+/// Collects the targets of the walruses in a comprehension, which bind in
+/// the scope containing it: through nested comprehensions, not into a
+/// lambda (a scope whose walruses bind in it).
+struct WalrusTargets<'n>(&'n mut BTreeSet<String>);
+
+impl<'a> Visitor<'a> for WalrusTargets<'_> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Named(named) => {
+                if let Expr::Name(name) = named.target.as_ref() {
+                    self.0.insert(name.id.as_str().to_string());
+                }
+                self.visit_expr(&named.value);
+            }
+            Expr::Lambda(_) => {}
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
 /// Collects bindings of one scope.
 #[derive(Default)]
 struct Binder {
@@ -159,11 +180,16 @@ impl<'a> Visitor<'a> for Binder {
                     self.names.insert(name.id.as_str().to_string());
                 }
             }
-            Expr::Lambda(_)
-            | Expr::ListComp(_)
-            | Expr::SetComp(_)
-            | Expr::DictComp(_)
-            | Expr::Generator(_) => {}
+            Expr::Lambda(_) => {}
+            // A comprehension is a scope of its own, but a walrus in it
+            // binds in the scope that contains it (PEP 572), nested
+            // comprehensions included.
+            Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
+                if !self.opaque {
+                    let mut walrus = WalrusTargets(&mut self.names);
+                    visitor::walk_expr(&mut walrus, expr);
+                }
+            }
             _ => visitor::walk_expr(self, expr),
         }
     }
