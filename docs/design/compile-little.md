@@ -175,7 +175,7 @@ cost 0.4 ms of schema and `ConfigWrapper.__getattr__` 0.2 ms, while
 
 So selection is by call-graph region, not by single function. The profile records, per
 function, its calls to Python functions by callee (section 2.2), and the rule
-(`src/profile.rs`, `select`) decides each function by the first of these steps it fails:
+(`src/profile/select.rs`, `select`) decides each function by the first of these steps it fails:
 
 1. **The function itself**: eligible, its profile entry current, not measured slower by
    pass 3, sampled by pass 2 once pass 2 has run, and catching an exception in less than
