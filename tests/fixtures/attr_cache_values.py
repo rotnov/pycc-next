@@ -115,4 +115,5 @@ def main():
         print(line)
 
 
-main()
+if __name__ == "__main__":
+    main()

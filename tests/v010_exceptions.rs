@@ -54,7 +54,7 @@ fn run(dir: &Path, script: &str) -> Output {
 fn build(name: &str, dir: &Path, flags: &[&str]) -> String {
     let source = fixture(name, dir, "m.py");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .args(flags)
         .arg(&source)
         .arg("-o")
@@ -228,18 +228,14 @@ fn build_package(dir: &str, package: &str, flags: &[&str]) -> (String, ScratchDi
         .arg(&tree)
         .arg("-o")
         .arg(tree.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module"])
+        .args(["--ext", "--non-strict", "--select", "all"])
         .args(flags)
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
-    for entry in std::fs::read_dir(&tree).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.extension().is_some_and(|ext| ext == "py") {
-            std::fs::remove_file(&path).expect("remove a source");
-        }
-    }
+    // The sources stay: CPython imports a module with no selected function
+    // from its source.
     (report, built)
 }
 

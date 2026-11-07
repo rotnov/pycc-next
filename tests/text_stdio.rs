@@ -59,7 +59,7 @@ fn assert_streams_match(name: &str, source: &str, stdin: &[u8], env: &[(&str, Op
     let mut oracle = Command::new(python());
     oracle.arg(&path);
     let expected = observed(&run(oracle, stdin, env));
-    for (mode, flags) in [("strict", &[][..]), ("non-strict", &["--non-strict", "--select", "module"][..])] {
+    for (mode, flags) in [("strict", &[][..]), ("non-strict", &["--non-strict"][..])] {
         let binary = dir.join(format!("{name}-{mode}"));
         let build = pycc()
             .arg("build")

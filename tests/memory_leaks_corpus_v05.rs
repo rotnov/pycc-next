@@ -64,7 +64,7 @@ fn assert_constant_memory(name: &str, body: &str) {
             .arg(&source)
             .arg("-o")
             .arg(&bin)
-            .args(["--release", "--non-strict", "--select", "module", "--report-fallbacks"])
+            .args(["--release", "--non-strict", "--report-fallbacks"])
             .output()
             .expect("pycc should spawn");
         let report = pycc_scratch::lf(&*String::from_utf8_lossy(&built.stderr));

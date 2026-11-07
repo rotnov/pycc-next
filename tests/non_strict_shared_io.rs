@@ -83,7 +83,7 @@ fn native_and_fallback_io_interleave_like_cpython_in_an_embedded_build() {
     let dir = ScratchDir::new("shared_io_native").expect("scratch");
     let source = copy_fixture(&dir, "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -106,7 +106,7 @@ fn native_and_fallback_io_interleave_like_cpython_in_an_ext_module() {
     let dir = ScratchDir::new("shared_io_ext").expect("scratch");
     let source = copy_fixture(&dir, "shared_io_mod.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--ext"])
+        .args(["build", "--non-strict", "--select", "all", "--ext"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("shared_io_mod"))

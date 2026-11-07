@@ -53,7 +53,7 @@ fn untyped_program_matches_cpython_in_a_native_build() {
     let dir = ScratchDir::new("non_strict_native").expect("scratch");
     let source = copy_into(&dir, "non_strict_untyped.py", "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module"])
+        .args(["build", "--non-strict"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -93,7 +93,7 @@ fn the_same_program_is_rejected_in_strict_mode() {
 #[test]
 fn non_strict_check_accepts_the_program() {
     let output = pycc()
-        .args(["check", "--non-strict", "--select", "module"])
+        .args(["check", "--non-strict"])
         .arg(fixture("non_strict_untyped.py"))
         .output()
         .expect("pycc should spawn");
@@ -157,7 +157,7 @@ fn untyped_ext_module_matches_its_source() {
     let compiled = ScratchDir::new("non_strict_ext").expect("scratch");
     let source = copy_into(&compiled, "non_strict_ext.py", "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--ext"])
+        .args(["build", "--non-strict", "--select", "all", "--ext"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("m"))
@@ -189,7 +189,7 @@ fn an_unsupported_construct_is_a_c0001_without_the_fallback() {
     let source = dir.join("m.py");
     std::fs::write(&source, "def f(x):\n    return lambda: x\n\nprint(f(1)())\n").expect("write");
     let output = pycc()
-        .args(["check", "--non-strict", "--select", "module"])
+        .args(["check", "--non-strict"])
         .arg(&source)
         .env("PYCC_NO_FALLBACK", "1")
         .output()
@@ -201,7 +201,7 @@ fn an_unsupported_construct_is_a_c0001_without_the_fallback() {
         text(&pycc_scratch::lf(&output.stdout))
     );
     let fallback = pycc()
-        .args(["check", "--non-strict", "--select", "module"])
+        .args(["check", "--non-strict"])
         .arg(&source)
         .output()
         .expect("pycc should spawn");

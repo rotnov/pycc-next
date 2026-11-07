@@ -195,15 +195,6 @@ def compile_package(pycc: pathlib.Path, staging: pathlib.Path, package: str,
 
 
 def selects(options: ModuleOptions) -> bool:
-    """Whether a build with `options` compiles selected functions (a non-strict
-    build without `--select module`) rather than whole modules."""
-    if options.strict:
-        return False
-    args = [*options.select_args, *options.extra_args]
-    mode = "profile"
-    for i, a in enumerate(args):
-        if a == "--select" and i + 1 < len(args):
-            mode = args[i + 1]
-        elif a.startswith("--select="):
-            mode = a.split("=", 1)[1]
-    return mode != "module"
+    """Whether a build with `options` compiles selected functions (every
+    non-strict build) rather than whole modules (a strict one)."""
+    return not options.strict

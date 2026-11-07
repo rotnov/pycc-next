@@ -1,11 +1,10 @@
 //! Untyped code runs native (v0.4 accept 1).
 //!
-//! - An `--ext --non-strict` module's unannotated functions and methods get
-//!   guarded native specializations (`pycc_ast::specialize_untyped`,
-//!   `src/specialize.rs`): called from CPython with the types the guard
-//!   expects, with others (a `str` subclass, `bytes`, a `list`, `None`,
-//!   `bool`, an `int` subclass, a float), the module prints what CPython
-//!   prints for its source, and repeated calls leak nothing.
+//! - An `--ext --non-strict` module's unannotated functions and methods
+//!   compile (`--select all`): called from CPython with the types their
+//!   bodies suggest and with others (a `str` subclass, `bytes`, a `list`,
+//!   `None`, `bool`, an `int` subclass, a float), the module prints what
+//!   CPython prints for its source, and repeated calls leak nothing.
 //! - Non-strict widening is per function: a name one function rebinds with
 //!   another type stays native in every other function binding it once.
 //! - Native `str` indexing and slicing by code point, ASCII and not
@@ -61,7 +60,7 @@ fn run_python(dir: &Path, script: &str) -> Output {
 /// Builds `untyped_specialize.py` as the extension `m` in `<dir>/ext`, next
 /// to its source as `m.py` in `<dir>/src`, each with the driver files;
 /// returns the build's report.
-fn build_specialized(dir: &Path) -> String {
+fn build_untyped(dir: &Path) -> String {
     let (ext, src) = (dir.join("ext"), dir.join("src"));
     for d in [&ext, &src] {
         std::fs::create_dir_all(d).expect("dir");
@@ -72,7 +71,7 @@ fn build_specialized(dir: &Path) -> String {
     let build_src = dir.join("m.py");
     std::fs::copy(fixture("untyped_specialize.py"), &build_src).expect("source");
     let build = pycc(
-        &["--ext", "--non-strict", "--select", "module", "--report-fallbacks"],
+        &["--ext", "--non-strict", "--select", "all", "--report-fallbacks"],
         &build_src,
         &ext.join("m"),
     );
@@ -85,18 +84,10 @@ fn build_specialized(dir: &Path) -> String {
 #[ignore = "requires a CPython 3.13+ oracle and Python.h (PYCC_PYTHON, default python3)"]
 fn untyped_ext_functions_run_native_with_cpython_results() {
     let dir = ScratchDir::new("untyped_native_ext").expect("scratch");
-    let report = build_specialized(&dir);
-    assert!(!report.contains("fallback:"), "{report}");
-    for spec in [
-        "`Text.common_prefix` runs natively when called with a: str, b: str",
-        "`Text.common_suffix` runs natively when called with a: str, b: str",
-        "`Text.scan` runs natively when called with text: str, start: int",
-        "`windows` runs natively when called with s: str, k: int",
-        "`stats` runs natively when called with s: str",
-        "`char_at` runs natively when called with s: str, i: int",
-        "`total` runs natively when called with n: int",
-    ] {
-        assert!(report.contains(&format!("specialized: {spec}")), "{spec}\n{report}");
+    let report = build_untyped(&dir);
+    assert!(!report.contains("not compiled:"), "{report}");
+    for name in ["Text.common_prefix", "Text.common_suffix", "Text.scan", "windows", "stats", "char_at", "total"] {
+        assert!(report.contains(&format!("compiled: m:{name}\n")), "{name}\n{report}");
     }
     let ours = run_python(&dir.join("ext"), "d.py");
     let oracle = run_python(&dir.join("src"), "d.py");
@@ -106,20 +97,20 @@ fn untyped_ext_functions_run_native_with_cpython_results() {
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn specialized_calls_leak_nothing() {
+fn untyped_calls_leak_nothing() {
     let dir = ScratchDir::new("untyped_native_leaks").expect("scratch");
-    build_specialized(&dir);
+    build_untyped(&dir);
     let probe = run_python(&dir.join("ext"), "l.py");
     assert!(probe.status.success(), "{}", text(&pycc_scratch::lf(&probe.stderr)));
     assert_eq!(text(&pycc_scratch::lf(&probe.stdout)), "ok\n");
 }
 
-/// The specialization of a function that does not type-check with the
-/// guessed types is dropped, and the function still compiles: nothing
-/// falls back, and the module behaves as its source.
+/// A function whose body would not type-check with the types its uses
+/// suggest (`s - 1` of a sequence) still compiles, next to one that does:
+/// nothing falls back, and the module behaves as its source.
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle and Python.h (PYCC_PYTHON, default python3)"]
-fn a_refused_specialization_is_dropped_not_fallen_back() {
+fn a_function_that_does_not_type_check_compiles() {
     let dir = ScratchDir::new("untyped_native_dropped").expect("scratch");
     let source = "def f(s, k):\n    out = []\n    for i in range(k):\n        out.append(s[i])\n    if s - 1:\n        pass\n    return out\n\n\
                   def g(s):\n    n = 0\n    for c in s:\n        n += len(s[0:1])\n    return n\n";
@@ -128,12 +119,12 @@ fn a_refused_specialization_is_dropped_not_fallen_back() {
     std::fs::create_dir_all(&src).expect("dir");
     std::fs::write(dir.join("m.py"), source).expect("write");
     std::fs::write(src.join("m.py"), source).expect("write");
-    let build = pycc(&["--ext", "--non-strict", "--select", "module", "--report-fallbacks"], &dir.join("m.py"), &ext.join("m"));
+    let build = pycc(&["--ext", "--non-strict", "--select", "all", "--report-fallbacks"], &dir.join("m.py"), &ext.join("m"));
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    assert!(!report.contains("fallback:"), "{report}");
-    assert!(report.contains("not specialized: `f`"), "{report}");
-    assert!(report.contains("specialized: `g` runs natively when called with s: str"), "{report}");
+    assert!(!report.contains("not compiled:"), "{report}");
+    assert!(report.contains("compiled: m:f\n"), "{report}");
+    assert!(report.contains("compiled: m:g\n"), "{report}");
     let script = "import m\nprint(m.g('abc'), m.g([[1]]))\ntry:\n    m.f('ab', 2)\nexcept TypeError as e:\n    print(e)\n";
     let run = |d: &Path| {
         Command::new(python())
@@ -154,7 +145,7 @@ fn widening_a_rebound_name_is_per_function() {
     let ir = dir.join("w.ll");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
         .env("PYCC_DUMP_LLVM", &ir)
-        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("w"))

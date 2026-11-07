@@ -89,4 +89,5 @@ def main():
         print(name, "balanced" if before == after else f"{before} -> {after}")
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -41,5 +41,5 @@ fn an_empty_frozenset_is_typed_by_its_uses() {
 
 #[test]
 fn an_empty_frozenset_is_typed_by_its_uses_in_non_strict_mode() {
-    check("empty_frozenset_non_strict", &["--non-strict", "--select", "module", "--report-fallbacks"]);
+    check("empty_frozenset_non_strict", &["--non-strict", "--report-fallbacks"]);
 }

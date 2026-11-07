@@ -350,7 +350,7 @@ class Configuration(Project):
             ({"extra-args": ["-o", "x"]}, "may not set '-o'"),
             ({"overrides": {"m": {"strikt": True}}}, "unknown [tool.pycc.overrides.\"m\"]"),
             ({"fallback-to-python": 3}, "fallback-to-python"),
-            ({"select": "some"}, "select must be one of profile, all, none, module"),
+            ({"select": "some"}, "select must be one of profile, all, none"),
             ({"compile": ["demo_pkg.core"]}, "is not MODULE:QUALNAME"),
             ({"exclude": ["a-b:f"]}, "not a dotted module name"),
             ({"profile": 1}, "profile must be a string"),
@@ -461,7 +461,7 @@ class Discovery(Project):
 
 class Wheel(Project):
     def test_compiles_modules_and_writes_a_valid_wheel(self):
-        self.project('pure-python = ["demo_pkg.cli"]\nselect = "module"\n'
+        self.project('pure-python = ["demo_pkg.cli"]\nselect = "all"\n'
                      '[tool.pycc.overrides."demo_pkg.__init__"]\nstrict = false\n')
         pycc_exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(pycc_exe), PYCC_PYTHON=None) as z:
@@ -479,8 +479,8 @@ class Wheel(Project):
         self.assertIn(f"Root-Is-Purelib: false\nTag: {tag}\n", wheel)
         self.assertIn("demo = demo_pkg.cli:main", entry_points)
         self.assertEqual(names, [
-            "demo_pkg/__init__.abi3.so", "demo_pkg/cli.py", "demo_pkg/core.abi3.so",
-            "demo_pkg/data/table.txt", "demo_pkg/py.typed",
+            "demo_pkg/__init__.abi3.so", "demo_pkg/__init__.py", "demo_pkg/cli.py",
+            "demo_pkg/core.abi3.so", "demo_pkg/data/table.txt", "demo_pkg/py.typed",
             "demo_pkg-1.2.0.dist-info/METADATA", "demo_pkg-1.2.0.dist-info/WHEEL",
             "demo_pkg-1.2.0.dist-info/entry_points.txt", "demo_pkg-1.2.0.dist-info/RECORD",
         ])
@@ -519,11 +519,13 @@ class Wheel(Project):
         self.assertEqual((meta_dir / dist_info / "METADATA").read_text(), meta)
 
     def test_a_package_is_built_whole_into_one_extension(self):
-        self.project('strict = false\nselect = "module"\npure-python = ["demo_pkg.cli"]')
+        self.project('strict = false\nselect = "all"\npure-python = ["demo_pkg.cli"]')
         exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(exe)) as z:
             names = [n for n in z.namelist() if "dist-info" not in n]
-        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/cli.py",
+        # The modules run as bytecode: their sources ship beside the extension.
+        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/__init__.py",
+                                 "demo_pkg/cli.py", "demo_pkg/core.py",
                                  "demo_pkg/data/table.txt", "demo_pkg/py.typed"])
         [call] = self.calls()
         self.assertEqual(pathlib.Path(call["args"][1]).name, "demo_pkg")
@@ -531,7 +533,7 @@ class Wheel(Project):
         self.assertIn("demo_pkg: 2 module(s) compiled into", self.stderr)
 
     def test_a_member_that_may_fall_back_is_left_out_and_the_package_rebuilt(self):
-        self.project('strict = false\nselect = "module"\nfallback-to-python = ["demo_pkg.core"]', {
+        self.project('strict = false\nselect = "all"\nfallback-to-python = ["demo_pkg.core"]', {
             "src/demo_pkg/__init__.py": "X = 1\n",
             "src/demo_pkg/core.py": "FAIL\n",
             "src/demo_pkg/util.py": "Y = 2\n",
@@ -539,7 +541,8 @@ class Wheel(Project):
         exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(exe)) as z:
             names = [n for n in z.namelist() if "dist-info" not in n]
-        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/core.py"])
+        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/__init__.py",
+                                 "demo_pkg/core.py", "demo_pkg/util.py"])
         first, second = self.calls()
         self.assertNotIn("--exclude", first["args"])
         self.assertEqual(second["args"][-2:], ["--exclude", "core"])
@@ -547,7 +550,7 @@ class Wheel(Project):
                       self.stderr)
 
     def test_a_member_that_may_not_fall_back_fails_the_build(self):
-        self.project('strict = false\nselect = "module"', {
+        self.project('strict = false\nselect = "all"', {
             "src/demo_pkg/__init__.py": "X = 1\n",
             "src/demo_pkg/core.py": "FAIL\n",
         })
@@ -560,7 +563,7 @@ class Wheel(Project):
                       str(e.exception))
 
     def test_whole_package_false_builds_each_module_on_its_own(self):
-        self.project('strict = false\nselect = "module"\nwhole-package = false\n'
+        self.project('strict = false\nselect = "all"\nwhole-package = false\n'
                      'pure-python = ["demo_pkg.cli"]')
         exe = self.fake_pycc()
         with self.build_wheel(PYCC=str(exe)) as z:

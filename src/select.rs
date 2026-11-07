@@ -8,8 +8,6 @@
 //! [`crate::profile`]) and the selection rule, or `--select all` (every
 //! eligible function), adjusted by `--compile` and `--no-compile`; with
 //! neither nothing is selected and the build makes no extension at all.
-//! `--select module` keeps the whole-module compilation of before, for the
-//! tests that still use it.
 
 use crate::profile::{self, Function, Rule};
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,8 +25,6 @@ pub(crate) enum SelectMode {
     All,
     /// Nothing, even with a profile.
     None,
-    /// Transitional: whole modules compiled as before.
-    Module,
 }
 
 /// A function of a module, as the selected rewrite finds it: its qualified
@@ -81,7 +77,7 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
     let mut out = Selection::default();
     let mut chosen: BTreeSet<(String, String, u32)> = BTreeSet::new();
     match request.mode {
-        SelectMode::None | SelectMode::Module => {}
+        SelectMode::None => {}
         SelectMode::All => {
             chosen.extend(
                 sources
@@ -255,19 +251,15 @@ impl Project {
 
 /// The selection of a non-strict `--ext` build of `path` (a module or a
 /// package directory), from its flags and `[tool.pycc]`, its sources
-/// indexed by `interpreter`; `None` under `--select module`. Prints the
-/// notes.
+/// indexed by `interpreter`. Prints the notes.
 pub(crate) fn resolve(
     path: &Path,
     mode: Option<SelectMode>,
     flags: &crate::cli::SelectFlags,
     interpreter: &OsStr,
     excludes: Option<&[String]>,
-) -> Result<Option<Selection>, String> {
+) -> Result<Selection, String> {
     let mode = mode.unwrap_or_default();
-    if mode == SelectMode::Module {
-        return Ok(None);
-    }
     // Pass 3's builds compile exactly the set they are given: the copied
     // project's `[tool.pycc]` must not add to it.
     let project = if flags.no_project_select { Project::default() } else { Project::read(path)? };
@@ -315,7 +307,6 @@ pub(crate) fn resolve(
         SelectMode::All => true,
         SelectMode::Profile => request.profile.is_some() || !compile.is_empty(),
         SelectMode::None => !compile.is_empty(),
-        SelectMode::Module => false,
     };
     let sources = if needs_sources {
         profile::index(interpreter, path)?
@@ -326,11 +317,11 @@ pub(crate) fn resolve(
     for note in &selection.notes {
         eprintln!("{note}");
     }
-    Ok(Some(selection))
+    Ok(selection)
 }
 
 /// The selected functions of the module this process compiles, when the
-/// build selects functions (not set under `--select module`, or in strict
+/// build selects functions (a non-strict `--ext` build; not set in strict
 /// mode).
 static MODULE: OnceLock<BTreeSet<Key>> = OnceLock::new();
 

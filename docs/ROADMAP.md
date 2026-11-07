@@ -102,9 +102,13 @@ Accept (carried over from v0.11, not met there):
    met**. pydantic schema stays at 0.99x and **the schema bar (>= 1.05x) is missed**:
    pydantic's hot parameters each take many types, so whole-body specialization does
    not apply. Per-operation specialization (the design's section 2.5) is the remaining
-   lever. The guessed specializations of `--select module` follow the same identity rules
-   now; a rebound parameter whose value may leave is not specialized, which costs
-   `diff_main` in module mode about 3% (6.77x to 6.47x-6.55x).
+   lever. The guessed specializations of the former `--select module` follow the same
+   identity rules now; a rebound parameter whose value may leave is not specialized, which
+   cost `diff_main` in module mode about 3% (6.77x to 6.47x-6.55x).
+   **Status (PR 6b):** `--select module` is deleted: every non-strict `--ext` build
+   compiles only selected functions. The tests that used it build with `--select all`,
+   `bench/package_check.py` and `bench/pydantic_check.py` take `--select profile|all`,
+   and CI's package checks run the profile build, its instruction gate `--select all`.
 
    Every step reports wall time, instructions, I1 misses and branch mispredictions, and the
    extension's size (the design's section 3). The three suites fail no test that passes

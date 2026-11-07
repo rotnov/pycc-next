@@ -23,7 +23,7 @@ fn object_dict_comprehensions_match_cpython_without_fallback() {
         .arg(&source)
         .arg("-o")
         .arg(&out)
-        .args(["--release", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--release", "--non-strict", "--report-fallbacks"])
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", support::rendered(&build));

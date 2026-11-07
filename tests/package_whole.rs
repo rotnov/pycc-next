@@ -54,36 +54,6 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// Removes every `.py` file under `dir`.
-fn remove_sources(dir: &Path) {
-    for entry in std::fs::read_dir(dir).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.is_dir() {
-            remove_sources(&path);
-        } else if path.extension().is_some_and(|ext| ext == "py") {
-            std::fs::remove_file(&path).expect("remove a source");
-        }
-    }
-}
-
-/// The files under `dir`, relative, sorted.
-fn files(dir: &Path, base: &Path, out: &mut Vec<String>) {
-    for entry in std::fs::read_dir(dir).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.is_dir() {
-            files(&path, base, out);
-        } else {
-            out.push(
-                path.strip_prefix(base)
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-            );
-        }
-    }
-    out.sort();
-}
-
 /// Builds the package `dir/name` whole, with `args` besides.
 fn build_whole(dir: &Path, name: &str, args: &[&str]) -> Output {
     let package = dir.join(name);
@@ -92,7 +62,7 @@ fn build_whole(dir: &Path, name: &str, args: &[&str]) -> Output {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .args(args)
         .output()
         .expect("pycc should spawn")
@@ -204,42 +174,10 @@ fn the_package_matches_cpython(release: bool) {
             "{report}"
         );
     }
-    // Calls of functions other modules compiled go to them natively.
-    for (name, module) in [
-        ("scaled", "pkw.util"),
-        ("shout", "pkw.util"),
-        ("_shout", "pkw.util"),
-        ("note", "pkw.util"),
-        ("fails", "pkw.util"),
-        ("label", "pkw.base"),
-        ("check", "pkw.base"),
-    ] {
-        assert!(
-            report.contains(&format!(
-                "native call: `{name}` calls `{module}`'s compiled function"
-            )),
-            "{report}"
-        );
-    }
-    // A class another module subclasses through a third module's re-export
-    // stays native since v0.9: the subclass is a CPython class over it,
-    // whose overrides compiled calls run (`pycc_mir::dispatch`).
-    assert!(
-        !report.contains("of the package subclasses `Tag`"),
-        "{report}"
-    );
-    assert!(report.contains("class `Bold` at"), "{report}");
-    // Instances of a class another module compiled are read natively.
-    assert!(
-        report.contains("native class: instances of `pkw.cursor.Cursor` are read natively"),
-        "{report}"
-    );
     assert_packed_relocations(&built.join("pkw").join(artifact()));
-    remove_sources(&built.join("pkw"));
-    let mut left = Vec::new();
-    files(&built.join("pkw"), &built.join("pkw"), &mut left);
-    // One extension, and the package's data file.
-    assert_eq!(left, [artifact(), "sub/data.txt"]);
+    // The sources stay beside the extension: CPython imports the modules
+    // with no selected function from them, and the others' `__file__` names
+    // them.
     let driver = fixture.join("driver.py");
     let theirs = run(&driver, &plain);
     assert_eq!(theirs.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&theirs.stderr)));
@@ -278,7 +216,6 @@ fn the_textkit_package_built_whole_matches_cpython() {
     copy_tree(&fixture.join("textkit"), &plain.join("textkit"));
     let build = build_whole(&built, "textkit", &["--release"]);
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
-    remove_sources(&built.join("textkit"));
     let driver = fixture.join("driver.py");
     let theirs = run(&driver, &plain);
     let ours = run(&driver, &built);
@@ -420,7 +357,7 @@ fn a_member_build_defines_only_prefixed_symbols() {
         .arg(&out)
         .args([
             "--ext",
-            "--non-strict", "--select", "module",
+            "--non-strict", "--select", "all",
             "--release",
             "--foreign-relative-imports",
             "--package-member",
@@ -437,8 +374,6 @@ fn a_member_build_defines_only_prefixed_symbols() {
         .filter(|l| !l.starts_with("max_tag "))
         .collect();
     assert!(objects.len() >= 2, "{manifest}");
-    // `BaseError` and `DeepError` take tags from the base.
-    assert!(manifest.contains("max_tag 41\n"), "{manifest}");
     for object in objects {
         let nm = Command::new("nm")
             .arg("-g")
@@ -506,7 +441,7 @@ fn a_member_build_compiles_against_the_package_builds_probe() {
             .arg(&out)
             .args([
                 "--ext",
-                "--non-strict", "--select", "module",
+                "--non-strict", "--select", "all",
                 "--release",
                 "--foreign-relative-imports",
                 "--package-member",

@@ -68,7 +68,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn native(name: &str) {
     let dir = ScratchDir::new(&format!("{name}_native")).expect("scratch");
     let source = fixture(name, &dir, "m.py");
-    build(&source, &dir.join("app"), &["--non-strict", "--select", "module"]);
+    build(&source, &dir.join("app"), &["--non-strict"]);
     let ours = Command::new(dir.join("app")).output().expect("run the build");
     let oracle = python().arg(&source).output().expect("python should spawn");
     assert_matches(&ours, &oracle);
@@ -79,7 +79,7 @@ fn native(name: &str) {
 fn ext(name: &str) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    build(&source, &compiled.join("m"), &["--ext", "--non-strict", "--select", "module"]);
+    build(&source, &compiled.join("m"), &["--ext", "--non-strict", "--select", "all"]);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new(&format!("{name}_ext_src")).expect("scratch");
     fixture(name, &plain, "m.py");
@@ -200,7 +200,7 @@ fn local_import_strict_and_leak_free() {
 /// non-strict mode; a missing sibling raises CPython's `ImportError`.
 #[test]
 fn relative_local_import_resolves_against_the_package() {
-    for flags in [&["--ext"][..], &["--ext", "--non-strict", "--select", "module"][..]] {
+    for flags in [&["--ext"][..], &["--ext", "--non-strict", "--select", "all"][..]] {
         let dir = ScratchDir::new("v08_relative_local_import").expect("scratch");
         let pkg = dir.join("pkg");
         std::fs::create_dir(&pkg).unwrap();
@@ -232,15 +232,17 @@ fn relative_local_import_resolves_against_the_package() {
     }
 }
 
-/// What the nested-statement fixtures' reports must say: every nested
-/// `def` named here is created by CPython with its body compiled.
-fn assert_lifted(report: &str, names: &[&str]) {
-    for name in names {
-        assert!(
-            report.contains(&format!("lifted: function `{name}`"))
-                || report.contains(&format!("lifted: lambda `{name}`")),
-            "{name} should have a compiled body:\n{report}"
-        );
+/// What the nested-statement fixtures' `--select all` reports must say: a
+/// function holding a nested `def` or a `lambda` is not compiled and stays
+/// bytecode (closures are not eligible units,
+/// `docs/design/compile-little.md`), each one in `stays` reported so, and
+/// each one in `compiles` compiled.
+fn assert_selection(report: &str, stays: &[&str], compiles: &[&str]) {
+    for name in stays {
+        assert!(report.contains(&format!("not compiled: m:{name}: ")), "{name} should stay bytecode:\n{report}");
+    }
+    for name in compiles {
+        assert!(report.contains(&format!("compiled: m:{name}\n")), "{name} should compile:\n{report}");
     }
 }
 
@@ -255,21 +257,14 @@ fn nested_def_ext() {
 }
 
 #[test]
-fn nested_def_bodies_are_compiled() {
+fn nested_def_enclosing_functions_stay_bytecode() {
     let dir = ScratchDir::new("v08_nested_def_report").expect("scratch");
     let source = fixture("v08_nested_def", &dir, "m.py");
-    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict", "--select", "module"]);
-    assert_lifted(
+    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict", "--select", "all"]);
+    assert_selection(
         &report,
-        &[
-            "traced.<locals>.wrapper",
-            "counter.<locals>.bump",
-            "counter.<locals>.peek",
-            "late_binding.<locals>.get",
-            "defaults_now.<locals>.show",
-            "shared_loop.<locals>.tag",
-            "logged.<locals>.call",
-        ],
+        &["traced", "counter", "late_binding", "defaults_now", "shared_loop", "logged"],
+        &["recursive", "rebinding", "raising", "add", "main"],
     );
 }
 
@@ -307,19 +302,14 @@ fn lambda_ext() {
 }
 
 #[test]
-fn lambda_bodies_are_compiled() {
+fn lambda_enclosing_functions_stay_bytecode() {
     let dir = ScratchDir::new("v08_lambda_report").expect("scratch");
     let source = fixture("v08_lambda", &dir, "m.py");
-    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict", "--select", "module"]);
-    assert_lifted(
+    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict", "--select", "all"]);
+    assert_selection(
         &report,
-        &[
-            "camel.<locals>.<lambda>",
-            "scaled.<locals>.<lambda>",
-            "make_all.<locals>.<lambda>",
-            "bind_now.<locals>.<lambda>",
-            "picker.<locals>.<lambda>",
-        ],
+        &["camel", "scaled", "make_all", "bind_now", "picker", "nested_lambda"],
+        &["rebound", "keyed"],
     );
 }
 
@@ -342,7 +332,7 @@ fn closures_and_cells_do_not_leak() {
          total += f(1)[0]\n    return total\n",
     )
     .unwrap();
-    build(&source, &dir.join("lk"), &["--ext", "--non-strict", "--select", "module"]);
+    build(&source, &dir.join("lk"), &["--ext", "--non-strict", "--select", "all"]);
     let run = python()
         .args([
             "-c",
@@ -386,7 +376,7 @@ fn rebinding_nested_def_cells_do_not_leak() {
          total += make(tag)(i)[1] + make(tag, lambda v: (tag, v))(1)[1]\n    return total\n",
     )
     .unwrap();
-    build(&source, &dir.join("rb"), &["--ext", "--non-strict", "--select", "module"]);
+    build(&source, &dir.join("rb"), &["--ext", "--non-strict", "--select", "all"]);
     let run = python()
         .args([
             "-c",

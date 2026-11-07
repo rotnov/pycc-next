@@ -21,11 +21,16 @@ class S(str):
     pass
 
 
-for _ in range(3):
-    print([kind(k) for k in ("list", "a", "zzz", "generator", "b")])
-    print([num(v) for v in (1, 4, 1.0, True, None, 1.5, 2)])
-print(kind(S("list")), kind(S("q")))
-try:
-    kind([])
-except TypeError as e:
-    print("TypeError", e)
+def main():
+    for _ in range(3):
+        print([kind(k) for k in ("list", "a", "zzz", "generator", "b")])
+        print([num(v) for v in (1, 4, 1.0, True, None, 1.5, 2)])
+    print(kind(S("list")), kind(S("q")))
+    try:
+        kind([])
+    except TypeError as e:
+        print("TypeError", e)
+
+
+if __name__ == "__main__":
+    main()

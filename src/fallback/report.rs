@@ -1,5 +1,5 @@
 //! `--report-fallbacks`: one line per piece of the entry module that runs
-//! in CPython (#12), and per compiled function twinned there.
+//! in CPython (#12).
 //!
 //! A split statement (`lift`) is reported by what of it really runs in
 //! CPython: its header (`class C(Base):`, decorators, class attributes),
@@ -12,19 +12,6 @@ use super::*;
 impl Plan {
     /// One line per fallback statement, for `--report-fallbacks`.
     pub(crate) fn report_lines(&self) -> Vec<String> {
-        let twins = self.twinned.iter().map(|(index, reason)| {
-            let stmt = &self.stmts[*index];
-            let (first, last) = self.lines(stmt.range.clone());
-            let name = match &stmt.kind {
-                Kind::Def(name, _) => name.as_str(),
-                _ => "?",
-            };
-            format!(
-                "twin: function `{name}` at {}:{first}-{last} is compiled, and runs in CPython \
-                 when Python code calls it: {reason}",
-                self.display
-            )
-        });
         let mut lines = Vec::new();
         for (index, reason) in &self.fallback {
             // A nested `def`'s body is reported with its statement.
@@ -83,7 +70,6 @@ impl Plan {
                 span(first, last)
             ));
         }
-        lines.extend(twins);
         // The nested statements CPython runs (`nested`), their enclosing
         // functions compiled.
         for (_, nested) in self.live_nested() {

@@ -59,7 +59,7 @@ fn a_global_the_module_never_binds_is_read_from_the_builtins() {
     let compiled = ScratchDir::new("fallback_builtin_read").expect("scratch");
     std::fs::write(compiled.join("m.py"), MODULE).expect("write the module");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(compiled.join("m.py"))
         .arg("-o")
         .arg(compiled.join("m"))
@@ -105,16 +105,15 @@ fn a_lazy_import_fallback_code_binds_is_resolved_when_compiled_code_reads_it() {
     let compiled = ScratchDir::new("fallback_lazy_import").expect("scratch");
     write(&compiled);
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(compiled.join("pkg"))
         .arg("-o")
         .arg(compiled.join("pkg/__init__"))
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&build.stderr));
-    for source in ["pkg/__init__.py", "pkg/_re.py"] {
-        std::fs::remove_file(compiled.join(source)).expect("import the artifact, not the source");
-    }
+    // `pkg/_re.py` has no selected function: CPython imports its source.
+    std::fs::remove_file(compiled.join("pkg/__init__.py")).expect("import the artifact, not the source");
     let plain = ScratchDir::new("fallback_lazy_import_src").expect("scratch");
     write(&plain);
     let driver = "import pkg\nprint(pkg.first('abc1'), pkg.first('1'), pkg.KIND)\n";
