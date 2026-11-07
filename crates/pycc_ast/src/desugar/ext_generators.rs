@@ -72,7 +72,7 @@ pub fn split_ext_generators(module: &ModModule) -> Option<ModModule> {
     // the others' in-module calls go to the native generator.
     let renamed: HashSet<String> = renamed
         .into_iter()
-        .filter(|name| bindings(&module.body, name) == 1)
+        .filter(|name| bound_once(&module.body, name))
         .collect();
     let rename = Rename { names: &renamed };
     for stmt in module.body.iter_mut() {
@@ -185,73 +185,25 @@ fn split(def: StmtFunctionDef, receiver: Option<&str>) -> (StmtFunctionDef, Stmt
     (private, wrapper)
 }
 
-/// How many times `body` binds `name` at any depth (a `def`, a class, an
-/// assignment target, a parameter).
-pub(super) fn bindings(body: &[Stmt], name: &str) -> usize {
-    struct Count<'n> {
-        name: &'n str,
-        count: usize,
-    }
-    impl<'a> Visitor<'a> for Count<'_> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            match stmt {
-                Stmt::FunctionDef(def) => {
-                    if def.name.as_str() == self.name {
-                        self.count += 1;
-                    }
-                    if def
-                        .parameters
-                        .iter()
-                        .any(|p| p.name().as_str() == self.name)
-                    {
-                        self.count += 1;
-                    }
-                }
-                Stmt::ClassDef(def) if def.name.as_str() == self.name => self.count += 1,
-                Stmt::Import(import) => {
-                    self.count += import
-                        .names
-                        .iter()
-                        .filter(|a| {
-                            a.asname
-                                .as_ref()
-                                .unwrap_or(&a.name)
-                                .as_str()
-                                .split('.')
-                                .next()
-                                == Some(self.name)
-                        })
-                        .count()
-                }
-                Stmt::ImportFrom(import) => {
-                    self.count += import
-                        .names
-                        .iter()
-                        .filter(|a| {
-                            a.name.as_str() == "*"
-                                || a.asname.as_ref().unwrap_or(&a.name).as_str() == self.name
-                        })
-                        .count()
-                }
-                _ => {}
-            }
-            visitor::walk_stmt(self, stmt);
-        }
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if let Expr::Name(n) = expr
-                && n.id.as_str() == self.name
-                && n.ctx != ExprContext::Load
-            {
-                self.count += 1;
-            }
-            visitor::walk_expr(self, expr);
-        }
-    }
-    let mut count = Count { name, count: 0 };
+/// Whether the one top-level `def` of `name` in `body` is the only binding
+/// of the name at any depth (`crate::namespace::bound_anywhere`, which
+/// counts every binding form).
+fn bound_once(body: &[Stmt], name: &str) -> bool {
+    let mut defs = 0;
     for stmt in body {
-        count.visit_stmt(stmt);
+        let bound = match stmt {
+            Stmt::FunctionDef(def) if def.name.as_str() == name => {
+                defs += 1;
+                def.parameters.iter().any(|p| p.name().as_str() == name)
+                    || crate::namespace::bound_anywhere(&def.body).contains(name)
+            }
+            other => crate::namespace::bound_anywhere(std::slice::from_ref(other)).contains(name),
+        };
+        if bound {
+            return false;
+        }
     }
-    count.count
+    defs == 1
 }
 
 /// Renames reads of the split functions to their private generators.

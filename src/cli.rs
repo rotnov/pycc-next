@@ -106,6 +106,11 @@ pub struct SelectFlags {
     /// `--compile` functions it is given.
     #[arg(long, hide = true, requires = "ext")]
     pub no_project_select: bool,
+    /// Internal (pass 3's builds): the profile whose observed argument
+    /// types the selected functions' compiled bodies are specialized for,
+    /// as a build with `--profile` specializes them.
+    #[arg(long, value_name = "PROFILE", hide = true, requires = "ext")]
+    pub types_profile: Option<PathBuf>,
     /// Internal (the package build's member builds): the member's selected
     /// functions, one `FIRSTLINENO QUALNAME` per line.
     #[arg(long, value_name = "PATH", hide = true, requires = "package_member")]

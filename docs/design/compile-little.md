@@ -369,6 +369,116 @@ Each operation in a selected body is lowered for the types it is expected to mee
 
 This replaces the guessed specializations of `src/specialize.rs` (section 7).
 
+**PR 8, first part: bodies specialized for observed types.** A selected function gets
+the parameter types pass 2 observed. Only parameters that held one exact type in every
+sampled call count, and only for `int`, `float`, `str` and `bytearray`
+(`Entry::observed_types`). Those types travel with the selection:
+- `Selection.types`;
+- the member `--select-functions` file, as ` param:type` after the qualified name;
+- for pass 3's builds, `--types-profile`, so pass 3 times the same typed bodies a build
+  compiles.
+
+The selection marks each such function's lift explicitly
+(`crate::specialize::set_lifts`). `pycc_ast::specialize_observed` then gives the lift a
+native copy with those parameters typed, and an exact-type guard in front that calls it
+(`type(s) is str`). Any other argument, a subclass included, runs the generic lift.
+
+`specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
+reasons:
+- a dunder runs through a slot;
+- a class-private `__x` is name-mangled in its class body;
+- an annotation is the user's type.
+
+None of those apply to a lift: it is module-level, generated, and annotated `object`
+only as a placeholder. So lifts are told apart by the selection's flag, never by their
+names or annotations.
+
+A native parameter is a converted copy of its argument, so two rules keep the copy the
+function it copies (`specialize/escapes.rs`):
+- **The argument stays the argument.** The copy also takes each specialized `int`,
+  `float` or `str` parameter's original object. Every use reads that object unless it
+  provably keeps the value inside builtin code; the rule is an allowlist, not a list of
+  escapes. Allowed: arithmetic, unary operations and comparisons (not `is`) whose
+  operands are all provably native (specialized parameters, literals, items of native
+  sequences, or such operations); items, slices, indexes and slice bounds of a native
+  `str` or `bytearray`, and the `str` an `in` searches; tests and loops over native
+  sequences; `len`, `ord` and `range` of native values when no module binding, formal
+  parameter or body binding shadows them; a native `str`'s methods, with native
+  arguments except to `format`. Everything else reads the object: a return, a store,
+  a call or container argument, `is`, `hash` (a NaN hashes by identity), and any
+  operation with an operand of unknown type, which may reach that operand's reflected
+  method (`__radd__`). An allowed operation whose result CPython may give as the operand
+  itself (`+x`, `s[:]`, `s + ''`, `s * 1`, a `str` method with nothing to change, such as
+  `s.strip()`, or `s.split()`'s one item) keeps its operands native only while its own
+  result is consumed. Where that result leaves, the operands read their objects too.
+  Operations whose result is always a new value (comparisons, `-x`, `len`, an item,
+  `s.find(t)`) consume their operands. A `bytearray`'s native form is the object itself.
+- **A parameter the body may bind again is not specialized.** The observed type is the
+  argument's, not that of later values (`for item in xs: n = item`). Any assignment,
+  augmented assignment, `for`/`with`/comprehension target, walrus, `del`, `except ... as`
+  or `case` capture, import, `global`/`nonlocal`, or nested scope binding the name counts.
+  One scan answers this and the builtin-shadowing question above, and the per-function
+  fallback uses the same per-scope part of it (`pycc_ast::namespace::bound_anywhere` and
+  `bound_names`);
+  `--report-fallbacks` says `not specialized: ... may be bound again in the body`.
+
+`tests/select_observed_types.rs` checks both paths against CPython: the observed `str`s;
+a list, a tuple, an `int` or `None`; `str` subclasses that change indexing or `len`; a
+NaN, a large `int` and a `str` that leave unchanged; `hash` of a NaN, a reflected
+`__radd__`, and a `len` bound by a parameter, a `case` capture or an `except ... as`; `+x`,
+`s.strip()`, `s[:]`, `s + ''` and `s.split()` against CPython's identities; and a rebound
+parameter.
+
+Measured locally on CPython 3.15:
+- **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
+  0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for
+  `text1: str, text2: str` (2,763 ms against 2,814 ms for its 30-function region). Before:
+  2.75x. **The checkpoint's diff_main bar (>= 6x) is met.** With the two rules below
+  (the allowlist of native uses, no rebound parameters) it measures 6.73x (CPython
+  7.116 s, compiled 1.058 s, medians of 5). The runs during these fixes ranged from 6.33x
+  to 6.98x; the machine's own speed varied between them (CPython 5.43 to 7.12 s).
+  `diff_bisect` keeps its specialization, since its loop only indexes `text1` and
+  `text2` and takes their `len`. Pass 3 keeps it alone or the 30-function region, whose
+  timings are within noise of each other; three functions of the region rebind an
+  observed parameter and are not specialized.
+- **pydantic `model_json_schema()`: 0.99x** (14.41 ms against 14.32 ms, 31 rounds). Pass
+  3 keeps none of 55 candidates. **The checkpoint's schema bar (>= 1.05x) is missed.**
+
+Observed types do not help polymorphic library code. In pydantic's training profile,
+the hot functions' parameters each hold many exact types:
+- `_make_json_hashable(value)`: `str` 536, `dict` 308, `list` 88, `int` 42, `NoneType`
+  12, `float` 8, `bool` 6 (of 1,000 sampled calls);
+- `_DefinitionsRemapping.remap_json_schema(schema)`: `str` 512, `dict` 327, `list` 85,
+  `int` 49, `NoneType` 13, `bool` 10, `float` 4;
+- `GenerateJsonSchema._sort_recursive(value, parent_key)`: `value` `str` 529, `dict`
+  318, `list` 80, `int` 47, `NoneType` 13, `bool` 10, `float` 3; `parent_key` always
+  `str`.
+
+The only parameter with one type among the top functions is `parent_key`, plus
+`ConfigWrapper.__getattr__`'s `name`, which is not specialized because that body has no
+loop. Whole-body specialization therefore has nothing to specialize. pydantic needs
+this section's per-operation specialization: an inline exact-type path at each
+`isinstance` and dict/list operation, with the generic helper cold.
+
+Generic bodies are slower than the interpreter. A generic lift costs 2-7% on whole
+pydantic phases (section 1's whole-module numbers and PR 4's candidates). Per top-level
+call it can cost much more. The table below replays the top-level calls each function
+received during define and schema (5 repetitions), on fresh deep copies, giving ns per
+call (medians of 5 processes of 15 passes each):
+
+| function | calls | CPython | generic lift | typed (observed) | ideal C |
+|---|---|---|---|---|---|
+| `_make_json_hashable` | 2,580 | 5,961 | 5,499 (1.08x) | n/a: no single-type parameter | 1,601 (3.7x) |
+| `_DefinitionsRemapping.remap_json_schema` | 120 | 25,834 | 29,054 (0.89x) | n/a: no single-type parameter | not written |
+| `GenerateJsonSchema._sort_recursive` | 170 | 6,661 | 10,306 (0.65x) | 12,864 (0.52x; `parent_key: str`) | not written |
+
+The ideal C is `bench/headroom/hrfast.c` (section 1). Typing the one `str` parameter of
+`_sort_recursive` makes it slower: its recursive calls still go through the object
+protocol, and the guard adds a test per call. Pass 3 rejects such a set, since it loses.
+The fix is either of:
+- compile a body only when it is typed where it matters;
+- prove per function that the generic lift pays, as pass 3 already does per set.
+
 ### 2.6 Idiom lowering
 
 Patterns that make intermediate objects are compiled to code that builds the result

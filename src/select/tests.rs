@@ -16,6 +16,7 @@ fn request<'a>(mode: SelectMode, compile: &'a [String], no_compile: &'a [String]
     Request {
         mode,
         profile: None,
+        types_profile: None,
         compile,
         no_compile,
         rule: Rule::default(),
@@ -126,11 +127,64 @@ fn a_profile_selects_by_the_rule() {
     assert!(selection.notes.iter().any(|n| n.contains("m:gone") && n.contains("no longer")), "{:?}", selection.notes);
 }
 
+/// A selected function carries the types its profile entry observed, and a
+/// build of `--compile` functions takes them from `--types-profile`; a
+/// function whose source changed since carries none.
+#[test]
+fn a_selected_function_carries_its_observed_types() {
+    let dir = pycc_scratch::ScratchDir::new("select_test").unwrap();
+    let path = dir.join("p.json");
+    let mut hot = profile::Entry {
+        module: "m".into(),
+        qualname: "hot".into(),
+        firstlineno: 1,
+        sha256: "m:hot".into(),
+        calls: 100,
+        self_ns: 500,
+        callees: Default::default(),
+        arg_types: Default::default(),
+        handled: 0,
+        sampled: true,
+        measured: None,
+    };
+    hot.arg_types.insert("s".into(), [("str".to_string(), 7)].into());
+    hot.arg_types.insert("d".into(), [("dict".to_string(), 7)].into());
+    let p = profile::Profile {
+        version: profile::VERSION,
+        python: "3.15".into(),
+        workload: "w.py".into(),
+        runs: 1,
+        total_ns: 1000,
+        functions: vec![hot],
+        sampled: true,
+        verified: false,
+        winner: None,
+    };
+    std::fs::write(&path, p.to_json()).unwrap();
+    let sources = [function("m", "hot", 1, true)];
+    let expected: BTreeMap<Key, Types> = [(("hot".to_string(), 1), vec![("s".to_string(), "str".to_string())])].into();
+    let mut req = request(SelectMode::Profile, &[], &[]);
+    req.profile = Some(&path);
+    assert_eq!(decide(&req, &sources).unwrap().types["m"], expected);
+    let compile = ["m:hot".to_string()];
+    let mut req = request(SelectMode::None, &compile, &[]);
+    assert!(decide(&req, &sources).unwrap().types.is_empty());
+    req.types_profile = Some(&path);
+    assert_eq!(decide(&req, &sources).unwrap().types["m"], expected);
+    let mut changed = function("m", "hot", 1, true);
+    changed.sha256 = "other".into();
+    assert!(decide(&req, &[changed]).unwrap().types.is_empty());
+}
+
 #[test]
 fn a_members_selection_round_trips_through_its_file() {
     let set: BTreeSet<Key> = [("C.m".to_string(), 3), ("f".to_string(), 10)].into();
-    assert_eq!(from_text(&to_text(&set)).unwrap(), set);
-    assert!(from_text("").unwrap().is_empty());
+    let types: BTreeMap<Key, Types> =
+        [(("f".to_string(), 10), vec![("s".to_string(), "str".to_string()), ("n".to_string(), "int".to_string())])].into();
+    assert_eq!(from_text(&to_text(&set, &types)).unwrap(), (set.clone(), types));
+    assert_eq!(from_text(&to_text(&set, &BTreeMap::new())).unwrap(), (set, BTreeMap::new()));
+    assert!(from_text("").unwrap().0.is_empty());
+    assert!(from_text("3 f s\n").is_err());
     assert!(from_text("x f\n").is_err());
     assert!(from_text("3\n").is_err());
 }

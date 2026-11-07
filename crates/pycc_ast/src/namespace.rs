@@ -23,8 +23,10 @@
 //! into the dotted form CPython shows (`helper.double`), for diagnostics
 //! and runtime names.
 
+mod bindings;
 mod scope;
 
+pub use bindings::{bound_anywhere, bound_names, module_scope_names, opaque_bound_names, target_names};
 pub use scope::{
     ChainRewrite, GlobalRewrite, ModuleBindings, NameRewrite, RewriteError, module_bindings,
     rewrite_module_globals, statement_bindings,

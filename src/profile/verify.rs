@@ -166,6 +166,10 @@ pub(crate) fn clear(plain: &[u64], built: &[u64]) -> bool {
     b[0] > p[2] || b[2] < p[0]
 }
 
+/// The file in pass 3's scratch directory holding the profile its builds
+/// read observed types from (`--types-profile`).
+const TYPES_FILE: &str = "types.json";
+
 /// The outcome of one check.
 #[derive(Debug, Clone)]
 pub(super) struct Check {
@@ -196,6 +200,9 @@ pub(super) fn verify(
     // measured winners are selected, never a function that would fill the
     // slot of a rejected one.
     profile.verified = true;
+    // The observed types every check's build specializes its compiled
+    // bodies for, as the build that reads this profile will.
+    std::fs::write(cx.scratch.join(TYPES_FILE), profile.to_json()).map_err(|e| e.to_string())?;
     // The winning set an earlier profile measured, when it is still whole
     // (every member unchanged): every set measured now includes it, so the
     // selection stays one set measured as a whole. A broken one is
@@ -706,7 +713,9 @@ fn build(
         .arg(copy)
         .arg("-o")
         .arg(&out)
-        .args(["--ext", "--non-strict", "--release", "--select", "none", "--report-fallbacks", "--no-project-select"]);
+        .args(["--ext", "--non-strict", "--release", "--select", "none", "--report-fallbacks", "--no-project-select"])
+        .arg("--types-profile")
+        .arg(cx.scratch.join(TYPES_FILE));
     // Exactly `set`: no selection rule runs again, so leaving the other
     // candidates out changes nothing else.
     for (module, qualname, _) in set {

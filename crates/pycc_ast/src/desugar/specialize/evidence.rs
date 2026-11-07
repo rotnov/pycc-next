@@ -51,7 +51,10 @@ pub(super) struct Evidence {
 impl Evidence {
     pub(super) fn of(body: &[Stmt], params: &[String]) -> Self {
         let params: HashSet<String> = params.iter().cloned().collect();
-        let (item_of, derived, rebound) = Locals::of(body, &params);
+        let (item_of, derived, mut rebound) = Locals::of(body, &params);
+        // Every binding form counts, not only the targets `Locals` follows.
+        let bound = crate::namespace::bound_anywhere(body);
+        rebound.extend(params.iter().filter(|param| bound.contains(*param)).cloned());
         let mut walker = Walker {
             params,
             item_of,

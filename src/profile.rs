@@ -149,6 +149,27 @@ impl Measured {
 pub(crate) const TYPE_CALLS: u64 = 1000;
 
 impl Entry {
+    /// The parameters pass 2 saw holding one exact type in every call it
+    /// sampled, each with that type, when it is one a native body takes
+    /// ([`pycc_ast::OBSERVED_TYPES`]): what the function's compiled body is
+    /// specialized for (docs/design/compile-little.md, section 2.5).
+    /// Nothing when pass 2 did not sample it.
+    pub(crate) fn observed_types(&self) -> Vec<(String, String)> {
+        if !self.sampled {
+            return Vec::new();
+        }
+        self.arg_types
+            .iter()
+            .filter_map(|(param, types)| {
+                let mut seen = types.keys();
+                let (Some(ty), None) = (seen.next(), seen.next()) else {
+                    return None;
+                };
+                pycc_ast::OBSERVED_TYPES.contains(&ty.as_str()).then(|| (param.clone(), ty.clone()))
+            })
+            .collect()
+    }
+
     /// Its key among callees.
     pub(crate) fn callee_key(&self) -> String {
         format!("{}:{}:{}", self.module, self.qualname, self.firstlineno)

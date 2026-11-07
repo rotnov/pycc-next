@@ -8,20 +8,11 @@
 //! body and does not declare it `global`; a class body's bindings are
 //! visible only inside the class body itself.
 
+pub(crate) use pycc_ast::namespace::{bound_names, opaque_bound_names};
 use pycc_ast::visitor::{self, Visitor};
-use pycc_ast::{Expr, ExprContext, Pattern, Stmt};
+use pycc_ast::{Expr, ExprContext, Stmt};
 use std::collections::BTreeSet;
 use std::ops::Range;
-
-/// The names `body` binds in the scope it runs in, without descending into
-/// nested function, lambda, class or comprehension scopes (a nested `def`
-/// or `class` binds its own name here). Names declared `global` are
-/// included: from the module's point of view they are bound too.
-pub(crate) fn bound_names(body: &[Stmt]) -> BTreeSet<String> {
-    let mut collector = Binder::default();
-    collector.visit_body(body);
-    collector.names
-}
 
 /// The names declared `global` directly in `body` (not in nested scopes).
 pub(crate) fn declared_globals(body: &[Stmt]) -> BTreeSet<String> {
@@ -72,103 +63,6 @@ fn scope_globals(stmt: &Stmt, found: &mut BTreeSet<String>) {
         }
         _ => {}
     }
-}
-
-/// Collects bindings of one scope.
-#[derive(Default)]
-struct Binder {
-    names: BTreeSet<String>,
-    /// Only bindings that are not a plain name target (`import`,
-    /// `except ... as`, a match capture, a `def`/`class` name).
-    opaque: bool,
-}
-
-impl<'a> Visitor<'a> for Binder {
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        match stmt {
-            Stmt::FunctionDef(def) => {
-                self.names.insert(def.name.as_str().to_string());
-                // Decorators and defaults run in this scope; the body does not.
-                for decorator in &def.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-            }
-            Stmt::ClassDef(class) => {
-                self.names.insert(class.name.as_str().to_string());
-                for decorator in &class.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-            }
-            Stmt::Global(global) => {
-                self.names
-                    .extend(global.names.iter().map(|n| n.as_str().to_string()));
-            }
-            Stmt::Import(import) => {
-                for alias in &import.names {
-                    let bound = match &alias.asname {
-                        Some(asname) => asname.as_str(),
-                        None => alias.name.as_str().split('.').next().unwrap_or(""),
-                    };
-                    self.names.insert(bound.to_string());
-                }
-            }
-            Stmt::ImportFrom(import) => {
-                for alias in &import.names {
-                    let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                    self.names.insert(bound.as_str().to_string());
-                }
-            }
-            _ => visitor::walk_stmt(self, stmt),
-        }
-    }
-
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        match expr {
-            Expr::Name(name) if !matches!(name.ctx, ExprContext::Load) => {
-                if !self.opaque {
-                    self.names.insert(name.id.as_str().to_string());
-                }
-            }
-            Expr::Lambda(_)
-            | Expr::ListComp(_)
-            | Expr::SetComp(_)
-            | Expr::DictComp(_)
-            | Expr::Generator(_) => {}
-            _ => visitor::walk_expr(self, expr),
-        }
-    }
-
-    fn visit_except_handler(&mut self, handler: &'a pycc_ast::ExceptHandler) {
-        let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
-        if let Some(name) = &h.name {
-            self.names.insert(name.as_str().to_string());
-        }
-        visitor::walk_except_handler(self, handler);
-    }
-
-    fn visit_pattern(&mut self, pattern: &'a Pattern) {
-        match pattern {
-            Pattern::MatchAs(p) => {
-                if let Some(name) = &p.name {
-                    self.names.insert(name.as_str().to_string());
-                }
-            }
-            Pattern::MatchStar(p) => {
-                if let Some(name) = &p.name {
-                    self.names.insert(name.as_str().to_string());
-                }
-            }
-            Pattern::MatchMapping(p) => {
-                if let Some(rest) = &p.rest {
-                    self.names.insert(rest.as_str().to_string());
-                }
-            }
-            _ => {}
-        }
-        visitor::walk_pattern(self, pattern);
-    }
-
-    fn visit_annotation(&mut self, _expr: &'a Expr) {}
 }
 
 /// Whether `name`, referenced in the innermost of `scopes`, is the module's.
@@ -531,13 +425,13 @@ impl Rewriter<'_> {
             return;
         };
         self.visit_expr(&first.iter);
-        let mut targets = Binder::default();
-        for generator in generators {
-            targets.visit_expr(&generator.target);
-        }
+        let targets = generators
+            .iter()
+            .flat_map(|generator| pycc_ast::namespace::target_names(&generator.target))
+            .collect();
         self.scopes.push(Scope {
             kind: ScopeKind::Function,
-            locals: targets.names,
+            locals: targets,
             globals: BTreeSet::new(),
         });
         for (index, generator) in generators.iter().enumerate() {
@@ -651,18 +545,6 @@ pub(crate) fn all_global_declarations(stmt: &Stmt) -> BTreeSet<String> {
     let mut globals = Globals::default();
     globals.visit_stmt(stmt);
     globals.0
-}
-
-/// The module-scope names `stmt` binds through something other than a
-/// plain name target, which compiled code cannot redirect to the
-/// namespace dictionary.
-pub(crate) fn opaque_bound_names(stmt: &Stmt) -> BTreeSet<String> {
-    let mut collector = Binder {
-        opaque: true,
-        ..Binder::default()
-    };
-    collector.visit_stmt(stmt);
-    collector.names
 }
 
 /// The bare names the bases of the class statements in `stmt` read (the
