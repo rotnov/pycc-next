@@ -43,7 +43,7 @@ fn assert_compiled_like_cpython(stem: &str, stdin: &str) {
         .arg(&fixture)
         .arg("-o")
         .arg(&binary)
-        .args(["--release", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--release", "--non-strict", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));

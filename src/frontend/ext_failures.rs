@@ -54,8 +54,7 @@ pub(super) fn export_gaps_as_failures(
     } else {
         crate::fallback::inferred_functions(&source)
     };
-    let mut excluded = inferred;
-    excluded.extend(crate::fallback::twinned_exports());
+    let excluded = inferred;
     if ext_module && let Some(refusals) = unattachable_methods(typed) {
         let (diagnostics, origins) = refusals.into_iter().unzip();
         return Err(FrontendFailure::Compile {

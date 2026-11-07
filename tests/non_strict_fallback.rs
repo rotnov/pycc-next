@@ -78,7 +78,7 @@ fn compiled_and_fallback_code_match_cpython_in_a_native_build() {
     let dir = ScratchDir::new("fallback_native").expect("scratch");
     let source = fixture(&dir, "m.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -99,7 +99,7 @@ fn compiled_and_fallback_code_match_cpython_in_an_ext_module() {
     let compiled = ScratchDir::new("fallback_ext").expect("scratch");
     let source = fixture(&compiled, "fbm.py");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--ext", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "all", "--ext", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("fbm"))
@@ -137,7 +137,7 @@ fn a_function_the_boundary_cannot_publish_falls_back() {
     .expect("write");
     let input = "1\n2\n3 4\n";
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -177,7 +177,7 @@ fn a_module_level_fallback_block_shares_globals_with_compiled_code() {
     )
     .expect("write");
     let build = pycc()
-        .args(["build", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("app"))
@@ -211,7 +211,7 @@ fn strict_mode_still_refuses_what_non_strict_runs_in_cpython() {
         text(&pycc_scratch::lf(&strict.stdout))
     );
     let lenient = pycc()
-        .args(["check", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["check", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .output()
         .expect("spawn");
@@ -230,7 +230,7 @@ fn a_syntax_error_is_reported_in_non_strict_mode() {
     let source = dir.join("m.py");
     std::fs::write(&source, "def f(:\n    pass\n").expect("write");
     let output = pycc()
-        .args(["check", "--non-strict", "--select", "module"])
+        .args(["check", "--non-strict"])
         .arg(&source)
         .output()
         .expect("spawn");

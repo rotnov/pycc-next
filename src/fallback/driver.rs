@@ -24,75 +24,18 @@ pub(crate) fn with_fallback<T, E>(
     attempt: impl Fn() -> Result<T, E>,
     split: impl Fn(&E) -> Option<Vec<Failure>>,
 ) -> Result<T, E> {
-    // A non-strict `--ext` module that selects functions stays bytecode
-    // but for them (`selected`).
-    if let Some(selected) = crate::select::module()
-        && publishes.variables
-        && mode_allows(path)
-    {
+    // A non-strict `--ext` module stays bytecode but for its selected
+    // functions (`selected`); a build with nothing selected makes no
+    // extension, so an empty selection compiles nothing.
+    if publishes.variables && mode_allows(path) {
+        let none = BTreeSet::new();
+        let selected = crate::select::module().unwrap_or(&none);
         return super::selected::with_selection(path, display, publishes, selected, attempt, split);
     }
     set_override(None);
-    // A non-strict `--ext` module: its container slots that code holding an
-    // instance as a CPython object may use -- its own fallback code, and
-    // in a package built one extension per module the other modules -- are
-    // CPython objects (`pycc_hir`'s `external_reads`).
-    pycc_hir::set_external_attribute_reads(if publishes.variables && mode_allows(path) {
-        super::package_bases::attributes_used_in_package(path, publishes.foreign_relative_imports)
-    } else {
-        BTreeSet::new()
-    });
+    pycc_hir::set_external_attribute_reads(BTreeSet::new());
     let first = attempt();
     let failures = match &first {
-        Ok(_) if publishes.variables && mode_allows(path) => {
-            // Nothing falls back, but Python code reads the module's
-            // variables: compile the rewrite that publishes them.
-            let Some(mut plan) =
-                read_entry(path).and_then(|s| Plan::new(&s, display, publishes))
-            else {
-                return first;
-            };
-            plan.set_entry(path);
-            let subclassed = plan
-                .stmts
-                .iter()
-                .any(|stmt| matches!(&stmt.kind, Kind::Class(n) if plan.package_bases.contains_key(n)));
-            if plan.external.is_empty()
-                && !plan.stmts.iter().any(|stmt| stmt.hidden_members)
-                && !subclassed
-            {
-                return first;
-            }
-            plan.cascade();
-            if plan.falls_back_a_project_import() {
-                return first;
-            }
-            let rendered = plan.render();
-            if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
-                eprintln!("--- fallback rewrite ---\n{}", rendered.text);
-            }
-            install(&rendered);
-            let value = match attempt() {
-                Ok(value) => Some(value),
-                Err(failure) => split(&failure).and_then(|failures| {
-                    converge(&mut plan, Some(rendered), failures, &attempt, &split)
-                }),
-            };
-            return match value {
-                Some(value) if !plan.falls_back_a_project_import() => {
-                    if REPORT.load(Ordering::Relaxed) {
-                        for line in plan.report_lines() {
-                            eprintln!("{line}");
-                        }
-                    }
-                    Ok(value)
-                }
-                _ => {
-                    set_override(None);
-                    attempt()
-                }
-            };
-        }
         // Strict mode: Python code reads the module's variables, which a
         // rewrite copies onto the module object (`crate::ext_globals`).
         // Not under `--foreign-relative-imports`: the artifact is imported

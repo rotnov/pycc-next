@@ -159,7 +159,7 @@ fn a_mirrored_import_binds_its_names_with_one_import_call_as_cpython() {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);

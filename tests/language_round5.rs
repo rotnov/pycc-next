@@ -161,7 +161,7 @@ fn global_statements_match_cpython() {
 fn global_statements_compile_natively_in_non_strict_mode() {
     let report = matches_cpython(
         "global_statements.py",
-        &["--non-strict", "--select", "module", "--report-fallbacks"],
+        &["--non-strict", "--select", "all", "--report-fallbacks"],
         "",
     );
     assert!(!report.contains("fallback:"), "{report}");
@@ -218,7 +218,7 @@ fn computed_instance_attributes_match_cpython() {
 /// definition in the same block, compile natively.
 #[test]
 fn defs_in_module_level_blocks_match_cpython() {
-    let report = matches_cpython("block_defs.py", &["--non-strict", "--select", "module", "--report-fallbacks"], "");
+    let report = matches_cpython("block_defs.py", &["--non-strict", "--select", "all", "--report-fallbacks"], "");
     assert!(
         !report.contains("blk.py:2-") && !report.contains("block_defs.py:2-"),
         "{report}"
@@ -247,7 +247,7 @@ fn generator_expressions_match_cpython() {
 #[test]
 fn generators_compile_natively_in_non_strict_mode() {
     for name in ["generators.py", "generator_expressions.py"] {
-        let report = matches_cpython(name, &["--non-strict", "--select", "module", "--report-fallbacks"], "");
+        let report = matches_cpython(name, &["--non-strict", "--select", "all", "--report-fallbacks"], "");
         assert!(!report.contains("fallback:"), "{report}");
     }
 }
@@ -287,7 +287,7 @@ fn closures_match_cpython() {
 /// The same program compiles natively in non-strict mode.
 #[test]
 fn closures_compile_natively_in_non_strict_mode() {
-    let report = matches_cpython("closures.py", &["--non-strict", "--select", "module", "--report-fallbacks"], "");
+    let report = matches_cpython("closures.py", &["--non-strict", "--select", "all", "--report-fallbacks"], "");
     assert!(!report.contains("fallback:"), "{report}");
 }
 

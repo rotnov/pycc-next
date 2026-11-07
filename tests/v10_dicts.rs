@@ -76,7 +76,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn ext(name: &str, flags: &[&str]) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    let mut all = vec!["--ext", "--non-strict", "--select", "module"];
+    let mut all = vec!["--ext", "--non-strict", "--select", "all"];
     all.extend_from_slice(flags);
     build(&source, &compiled.join("m"), &all);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
@@ -117,7 +117,7 @@ fn functions_calling(name: &str, callee: &str) -> Vec<String> {
     let source = fixture(name, &dir, "m.py");
     let ir = dir.join("m.ll");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("m"))

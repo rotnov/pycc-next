@@ -62,7 +62,7 @@ fn build_whole(dir: &Path) -> String {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks", "--release"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks", "--release"])
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);

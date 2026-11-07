@@ -6,13 +6,10 @@ every module (`pycc build pydantic --ext`, v0.8), or with `--separate` module by
 each as its own `--foreign-relative-imports` extension module (pydantic-core, its Rust
 part, is not built: it is the PyPI wheel the test interpreter has installed;
 `pydantic.v1`, the bundled copy of pydantic 1, is kept in Python). By default only the
-functions the training profile selects are compiled (`--select`, below). Under
-`--select module`, for every module the script prints how many of its
-functions and methods compile natively, from `--report-fallbacks`: a `def` inside a
-range the report says runs in CPython (`fallback: ... at f:a-b runs in CPython`) is
-not native; a class statement CPython runs with its methods compiled reports only its
-header, so its methods count as native. The archive is untrusted data and is handled
-as in `bench/package_check.py` (checked members, the `data` extraction filter).
+functions the training profile selects are compiled (`--select`, below); the modules
+stay bytecode, so their `.py` files stay. The script prints what was compiled and what
+was not, from `--report-fallbacks`. The archive is untrusted data and is handled as in
+`bench/package_check.py` (checked members, the `data` extraction filter).
 
 v0.7 accept 4's measurement, not a CI gate; `.github/workflows/bench.yml` runs `--time`.
 
@@ -21,7 +18,7 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
                                        [--time [PYTHON]] [--runs N] [--repeat R]
                                        [--separate] [--json PATH] [--competitors]
                                        [--cachegrind [PYTHON]] [--cg-repeat R]
-                                       [--select profile|module] [MODULE ...]
+                                       [--select profile|all] [MODULE ...]
   MODULE   build only the modules whose path contains one of these strings
            (implies --separate).
   --select profile (default)
@@ -29,18 +26,14 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
            (docs/design/compile-little.md): `pycc profile` first runs
            `bench/pydantic_workload.py --train` against the unchanged sources
            (with the `--time` interpreter, else this one), the build passes it
-           as `--profile`, and the modules' `.py` files stay, since their
-           bytecode runs. Prints what was compiled and what was not.
-  --select module
-           the transitional whole-module compilation (`--select module`), which
-           also counts how many functions of each module compile natively and
-           removes the `.py` files.
+           as `--profile`.
+  --select all
+           compile every eligible function (`pycc build --select all`).
   --separate
            build each module as its own extension (before v0.8's whole-package
            build).
-  --keep   leave the built tree (compiled modules, the `.py` files removed under
-           `--select module`, the sdist's
-           tests beside them) in DIR instead of a temporary directory.
+  --keep   leave the built tree (the extension beside the modules' sources, the
+           sdist's tests beside them) in DIR instead of a temporary directory.
   --tests  then run pydantic's own test suite against the compiled tree with
            PYTHON, an interpreter with pydantic-core 2.50.2 and the suite's test
            dependencies installed (pytest, pytest-mock, dirty-equals, inline-snapshot,
@@ -121,33 +114,10 @@ PYDANTIC = package_check.Package(
     instruction_calls=0,
 )
 
-FALLBACK = re.compile(r"^fallback: .*? at (.*?):(\d+)(?:-(\d+))? runs in CPython: (.*)$", re.M)
-
-
-def count_defs(text: str) -> int:
-    return len(re.findall(r"^\s*(?:async\s+)?def ", text, re.M))
-
-
-def count(py: pathlib.Path, r: subprocess.CompletedProcess,
-          whole: bool) -> tuple[pathlib.Path, int, int, list[str]]:
-    """`py`, its function count, how many run in CPython and the report's fallback
-    reasons (or the build failure), from the build `r` (of the whole package when
-    `whole`, whose report names each module's file)."""
-    text = py.read_text(encoding="utf-8")
-    defs = count_defs(text)
-    if r.returncode != 0:
-        last = (r.stderr.strip().splitlines() or ["?"])[-1]
-        return py, defs, defs, ["BUILD FAILED: " + last]
-    lines = text.splitlines()
-    fell, notes = 0, []
-    for m in FALLBACK.finditer(r.stderr):
-        if whole and pathlib.Path(m[1]).resolve() != py.resolve():
-            continue
-        lo, hi = int(m[2]), int(m[3] or m[2])
-        n = count_defs("\n".join(lines[lo - 1:hi]))
-        fell += n
-        notes.append(f"{lo}-{hi} ({n}): {m[4][:160]}")
-    return py, defs, fell, notes
+def compiled_lines(r: subprocess.CompletedProcess) -> list[str]:
+    """The `compiled: ` and `not compiled: ` lines of build `r`'s report."""
+    return [line for line in r.stderr.splitlines()
+            if line.startswith(("compiled: ", "not compiled: "))]
 
 
 FLAGS = ["--ext", "--non-strict", "--release", "--report-fallbacks"]
@@ -168,13 +138,15 @@ def training_profile(pycc: str, python: str, src: pathlib.Path, out: pathlib.Pat
             print(line)
 
 
-def build(pycc: str, py: pathlib.Path, select: list[str]) -> tuple[pathlib.Path, int, int, list[str]]:
+def build(pycc: str, py: pathlib.Path, select: list[str]) -> subprocess.CompletedProcess:
     """Builds one module as its own extension (`--separate`)."""
     out = py.parent / "__init__" if py.name == "__init__.py" else py.with_suffix("")
     r = subprocess.run([pycc, "build", str(py), "-o", str(out), *FLAGS, *select,
                         "--foreign-relative-imports"],
                        capture_output=True, text=True, timeout=1800)
-    return count(py, r, whole=False)
+    if r.returncode != 0:
+        print(f"{py}: BUILD FAILED: {(r.stderr.strip().splitlines() or ['?'])[-1]}")
+    return r
 
 
 WORKLOAD = pathlib.Path(__file__).resolve().parent / "pydantic_workload.py"
@@ -359,7 +331,7 @@ def main() -> int:
     p.add_argument("--competitors", action="store_true")
     p.add_argument("--cachegrind", nargs="?", const=sys.executable)
     p.add_argument("--cg-repeat", type=int, default=5)
-    p.add_argument("--select", choices=("profile", "module"), default="profile")
+    p.add_argument("--select", choices=("profile", "all"), default="profile")
     a = p.parse_args()
     archive = package_check.fetch(PYDANTIC, pathlib.Path(a.cache))
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -376,13 +348,12 @@ def main() -> int:
         mods = sorted(q for q in (tree / "pydantic").rglob("*.py") if "v1" not in q.parts)
         if a.modules:
             mods = [m for m in mods if any(o in str(m) for o in a.modules)]
-        total = fell_total = failed = 0
         if a.select == "profile":
             profile = tmp / "pycc.profile.json"
             training_profile(a.pycc, a.time or sys.executable, src, profile)
             select = ["--profile", str(profile)]
         else:
-            select = ["--select", "module"]
+            select = ["--select", "all"]
         if a.separate or a.modules:
             with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
                 results = list(ex.map(lambda q: build(a.pycc, q, select), mods))
@@ -392,46 +363,22 @@ def main() -> int:
                                 *FLAGS, *select, "--exclude", "v1"], capture_output=True,
                                text=True, timeout=3600,
                                env=dict(os.environ, PYCC_JOBS=str(a.jobs)))
-            results = [count(q, r, whole=True) for q in mods]
-            if a.select == "profile":
-                if r.returncode != 0:
-                    sys.exit(f"the build failed:\n{r.stderr}")
-                compiled = [line for line in r.stderr.splitlines()
-                            if line.startswith(("compiled: ", "not compiled: "))]
-                print("\n".join(compiled))
-        for py, defs, fell, notes in results:
-            total += defs
-            fell_total += fell
-            failed += bool(notes and notes[0].startswith("BUILD FAILED"))
-            if a.select == "profile":
-                continue
-            print(f"{py.relative_to(tree)}: {defs - fell}/{defs} native")
-            for n in notes:
-                print("    " + n)
-            sys.stdout.flush()
-        if a.select == "profile":
-            # Only the selected functions are compiled; the modules run as bytecode.
-            n = sum(line.startswith("compiled: ") for line in r.stderr.splitlines()) \
-                if not (a.separate or a.modules) else 0
-            print(f"TOTAL: {n} selected functions compiled")
-        else:
-            print(f"TOTAL: {total - fell_total}/{total} functions native, "
-                  f"{failed} modules failed to build")
+            if r.returncode != 0:
+                sys.exit(f"the build failed:\n{r.stderr}")
+            results = [r]
+        # Only the compiled functions are native; the modules run as bytecode.
+        compiled = [line for r in results for line in compiled_lines(r)]
+        print("\n".join(compiled))
+        failed = sum(r.returncode != 0 for r in results)
+        n = sum(line.startswith("compiled: ") for line in compiled)
+        print(f"TOTAL: {n} functions compiled, {failed} modules failed to build")
         if not a.tests and not a.time and not a.cachegrind:
             return 1 if failed else 0
-        for py in mods:
-            if a.select == "profile":
-                break  # the modules' bytecode runs: their sources stay
-            # A module whose separate build failed stays Python.
-            if not (a.separate or a.modules) or any(
-                    q.name.startswith(py.stem + ".") and q.suffix in (".so", ".pyd")
-                    for q in py.parent.iterdir()):
-                py.unlink()
         plain = tmp / "plain"
         shutil.copytree(src / "pydantic", plain / "pydantic")
         work = tmp / "work"
         work.mkdir()
-        doc: dict = {"version": PYDANTIC.version, "native": f"{total - fell_total}/{total}"}
+        doc: dict = {"version": PYDANTIC.version, "compiled": n}
         if a.cachegrind:
             cgpy = str(pathlib.Path(a.cachegrind).absolute()) if "/" in a.cachegrind \
                 else a.cachegrind

@@ -44,7 +44,7 @@ fn an_arbitrary_decorator_runs_in_cpython_under_non_strict() {
             .expect("the oracle runs"),
     );
     assert_eq!(
-        run_native("stdlib_user_decorator", &source, &["--non-strict", "--select", "module"]),
+        run_native("stdlib_user_decorator", &source, &["--non-strict"]),
         expected
     );
 }

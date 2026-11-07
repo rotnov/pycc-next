@@ -77,7 +77,7 @@ fn build_module(dir: &Path, module: &str, script: &str, flags: &[&str]) -> Strin
     std::fs::copy(fixture(module), &build_src).expect("source");
     let out = Command::new(env!("CARGO_BIN_EXE_pycc"))
         .arg("build")
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .args(flags)
         .arg(&build_src)
         .arg("-o")
@@ -166,7 +166,7 @@ fn run_as_program(module: &str) {
     let source = dir.join("prog.py");
     std::fs::copy(fixture(module), &source).expect("source");
     let out = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--non-strict", "--select", "module", "--release"])
+        .args(["build", "--non-strict", "--select", "all", "--release"])
         .arg(&source)
         .arg("-o")
         .arg(dir.join("prog"))

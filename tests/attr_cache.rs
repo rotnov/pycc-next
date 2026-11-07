@@ -20,8 +20,10 @@ fn python() -> Command {
     Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
 }
 
-/// Builds `tests/fixtures/<fixture>.py` as an extension module and compares
-/// importing it, with the caches on and off, against CPython running it;
+/// Builds `tests/fixtures/<fixture>.py` as an extension module (`--select
+/// all`) and compares importing it and calling its `main()`, once the
+/// selected functions are patched, with the caches on and off, against
+/// CPython running it;
 /// `hits` when the fixture reads attributes the caches must answer (with
 /// the caches off, none is answered either way).
 fn matches_cpython(fixture: &str, hits: bool) {
@@ -46,7 +48,7 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, 
     let module = format!("{fixture}_ext");
     std::fs::copy(&source, dir.join(format!("{module}.py"))).expect("copy the fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(dir.join(format!("{module}.py")))
         .arg("-o")
         .arg(dir.join(&module))
@@ -60,7 +62,7 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, 
         .expect("python3 should spawn");
     assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
     let probe = format!(
-        "import ctypes, sys\nimport {module}\n\
+        "import ctypes, sys\nimport {module}\n{module}.main()\n\
          hits = ctypes.CDLL({module}.__file__).pycc_ext_attr_cache_hits()\n\
          print('HITS', hits > 0, file=sys.stderr)\n\
          print('COUNT', hits, file=sys.stderr)\n\
@@ -164,10 +166,8 @@ fn an_empty_literal_and_its_neighbour_compare_apart() {
     matches_cpython("text_literal_compare", false);
 }
 
-/// v0.9: a module attribute whose dict key is a `str` equal to the read's
-/// name but not the same object -- what a non-strict module's compiled
-/// global stores (`ns['LIMIT'] = LIMIT`) insert -- is cached too: every
-/// read in the loop is a hit, and a rebinding is still seen.
+/// v0.9: a module's own attributes read through the module object are
+/// cached: every read in the loop is a hit, and a rebinding is still seen.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn module_attributes_stored_by_compiled_code_are_cached() {

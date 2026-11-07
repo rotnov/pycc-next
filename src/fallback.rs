@@ -83,7 +83,6 @@ mod state;
 
 pub(crate) use state::{
     Snapshot, active, attached_methods, code_chunks, entry_copied, entry_override, entry_source, reporting, set_report,
-    twinned_exports,
 };
 use state::{REPORT, install, set_override};
 
@@ -214,13 +213,8 @@ pub(crate) struct Plan {
     demoted: BTreeSet<String>,
     /// Compiled imports that fallback code reads a name of: they stay
     /// compiled and also run in CPython right after, so both sides see the
-    /// module (`cascade`). Also every function in `twinned`.
+    /// module (`cascade`).
     mirrored: BTreeSet<usize>,
-    /// Functions whose signature the `--ext` boundary cannot carry (an
-    /// export gap, `C0003`): compiled code calls the compiled function,
-    /// and its source also runs in CPython right after, binding the name
-    /// Python code reads (its *twin*). Index -> the gap.
-    twinned: BTreeMap<usize, String>,
     /// The entry file's directory: an import of a module found there is the
     /// program's own and is never mirrored (CPython would load a second copy).
     entry_dir: Option<std::path::PathBuf>,
@@ -405,7 +399,6 @@ impl Plan {
             erased: BTreeMap::new(),
             substituted: BTreeMap::new(),
             mirrored: BTreeSet::new(),
-            twinned: BTreeMap::new(),
             demoted: BTreeSet::new(),
             objectified: BTreeSet::new(),
             entry_dir: None,
@@ -581,7 +574,6 @@ impl Plan {
             self.object_builtins.len(),
             self.demoted.len(),
             self.erased.len(),
-            self.twinned.len(),
             self.nested.len(),
         );
         // The docstring and `from __future__` imports stay compiled: the
@@ -623,9 +615,6 @@ impl Plan {
                 continue;
             }
             let reason = describe(&failure.diagnostic);
-            if self.twin(rendered, failure, &reason) {
-                continue;
-            }
             match self.owner_of(rendered, failure) {
                 Some(index) if index >= first => {
                     // Name the line within a multi-line statement.
@@ -695,7 +684,6 @@ impl Plan {
             self.object_builtins.len(),
             self.demoted.len(),
             self.erased.len(),
-            self.twinned.len(),
             self.nested.len(),
         ) != before
     }
@@ -830,26 +818,6 @@ impl Plan {
             );
         }
         !receiving.is_empty()
-    }
-
-    /// Twins the function an export gap (`C0003`) of an `--ext` module
-    /// refuses, returning whether it did.
-    fn twin(&mut self, rendered: Option<&Rendered>, failure: &Failure, reason: &str) -> bool {
-        if failure.diagnostic.code != "C0003" || !self.publishes.variables {
-            return false;
-        }
-        let Some(index) = self.owner_of(rendered, failure) else {
-            return false;
-        };
-        if !matches!(self.stmts[index].kind, Kind::Def(..))
-            || self.fallback.contains_key(&index)
-            || index >= self.top
-        {
-            return false;
-        }
-        self.mirrored.insert(index);
-        self.twinned.entry(index).or_insert_with(|| reason.to_string());
-        true
     }
 
     /// The source line a failure's span starts on, when it has one in

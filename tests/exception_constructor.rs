@@ -26,7 +26,7 @@ fn functions_raising_an_exception_class_with_a_constructor_stay_compiled() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/exception_constructor.py");
     std::fs::copy(&source, dir.join("excmod.py")).expect("copy the fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(dir.join("excmod.py"))
         .arg("-o")
         .arg(dir.join("excmod"))

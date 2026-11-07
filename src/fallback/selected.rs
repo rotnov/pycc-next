@@ -253,7 +253,6 @@ impl Plan {
             copied: out.copied,
             mirror_spans: out.mirror_spans,
             edited: out.edited,
-            twinned: BTreeSet::new(),
             attached: Vec::new(),
             chunks: out.chunks,
         }

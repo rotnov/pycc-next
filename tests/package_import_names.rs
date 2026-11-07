@@ -117,7 +117,7 @@ fn every_member_s_native_calls_answer_as_cpython_does() {
         .arg(&package)
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);

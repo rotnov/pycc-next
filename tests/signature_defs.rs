@@ -165,7 +165,7 @@ fn check(label: &str, module: &str, driver: &str) -> String {
     let path = compiled.join("m.py");
     std::fs::write(&path, module).expect("write the module");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(&path)
         .arg("-o")
         .arg(compiled.join("m"))

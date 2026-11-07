@@ -2,11 +2,11 @@
 
 Each package in PACKAGES is pinned by version and by the sha256 of what is downloaded. Its
 modules are built unchanged with `--ext --non-strict`: a package (a directory) whole, into
-one extension `pkg/__init__.abi3.so` holding every module (`pycc build PKG --ext`, v0.8;
-`--separate` builds each module as its own extension instead), a single-module package
-as its own extension; the `.py` files are removed from the tree, and the package's own
-unittest suite runs in CPython against the compiled modules (and, first, against the
-sources). The downloaded
+one extension `pkg/__init__.abi3.so` serving its modules with compiled functions (`pycc
+build PKG --ext`, v0.8; `--separate` builds each module as its own extension instead), a
+single-module package as its own extension; the modules stay bytecode, so their `.py`
+files stay, and the package's own unittest suite runs in CPython against the compiled
+tree (and, first, against the sources). The downloaded
 archive is untrusted data: every member must be a regular file or a directory (a
 symlink, hard link or special file fails the check before anything is extracted, so
 what is hashed is what is built and run), it is extracted with tarfile's `data` filter
@@ -41,23 +41,23 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
                                       [--max-build-seconds S] [--jobs N]
                                       [--instructions] [--separate] [--json PATH]
-                                      [--competitors] [--select module|profile]
+                                      [--competitors] [--select profile|all]
   PACKAGE  names from PACKAGES (default: all of them).
-  --select module (default)
-           compile whole modules (the transitional `--select module`,
-           docs/design/compile-little.md) and remove the `.py` files.
-  --select profile
+  --select profile (default)
            compile only the functions a profile selects: `pycc profile` runs
            the package's own test suite and then each of its timed workloads
            once (the training input, `training`) against the unchanged sources
-           first, the build passes it as `--profile`, and the
-           `.py` files stay, since the modules' bytecode runs. The modules the
+           first, and the build passes it as `--profile`. The modules the
            build keeps in Python (`excludes`) are excluded from the profile's
            candidates too, the layout's other entries are given to pass 3
            (`--verify-include`), and the check fails unless the build
-           compiles exactly the set pass 3 measured as the winner. The suite
-           then checks that each module with a compiled function is imported
-           through the extension.
+           compiles exactly the set pass 3 measured as the winner.
+  --select all
+           compile every eligible function (`pycc build --select all`): what
+           the build makes of each function does not depend on timing, so
+           `--instructions` counts are stable from run to run.
+  Either way the suite then checks that each module with a compiled
+  function is imported through the extension.
   --time   also time each package's hot paths compiled and in CPython (pypng:
            its 256x256 filter image, and every PngSuite image its tests use;
            mistune and pystache: also `import PACKAGE`, see `import_timed`).
@@ -210,10 +210,6 @@ def python(code: str, *args: str, cwd: pathlib.Path) -> subprocess.CompletedProc
                           capture_output=True, text=True, timeout=900)
 
 
-def count_defs(src: str) -> int:
-    return len(re.findall(r"^\s*def ", src, re.M))
-
-
 # `--time`'s measurements, for `--json`.
 TIMINGS: list[dict] = []
 # `--competitors`' builds, for `--json`.
@@ -298,8 +294,6 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     single = pkg.layout[0][0].endswith(".py")
     pkg_dir = built if single else built / pkg.layout[0][0]
 
-    defs = fell = 0
-
     flags = ["--ext", "--non-strict", "--release", "--report-fallbacks"]
     if a.select == "profile":
         # The training input is every workload the check runs (`training`):
@@ -329,7 +323,7 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
                 print("  " + line)
         flags += ["--profile", str(profile)]
     else:
-        flags += ["--select", "module"]
+        flags += ["--select", "all"]
 
     def build(mod: str) -> tuple[subprocess.CompletedProcess, float]:
         py = pkg_dir / mod
@@ -367,21 +361,6 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             print(b.stdout + b.stderr)
             print(f"FAIL: pycc could not build {pkg.import_name}/{mod}")
             return False
-        source = (pkg_dir / mod).read_text(encoding="utf-8")
-        defs += count_defs(source)
-        lines = source.splitlines()
-        # A whole-package build reports every module's fallbacks: this
-        # module's name its file.
-        for m in re.finditer(r"^fallback: .*? at (.*?):(\d+)(?:-(\d+))? runs in CPython: (.*)$",
-                             b.stderr, re.M):
-            if not pathlib.Path(m[1]).as_posix().endswith(f"/{pkg_dir.name}/{mod}") \
-                    and not single:
-                continue
-            lo = int(m[2])
-            hi = int(m[3] or m[2])
-            n = count_defs("\n".join(lines[lo - 1:hi]))
-            fell += n
-            print(f"  {mod}:{lo}-{hi} in CPython ({n} functions): {m[4]}")
         if single or a.separate:
             for line in b.stderr.splitlines():
                 if line.startswith(("specialized:", "not specialized:")):
@@ -392,7 +371,7 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
                 print(f"  {line}")
     # Only now: a module's dotted name is found from the `__init__.py`
     # files beside and above it.
-    # The selected functions compiled, by module (`--select profile`).
+    # The selected functions compiled, by module.
     selected: dict[str, list[str]] = {}
     for b, _ in results:
         for line in b.stderr.splitlines():
@@ -401,13 +380,13 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
                 if qualname not in selected.setdefault(module, []):
                     selected[module].append(qualname)
     cpu = sum(seconds for _, seconds in results if seconds == seconds)
+    # The modules' bytecode runs: their sources stay.
+    n = sum(len(q) for q in selected.values())
+    for module, qualnames in sorted(selected.items()):
+        print(f"  compiled: {module}: {', '.join(qualnames)}")
+    print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s "
+          f"({cpu:.2f}s of builds, {a.jobs} at a time); {n} selected functions compiled")
     if a.select == "profile":
-        # The modules' bytecode runs: their sources stay.
-        n = sum(len(q) for q in selected.values())
-        for module, qualnames in sorted(selected.items()):
-            print(f"  compiled: {module}: {', '.join(qualnames)}")
-        print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s "
-              f"({cpu:.2f}s of builds, {a.jobs} at a time); {n} selected functions compiled")
         # The build compiles exactly the set pass 3 measured as the winner.
         r = subprocess.run([a.pycc, "profile", str(plain / pkg.layout[0][0]), "-o", str(profile),
                             "--check", *[arg for e in pkg.excludes for arg in ("--exclude", e)],
@@ -420,12 +399,6 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             print(f"FAIL: the build compiled {sorted(compiled_set)}, but pass 3 measured "
                   f"{sorted(measured)} as the winner")
             return False
-    else:
-        for mod in pkg.modules:
-            (pkg_dir / mod).unlink()
-        native = defs - fell
-        print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s "
-              f"({cpu:.2f}s of builds, {a.jobs} at a time); {native}/{defs} functions native")
     if a.max_build_seconds is not None and build_seconds > a.max_build_seconds:
         print(f"FAIL: {pkg.name} took {build_seconds:.2f}s to build, more than "
               f"{a.max_build_seconds:g}s")
@@ -438,8 +411,7 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
         .removesuffix(".__init__")
         for m in pkg.modules
     )
-    compiled = ("selected", ",".join(sorted(selected))) if a.select == "profile" \
-        else ("compiled", names)
+    compiled = ("selected", ",".join(sorted(selected)))
     for label, tree, check_names in (("cpython", plain, names), ("compiled", built, compiled[1])):
         mode = compiled[0] if label == "compiled" else label
         r = python(CHECK_COMPILED + pkg.tests, str(tree), mode, check_names, cwd=cwd)
@@ -541,7 +513,7 @@ def main() -> int:
     ap.add_argument("--separate", action="store_true")
     ap.add_argument("--json")
     ap.add_argument("--competitors", action="store_true")
-    ap.add_argument("--select", choices=("module", "profile"), default="module")
+    ap.add_argument("--select", choices=("profile", "all"), default="profile")
     a = ap.parse_args()
     for name in a.packages:
         if name not in PACKAGES:

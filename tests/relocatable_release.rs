@@ -203,7 +203,7 @@ fn the_packaged_compiler_builds_ext_and_non_strict_programs() {
         "prog.py",
         "-o",
         "prog",
-        "--non-strict", "--select", "module",
+        "--non-strict", "--select", "all",
     ]));
     assert_eq!(
         run_ok(&mut isolated(dir.join("prog"), &scratch, &dir)),

@@ -53,7 +53,7 @@ fn build_ext(dir: &Path, module: &str, source: &Path) {
         .arg(source)
         .arg("-o")
         .arg(dir.join(module))
-        .args(["--ext", "--non-strict", "--select", "module", "--release", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--release", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
@@ -82,7 +82,7 @@ fn strict_matches_cpython() {
 
 #[test]
 fn non_strict_matches_cpython() {
-    native_build_matches_cpython("str_scan_loop", &["--non-strict", "--select", "module"]);
+    native_build_matches_cpython("str_scan_loop", &["--non-strict"]);
 }
 
 #[test]

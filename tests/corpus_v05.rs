@@ -130,7 +130,7 @@ fn strict_infers_the_corpus_signatures() {
 
 #[test]
 fn non_strict_runs_the_inference_fixture_natively() {
-    let report = matches_cpython("corpus_v05_inference.py", &["--non-strict", "--select", "module", "--report-fallbacks"]);
+    let report = matches_cpython("corpus_v05_inference.py", &["--non-strict", "--report-fallbacks"]);
     assert!(!report.contains("fallback:"), "{report}");
 }
 
@@ -149,13 +149,13 @@ fn a_format_field_the_arguments_do_not_cover_is_not_rewritten() {
 
 #[test]
 fn non_strict_runs_object_paths_without_fallback() {
-    let report = matches_cpython("corpus_v05_objects.py", &["--non-strict", "--select", "module", "--report-fallbacks"]);
+    let report = matches_cpython("corpus_v05_objects.py", &["--non-strict", "--report-fallbacks"]);
     assert!(!report.contains("fallback:"), "{report}");
 }
 
 #[test]
 fn non_strict_runs_cpython_builtins_over_objects_without_fallback() {
-    let report = matches_cpython("corpus_v05_builtins.py", &["--non-strict", "--select", "module", "--report-fallbacks"]);
+    let report = matches_cpython("corpus_v05_builtins.py", &["--non-strict", "--report-fallbacks"]);
     assert!(!report.contains("fallback:"), "{report}");
 }
 
@@ -182,6 +182,6 @@ fn strict_mode_keeps_refusing_the_object_builtins() {
 #[test]
 fn an_infinity_an_int_replaces_matches_cpython() {
     matches_cpython("corpus_v05_int_inf.py", &[]);
-    let report = matches_cpython("corpus_v05_int_inf.py", &["--non-strict", "--select", "module", "--report-fallbacks"]);
+    let report = matches_cpython("corpus_v05_int_inf.py", &["--non-strict", "--report-fallbacks"]);
     assert!(!report.contains("fallback:"), "{report}");
 }

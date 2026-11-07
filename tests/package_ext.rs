@@ -78,7 +78,7 @@ fn build_package(dir: &Path) -> String {
             .arg(package.join(module))
             .args([
                 "--ext",
-                "--non-strict", "--select", "module",
+                "--non-strict", "--select", "all",
                 "--foreign-relative-imports",
                 "--report-fallbacks",
             ])
@@ -138,7 +138,7 @@ fn a_package_init_outside_an_identifier_directory_is_refused() {
         .arg(package.join("__init__.py"))
         .arg("-o")
         .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module"])
+        .args(["--ext", "--non-strict", "--select", "all"])
         .output()
         .expect("pycc should spawn");
     assert!(!build.status.success());

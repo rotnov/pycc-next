@@ -54,7 +54,7 @@ fn run(dir: &Path, script: &str) -> Output {
 fn build(name: &str, dir: &Path, flags: &[&str]) -> String {
     let source = fixture(name, dir, "m.py");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .args(flags)
         .arg(&source)
         .arg("-o")
@@ -228,7 +228,7 @@ fn build_package(dir: &str, package: &str, flags: &[&str]) -> (String, ScratchDi
         .arg(&tree)
         .arg("-o")
         .arg(tree.join("__init__"))
-        .args(["--ext", "--non-strict", "--select", "module"])
+        .args(["--ext", "--non-strict", "--select", "all"])
         .args(flags)
         .output()
         .expect("pycc should spawn");

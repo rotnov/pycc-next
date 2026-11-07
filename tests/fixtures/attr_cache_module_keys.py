@@ -1,6 +1,5 @@
-# A module's own globals read as attributes of the module object: the
-# compiled stores put keys into its dict that are equal to, not identical
-# with, the interned names the reads look up.
+# A module's own globals read as attributes of the module object, through
+# the attribute cache, and rebound and deleted between the reads.
 import sys
 
 LIMIT = "strict"
@@ -15,11 +14,16 @@ def read_many(n):
     return total
 
 
-print(read_many(200))
-sys.modules[__name__].LIMIT = "xx"
-print(read_many(3))
-del sys.modules[__name__].COUNT
-try:
-    read_many(1)
-except AttributeError as e:
-    print("AttributeError", e.name)
+def main():
+    print(read_many(200))
+    sys.modules[__name__].LIMIT = "xx"
+    print(read_many(3))
+    del sys.modules[__name__].COUNT
+    try:
+        read_many(1)
+    except AttributeError as e:
+        print("AttributeError", e.name)
+
+
+if __name__ == "__main__":
+    main()

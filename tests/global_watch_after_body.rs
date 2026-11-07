@@ -41,7 +41,7 @@ fn compiled_and_oracle(fixture: &str, driver: Option<&str>) -> (String, String) 
         }
     }
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(compiled.join("m.py"))
         .arg("-o")
         .arg(compiled.join("m"))

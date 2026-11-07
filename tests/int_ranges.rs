@@ -43,7 +43,7 @@ fn proven_smallint_locals_match_cpython_in_every_mode() {
     for (mode, flags) in [
         ("debug", &[][..]),
         ("strict", &["--release"][..]),
-        ("non-strict", &["--release", "--non-strict", "--select", "module"][..]),
+        ("non-strict", &["--release", "--non-strict", "--select", "all"][..]),
     ] {
         let binary = dir.join(format!("app-{mode}"));
         let build = pycc()
@@ -142,7 +142,7 @@ fn ext_and_source(dir: &std::path::Path, flags: &[&str]) {
 #[test]
 #[ignore = "requires a CPython 3.13+ oracle and Python.h (PYCC_PYTHON, default python3)"]
 fn an_ext_module_called_with_other_types_matches_cpython() {
-    for flags in [&["--release"][..], &["--release", "--non-strict", "--select", "module"][..]] {
+    for flags in [&["--release"][..], &["--release", "--non-strict", "--select", "all"][..]] {
         let dir = ScratchDir::new("int_ranges_ext").expect("scratch");
         ext_and_source(&dir, flags);
         let run = |d: &str| {

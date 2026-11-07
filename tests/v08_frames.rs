@@ -53,7 +53,7 @@ fn compiled_frames_behave_as_cpython_frames() {
     let source = fixture("v08_frames_ext", &compiled);
     fixture("v08_frames_ext", &plain);
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module"])
+        .args(["build", "--ext", "--non-strict", "--select", "all"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("v08_frames_ext"))
@@ -94,7 +94,7 @@ fn an_embedded_programs_traceback_matches_cpython() {
     .unwrap();
     let build = pycc()
         .current_dir(&*dir)
-        .args(["build", "--non-strict", "--select", "module", "app.py", "-o"])
+        .args(["build", "--non-strict", "--select", "all", "app.py", "-o"])
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");

@@ -249,12 +249,14 @@ rule selects. A non-strict `--ext` build reads it with `--profile`; the plan is
 ### Real packages, unchanged
 
 `python3 bench/package_check.py` (CI-gated) downloads five pinned, permissively licensed
-pure-Python packages, builds each unchanged -- a package whole into one extension
-(`--separate`: each module as its own), a single-module package as its extension --
-removes the `.py` files and runs the package's own unittest suite with CPython against
-the compiled modules (`python3 bench/package_check.py tomli --time` checks one and times
-its hot path; `--instructions` counts the instructions one call of the hot path executes
-under callgrind and fails over a documented bound, which CI also gates):
+pure-Python packages, profiles each one's own test suite and workloads with `pycc
+profile`, builds it unchanged with that profile -- a package whole into one extension
+(`--separate`: each module as its own), a single-module package as its extension -- and
+runs the package's own unittest suite with CPython against the compiled tree
+(`python3 bench/package_check.py tomli --time` checks one and times its hot path;
+`--select all` compiles every eligible function instead; `--instructions` counts the
+instructions one call of the hot path executes under callgrind and fails over a
+documented bound, which CI gates with `--select all`):
 
 - [diff-match-patch](https://pypi.org/project/diff-match-patch/) 20241021 (Apache-2.0,
   Google's diff/match/patch algorithms, pinned by sdist sha256);
@@ -275,10 +277,16 @@ refused before extraction.
 For diff-match-patch:
 
 ```console
+$ pycc profile diff_match_patch -o pycc.profile.json --exclude tests -- python3 work.py
 $ pycc build diff_match_patch -o diff_match_patch/__init__ \
-      --ext --non-strict --select module --exclude tests       # the whole package
+      --ext --non-strict --profile pycc.profile.json --exclude tests
 $ python3 -m unittest diff_match_patch.tests                    # 28 tests, OK
 ```
+
+The rest of this section describes these packages built whole-module, as v0.11 built
+non-strict code and as bench run 41427758082 measured them; v0.12 compiles only the
+functions a profile selects, and the profile builds' figures are in
+[`docs/design/compile-little.md`](docs/design/compile-little.md), section 8.
 
 The package builds to `diff_match_patch/__init__.abi3.so`, imported as the package, which
 imports its two other modules from itself; its `tests` stay Python. Every
@@ -394,7 +402,7 @@ fallback-to-python = false         # true, or a list of modules: ship as .py if 
 extra-args = []                    # more `pycc build` flags for every module
 whole-package = true               # default; false builds each module as its own extension
 # non-strict modules compile only selected functions (see Modes):
-# select = "profile"               # default; or "all", "none", "module" (whole modules)
+# select = "profile"               # default; or "all", "none"
 # profile = "pycc.profile.json"    # `pycc profile`'s output, relative to the project
 # compile = ["geo.loose:scale"]    # MODULE:QUALNAME added to the selection
 # exclude = ["geo.loose:helper"]   # and removed from it
@@ -494,9 +502,8 @@ and setuptools): that is the test harness, not a change to the packages.
   `--compile`/`--no-compile MODULE:QUALNAME` adjust it, `--select all` compiles every
   eligible function. **Without a profile nothing is selected**, and a module or package
   with nothing selected gets no extension: CPython imports it unchanged (`-o OUT` then gets
-  the module's source as `OUT`'s `.py`). `--select
-  module` keeps compiling whole modules, as described below, for now.
-- **Per-function fallback** (non-strict only, whole modules): a construct pycc cannot compile yet (a
+  the module's source as `OUT`'s `.py`).
+- **Per-function fallback** (non-strict native builds, which compile whole modules): a construct pycc cannot compile yet (a
   call of a `lambda` expression, ...) sends only the smallest enclosing function or method to
   CPython, kept as Python source and run by CPython's own `exec` in the module's
   namespace, at its place in the module. A nested `def` or `lambda` used as a value

@@ -52,7 +52,7 @@ fn build(dir: &Path, flags: &[&str]) -> String {
     std::fs::copy(fixture("untyped_bytearray.py"), &build_src).expect("source");
     let out = Command::new(env!("CARGO_BIN_EXE_pycc"))
         .arg("build")
-        .args(["--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .args(flags)
         .arg(&build_src)
         .arg("-o")
@@ -119,7 +119,7 @@ fn a_specialization_calls_builtins_natively_when_it_can() {
     std::fs::write(src.join("m.py"), source).expect("write");
     let ll = dir.join("m.ll");
     let out = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(dir.join("m.py"))
         .arg("-o")
         .arg(ext.join("m"))

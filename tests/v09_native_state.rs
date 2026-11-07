@@ -70,7 +70,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
 fn native(name: &str, flags: &[&str]) {
     let dir = ScratchDir::new(&format!("{name}_native")).expect("scratch");
     let source = fixture(name, &dir, "m.py");
-    let mut all = vec!["--non-strict", "--select", "module"];
+    let mut all = vec!["--non-strict"];
     all.extend_from_slice(flags);
     build(&source, &dir.join("app"), &all);
     let ours = Command::new(dir.join("app")).output().expect("run the build");
@@ -81,7 +81,7 @@ fn native(name: &str, flags: &[&str]) {
 fn ext(name: &str, flags: &[&str]) {
     let compiled = ScratchDir::new(&format!("{name}_ext")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    let mut all = vec!["--ext", "--non-strict", "--select", "module"];
+    let mut all = vec!["--ext", "--non-strict", "--select", "all"];
     all.extend_from_slice(flags);
     build(&source, &compiled.join("m"), &all);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
@@ -137,7 +137,7 @@ fn imported_exception_classes_in_except_ext() {
 fn ext_hosted(name: &str, host: &str, flags: &[&str]) {
     let compiled = ScratchDir::new(&format!("{name}_hosted")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
-    let mut all = vec!["--ext", "--non-strict", "--select", "module"];
+    let mut all = vec!["--ext", "--non-strict", "--select", "all"];
     all.extend_from_slice(flags);
     build(&source, &compiled.join("m"), &all);
     std::fs::remove_file(&source).expect("import the artifact, not the source");
@@ -196,7 +196,7 @@ fn raise_of_a_compiled_exception_with_an_object_argument_ext() {
     let compiled = ScratchDir::new("v09_raise_object_ext").expect("scratch");
     let source = fixture("v09_raise_object", &compiled, "m.py");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(&source)
         .arg("-o")
         .arg(compiled.join("m"))

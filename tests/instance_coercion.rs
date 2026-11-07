@@ -24,7 +24,7 @@ fn an_object_passed_for_a_compiled_class_parameter_is_its_instance() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/instance_coercion.py");
     std::fs::copy(&source, dir.join("coerced.py")).expect("copy the fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
-        .args(["build", "--ext", "--non-strict", "--select", "module", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
         .arg(dir.join("coerced.py"))
         .arg("-o")
         .arg(dir.join("coerced"))

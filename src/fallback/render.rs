@@ -18,8 +18,6 @@ pub(crate) struct Rendered {
     /// `(range in text, source offset)` of every edit's replacement text,
     /// with the offset of the source text it replaced.
     pub(super) edited: Vec<(Range<u32>, u32)>,
-    /// The names of the twinned functions (`Plan::twinned`).
-    pub(super) twinned: BTreeSet<String>,
     /// Each method attached to a compiled class (`attach`): the class, the
     /// class statement's offset in `text`, and the attributes of `self`
     /// the method uses, which the frontend checks the carrier exposes.
@@ -244,14 +242,6 @@ impl Plan {
             copied: out.copied,
             mirror_spans: out.mirror_spans,
             edited: out.edited,
-            twinned: self
-                .twinned
-                .keys()
-                .filter_map(|index| match &self.stmts[*index].kind {
-                    Kind::Def(name, _) => Some(name.clone()),
-                    _ => None,
-                })
-                .collect(),
         }
     }
 

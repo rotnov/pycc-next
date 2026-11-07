@@ -88,26 +88,26 @@ probe!(
 );
 probe!(
     a_native_list_from_a_comprehension_over_an_object,
-    &["--non-strict", "--select", "module"],
+    &["--non-strict"],
     "rows = [[len(str(k)), 1] for k in d]\ntotal += len(rows) + rows[0][1] + len(pair(i))"
 );
 probe!(
     set_of_an_object_and_empty_object_containers,
-    &["--non-strict", "--select", "module"],
+    &["--non-strict"],
     "s = set(d)\ne = set()\nfor k in d:\n    e.add(k)\ntotal += len(s) + len(e) + len(dict())"
 );
 probe!(
     an_object_defaultdict,
-    &["--non-strict", "--select", "module"],
+    &["--non-strict"],
     "g = collections.defaultdict(list)\nfor k in d:\n    g[k].append(i)\ntotal += len(g) + len(g[1])"
 );
 probe!(
     a_chained_comparison_over_objects,
-    &["--non-strict", "--select", "module"],
+    &["--non-strict"],
     "for k in d:\n    if 0 < k < 10 > i % 7:\n        total += 1"
 );
 probe!(
     widened_names_and_a_big_literal,
-    &["--non-strict", "--select", "module"],
+    &["--non-strict"],
     "row = pair(i)\nd[5] = row\nrow.append(1)\nbig = [1]\nbig.append(1012809128301279797787789798789798798)\nif d != big:\n    total += len(d[5]) + len(big)"
 );

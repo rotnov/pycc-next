@@ -56,4 +56,5 @@ def main() -> None:
             print("ValueError", exc)
 
 
-main()
+if __name__ == "__main__":
+    main()

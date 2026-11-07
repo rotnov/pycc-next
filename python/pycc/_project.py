@@ -46,7 +46,7 @@ _TOOL_KEYS = {
     "select", "profile", "compile", "exclude",
 }
 # `[tool.pycc] select` (docs/design/compile-little.md, section 2.2).
-_SELECT_MODES = ("profile", "all", "none", "module")
+_SELECT_MODES = ("profile", "all", "none")
 _OVERRIDE_KEYS = {"strict", "pure-python", "fallback-to-python", "extra-args"}
 
 
