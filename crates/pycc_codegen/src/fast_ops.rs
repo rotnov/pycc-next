@@ -21,11 +21,14 @@
 //! so on any other build every check fails and every operation takes its
 //! helper.
 //!
-//! The loads of an object's type and of an `int`'s or `str`'s value are
+//! The loads of an object's type and of a `str`'s value are
 //! `!invariant.load`: an object's type can change (`__class__` assignment)
-//! only between two heap classes, never to or from `int` or `str`, and an
-//! `int`'s or `str`'s value never changes. So a check on a value a loop does
-//! not rebind is loop-invariant, and LLVM hoists it out of the loop.
+//! only between two heap classes, never to or from `int` or `str`, and a
+//! `str`'s value never changes. So a check on a value a loop does not rebind
+//! is loop-invariant, and LLVM hoists it out of the loop. An `int`'s value
+//! is read with plain loads: a rebinding `x = x + 1` of the only reference
+//! to an `int` writes the new value into that object
+//! ([`Fast::int_in_place`]) instead of making a new one and freeing the old.
 
 use crate::rt_fns::RtFns;
 use inkwell::basic_block::BasicBlock;
@@ -71,6 +74,7 @@ const BYTEARRAY_START: u64 = 40;
 const FAST_SIZE: u64 = CLASSES + CLASS_COUNT * 8;
 
 /// The object layouts `fast_ops.c` checks (its file comment).
+const OB_REFCNT: u64 = 0;
 const OB_TYPE: u64 = 8;
 const INT_TAG: u64 = 16;
 const INT_DIGIT: u64 = 24;
@@ -292,7 +296,7 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         self.require_exact(object, INT_TYPE, name);
         let i64_type = self.context.i64_type();
         let tag = self
-            .load(i64_type.into(), self.at(object, INT_TAG, &format!("{name}_tag_at")), true, &format!("{name}_tag"))
+            .load(i64_type.into(), self.at(object, INT_TAG, &format!("{name}_tag_at")), false, &format!("{name}_tag"))
             .into_int_value();
         let compact = self
             .builder
@@ -303,7 +307,7 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
             .load(
                 self.context.i32_type().into(),
                 self.at(object, INT_DIGIT, &format!("{name}_digit_at")),
-                true,
+                false,
                 &format!("{name}_digit"),
             )
             .into_int_value();
@@ -314,6 +318,80 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         let sign_bits = self.builder.build_and(tag, self.i64(3), &format!("{name}_sign_bits")).expect("and");
         let sign = self.builder.build_int_sub(self.i64(1), sign_bits, &format!("{name}_sign")).expect("sub");
         self.builder.build_int_mul(sign, digit, &format!("{name}_value")).expect("mul")
+    }
+
+    /// Whether `object`, a compact `int` read by [`Fast::compact_int`] on
+    /// this path, can be given `value` in place ([`Fast::store_int`]) by a
+    /// rebinding of the one slot that references it: its reference count
+    /// is 1 (so it is mortal and nothing else holds it), it has one digit,
+    /// and `value` is compact and outside CPython's small-`int` cache
+    /// (`-5..=256`, whose values are always the cached objects).
+    pub(crate) fn int_in_place(&self, object: PointerValue<'ctx>, value: IntValue<'ctx>, name: &str) -> IntValue<'ctx> {
+        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
+        let count = self
+            .load(i32_type.into(), self.at(object, OB_REFCNT, &format!("{name}_count_at")), false, &format!("{name}_count"))
+            .into_int_value();
+        let alone = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, count, i32_type.const_int(1, false), &format!("{name}_alone"))
+            .expect("icmp");
+        let tag = self
+            .load(i64_type.into(), self.at(object, INT_TAG, &format!("{name}_tag_at")), false, &format!("{name}_tag"))
+            .into_int_value();
+        let digits = self.builder.build_right_shift(tag, self.i64(3), false, &format!("{name}_digits")).expect("lshr");
+        let one_digit = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, digits, self.i64(1), &format!("{name}_one_digit"))
+            .expect("icmp");
+        // `value + 5 > 261` (unsigned): `value < -5` or `value > 256`.
+        let shifted = self.builder.build_int_add(value, self.i64(5), &format!("{name}_shifted")).expect("add");
+        let not_small = self
+            .builder
+            .build_int_compare(IntPredicate::UGT, shifted, self.i64(261), &format!("{name}_not_small"))
+            .expect("icmp");
+        // `value + (2**30 - 1) < 2**31 - 1` (unsigned): `|value| < 2**30`.
+        let biased = self
+            .builder
+            .build_int_add(value, self.i64((1 << 30) - 1), &format!("{name}_biased"))
+            .expect("add");
+        let compact = self
+            .builder
+            .build_int_compare(IntPredicate::ULT, biased, self.i64((1 << 31) - 1), &format!("{name}_fits"))
+            .expect("icmp");
+        let both = self.builder.build_and(alone, one_digit, &format!("{name}_held")).expect("and");
+        let range = self.builder.build_and(not_small, compact, &format!("{name}_range")).expect("and");
+        self.builder.build_and(both, range, &format!("{name}_in_place")).expect("and")
+    }
+
+    /// Gives `object` the value `value`, where [`Fast::int_in_place`] holds:
+    /// one digit, `|value|`, and the sign in the tag.
+    pub(crate) fn store_int(&self, object: PointerValue<'ctx>, value: IntValue<'ctx>, name: &str) {
+        let negative = self
+            .builder
+            .build_int_compare(IntPredicate::SLT, value, self.i64(0), &format!("{name}_negative"))
+            .expect("icmp");
+        let negated = self.builder.build_int_neg(value, &format!("{name}_negated")).expect("neg");
+        let magnitude = self
+            .builder
+            .build_select(negative, negated, value, &format!("{name}_magnitude"))
+            .expect("select")
+            .into_int_value();
+        let digit = self
+            .builder
+            .build_int_truncate(magnitude, self.context.i32_type(), &format!("{name}_digit"))
+            .expect("trunc");
+        let sign = self
+            .builder
+            .build_select(negative, self.i64(8 | 2), self.i64(8), &format!("{name}_sign"))
+            .expect("select")
+            .into_int_value();
+        self.builder
+            .build_store(self.at(object, INT_TAG, &format!("{name}_tag_at")), sign)
+            .expect("store");
+        self.builder
+            .build_store(self.at(object, INT_DIGIT, &format!("{name}_digit_at")), digit)
+            .expect("store");
     }
 
     /// The value of a native `int` word, requiring a small one (odd; a
