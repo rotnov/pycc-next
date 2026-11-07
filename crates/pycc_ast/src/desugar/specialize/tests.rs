@@ -367,13 +367,19 @@ fn objects_read(body: &[Stmt]) -> Vec<String> {
     names.0
 }
 
-/// A use of a specialized parameter that may let its value out reads the
-/// original object; one that consumes the value reads the native one. A
-/// float is compared by identity first as a key and as the item `in` looks
-/// for, so those uses read its object too.
+/// A use of a specialized parameter reads the original object unless it
+/// provably keeps the value inside builtin code: arithmetic and
+/// comparisons of native operands, items and indexes of native sequences,
+/// tests, loops over native sequences, unshadowed `len`/`ord`/`range`, and
+/// a native `str`'s methods.
 #[test]
-fn a_specialized_parameter_that_may_escape_reads_its_original_object() {
-    let params = [("x".to_string(), "float"), ("s".to_string(), "str"), ("b".to_string(), "bytearray")];
+fn a_specialized_parameter_reads_its_original_object_unless_provably_consumed() {
+    let params = [
+        ("x".to_string(), "float"),
+        ("i".to_string(), "int"),
+        ("s".to_string(), "str"),
+        ("b".to_string(), "bytearray"),
+    ];
     let none = std::collections::BTreeSet::new();
     let escaping = [
         "return x",
@@ -387,6 +393,7 @@ fn a_specialized_parameter_that_may_escape_reads_its_original_object() {
         "y is not x",
         "x in ys",
         "d[x]",
+        "ys[i]",
         "x or y",
         "min(x, y)",
         "yield x",
@@ -394,9 +401,19 @@ fn a_specialized_parameter_that_may_escape_reads_its_original_object() {
         "return s",
         "f(k=s)",
         "s is t",
-        "len(x, k=1)",
+        "hash(x)",
+        "hash(s)",
+        "y = x + z",
+        "y = z * i",
+        "y = x == z",
+        "t += x",
+        "len(s, k=1)",
         "y = t.find(s)",
         "y = x.real",
+        "y = '{}'.format(x)",
+        "y = s.format(i)",
+        "y = s.split(sep=s)",
+        "y = s if z else s",
     ];
     for source in escaping {
         let mut body = parse(source).body.to_vec();
@@ -406,32 +423,41 @@ fn a_specialized_parameter_that_may_escape_reads_its_original_object() {
     }
     let consumed = [
         "y = x + 1",
+        "y = x * i - 2.5",
         "y = -x",
         "if x: pass",
         "while x < 1: pass",
-        "y = x == z",
+        "y = x == i",
         "y = 1.0 if x else 2.0",
         "for c in s: pass",
+        "for c in s[i:]: pass",
         "[c for c in s if x]",
-        "y = s[x:]",
+        "y = s[i:]",
         "y = s[0]",
+        "y = s[i] == s[i + 1]",
         "y = 'a' in s",
+        "y = z in s",
         "y = len(s)",
+        "y = len(s) + i",
         "y = ord(s[0])",
+        "for k in range(i): pass",
         "y = s.find(t)",
+        "y = s.find(s[1:])",
         "y = 'sep'.join(s)",
         "assert x, 'msg'",
         "return b",
         "f(b)",
         "y = s.upper()",
-        "t += x",
+        "y = b[i]",
+        "y = s[z.w]",
     ];
     for source in consumed {
         let mut body = parse(source).body.to_vec();
         let used = escapes::keep_objects(&mut body, &params, &none);
         assert!(used.is_empty(), "{source}");
     }
-    // A builtin the module or the body binds is not taken to consume.
+    // A builtin a module binding, a formal parameter or the body binds
+    // is not taken to be one.
     let shadowed = std::collections::BTreeSet::from(["len"]);
     let mut body = parse("y = len(s)").body.to_vec();
     assert_eq!(escapes::keep_objects(&mut body, &params, &shadowed), ["s"]);
@@ -474,7 +500,8 @@ def f(x: object, n: object, xs: object) -> object:
         .expect("the native copy");
     let names: Vec<&str> = native.parameters.args.iter().map(|a| a.parameter.name.as_str()).collect();
     assert_eq!(names, ["x", "n", "xs", "_pycc_object_x"]);
-    assert_eq!(objects_read(&native.body), ["_pycc_object_x"]);
+    // `t += x` may reach `t`'s own `__iadd__`, `return x` lets it out.
+    assert_eq!(objects_read(&native.body), ["_pycc_object_x", "_pycc_object_x"]);
     let Stmt::FunctionDef(original) = &module.body.iter().find(|s| matches!(s, Stmt::FunctionDef(d) if d.name.as_str() == "f")).unwrap() else {
         unreachable!()
     };

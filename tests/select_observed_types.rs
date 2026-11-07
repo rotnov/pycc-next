@@ -65,6 +65,27 @@ def seek(x, xs, d):
     return x in xs, d.get(x), d[x] if x in d else None, [x], (x, x)
 
 
+def hashed(x):
+    t = 0.0
+    for _ in range(2):
+        t += 1.0
+    return hash(x)
+
+
+def added(x, other):
+    t = 0.0
+    for _ in range(2):
+        t += 1.0
+    return x + other
+
+
+def measured(x, len):
+    t = 0.0
+    for _ in range(2):
+        t += 1.0
+    return len(x)
+
+
 def last(n, xs):
     for item in xs:
         n = item
@@ -75,6 +96,9 @@ def last(n, xs):
 /// `list` and a `float`.
 const WORK: &str = "\
 from pkg import m
+class Keep:
+    def __radd__(self, other):
+        return other
 for i in range(1200):
     m.count('abcab' * 3, 'a')
     m.scale([1.0, 2.0, 3.0], 0.5)
@@ -83,6 +107,9 @@ for i in range(1200):
     m.keep_s('abc')
     m.seek(2.5, [2.5], {2.5: 1})
     m.last(0, [1, 2])
+    m.hashed(2.5)
+    m.added(2.5, Keep())
+    m.measured(2.5, lambda v: v)
 ";
 
 /// Calls on both paths: the observed exact types, other types, a `str`
@@ -135,6 +162,14 @@ print('str', m.keep_s(text) is text, m.keep_s('x'))
 found, got, item, listed, pair = m.seek(nan, [nan], {nan: 'n'})
 print('seek', found, got, item, listed == [nan], pair[0] is nan, pair[1] is nan)
 show(m.seek, 2.5, [2.5], {2.5: 1})
+# A NaN hashes by identity; a reflected method and a parameter named
+# `len` receive the argument itself.
+class Keep:
+    def __radd__(self, other):
+        return other
+print('hash', m.hashed(nan) == hash(nan), m.hashed(2.5) == hash(2.5))
+print('radd', m.added(nan, Keep()) is nan, m.added(big + 0.5, Keep()) == big + 0.5, m.added(1.5, 1.0))
+print('len', m.measured(nan, lambda v: v) is nan, m.measured(text, len))
 # A parameter bound again in the body is not held to its observed type.
 show(m.last, 0, ['ok'])
 show(m.last, 0, [1, 2])
@@ -193,6 +228,12 @@ fn built(scratch: &Path) -> (std::path::PathBuf, std::path::PathBuf, String) {
         "pkg.m:seek".as_ref(),
         "--compile".as_ref(),
         "pkg.m:last".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:hashed".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:added".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:measured".as_ref(),
         "--types-profile".as_ref(),
         profile.as_os_str(),
     ]);
@@ -217,6 +258,9 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(report.contains("specialized: `scale` runs natively when called with k: float"), "{report}");
     assert!(report.contains("specialized: `keep_f` runs natively when called with x: float"), "{report}");
     assert!(report.contains("specialized: `keep_s` runs natively when called with s: str"), "{report}");
+    for f in ["hashed", "added", "measured"] {
+        assert!(report.contains(&format!("specialized: `{f}` runs natively when called with x: float")), "{report}");
+    }
     assert!(
         report.contains("not specialized: `last`: parameter `n` (observed `int`) may be bound again in the body"),
         "{report}"
@@ -230,6 +274,7 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(out.contains("nan True True 2.5\nbig True 5\n"), "{out}");
     assert!(out.contains("str True x\nseek True n n True True True\n"), "{out}");
     assert!(out.contains("last 'ok'\nlast 2\nlast 0\n"), "{out}");
+    assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\n"), "{out}");
     // The module is the one the package's extension serves.
     let o = Command::new(python())
         .args(["-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from pkg import m; print(type(m.__spec__.loader).__name__)"])

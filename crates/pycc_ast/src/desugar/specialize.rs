@@ -409,8 +409,8 @@ pub type Observed = (String, Vec<(String, &'static str)>);
 /// for a guess, only a function that loops is specialized, and the copies
 /// of those `keep_builtins` names (by report name) keep calling builtins
 /// as their originals do. A parameter the body may bind again is not
-/// specialized, and a use of a specialized one that may let its value out
-/// reads its original object (`escapes`). Returns what was specialized,
+/// specialized, and a use of a specialized one reads its original object
+/// unless it provably cannot let the value out (`escapes`). Returns what was specialized,
 /// by report name, and why an observed parameter was not, by report name.
 pub fn specialize_observed(
     module: &mut ModModule,
@@ -424,7 +424,7 @@ pub fn specialize_observed(
     {
         return (Vec::new(), Vec::new());
     }
-    let shadowed: std::collections::BTreeSet<&str> = escapes::CONSUMING_BUILTINS
+    let shadowed: std::collections::BTreeSet<&str> = escapes::PROVEN_BUILTINS
         .into_iter()
         .filter(|builtin| binds_at_module_level(&module.body, builtin))
         .collect();
@@ -519,7 +519,10 @@ fn plan_observed(
         return None;
     }
     let (mut clone, spec) = native_copy(def, None, annotations, guessed, &[], keep_builtins, report);
-    let objects = escapes::keep_objects(&mut clone.body, &spec.params, shadowed);
+    // A formal parameter may shadow a builtin as a module binding may.
+    let mut shadowed = shadowed.clone();
+    shadowed.extend(p.iter().map(|param| param.name().as_str()));
+    let objects = escapes::keep_objects(&mut clone.body, &spec.params, &shadowed);
     for param in &objects {
         let mut object = clone.parameters.args[0].clone();
         object.parameter.name = Identifier::new(format!("{}{param}", escapes::OBJECT_PREFIX), def.name.range());

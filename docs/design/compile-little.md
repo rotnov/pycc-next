@@ -396,12 +396,18 @@ names or annotations.
 A native parameter is a converted copy of its argument, so two rules keep the copy the
 function it copies (`specialize/escapes.rs`):
 - **The argument stays the argument.** The copy also takes each specialized `int`,
-  `float` or `str` parameter's original object, and every use that may let the value out
-  reads that object: a return, an assignment, a call or container argument, `is`, and,
-  for a `float`, a key or the item `in` looks for (compared by identity first, so
-  `[f(nan)] == [nan]` holds). Uses that consume the value (arithmetic, an index, `len()`,
-  a loop's iterable, a `str` method) read the native value. A `bytearray`'s native form
-  is the object itself.
+  `float` or `str` parameter's original object. Every use reads that object unless it
+  provably keeps the value inside builtin code; the rule is an allowlist, not a list of
+  escapes. Allowed: arithmetic, unary operations and comparisons (not `is`) whose
+  operands are all provably native (specialized parameters, literals, items of native
+  sequences, or such operations); items, slices, indexes and slice bounds of a native
+  `str` or `bytearray`, and the `str` an `in` searches; tests and loops over native
+  sequences; `len`, `ord` and `range` of native values when no module binding, formal
+  parameter or body binding shadows them; a native `str`'s methods, with native
+  arguments except to `format`. Everything else reads the object: a return, a store,
+  a call or container argument, `is`, `hash` (a NaN hashes by identity), and any
+  operation with an operand of unknown type, which may reach that operand's reflected
+  method (`__radd__`). A `bytearray`'s native form is the object itself.
 - **A parameter the body may bind again is not specialized.** The observed type is the
   argument's, not that of later values (`for item in xs: n = item`). Any assignment,
   augmented assignment, `for`/`with`/comprehension target, walrus, `del`, `except ... as`
@@ -410,15 +416,19 @@ function it copies (`specialize/escapes.rs`):
 
 `tests/select_observed_types.rs` checks both paths against CPython: the observed `str`s;
 a list, a tuple, an `int` or `None`; `str` subclasses that change indexing or `len`; a
-NaN, a large `int` and a `str` that leave unchanged; and a rebound parameter.
+NaN, a large `int` and a `str` that leave unchanged; `hash` of a NaN, a reflected
+`__radd__` and a parameter named `len`; and a rebound parameter.
 
 Measured locally on CPython 3.15:
 - **diff-match-patch `diff_main` in profile mode: 6.88x** (CPython 6.162 s, compiled
   0.896 s, medians of 5). Pass 3 keeps `diff_bisect` alone, specialized for
   `text1: str, text2: str` (2,763 ms against 2,814 ms for its 30-function region). Before:
-  2.75x. **The checkpoint's diff_main bar (>= 6x) is met.** With the two rules above
-  (objects for escaping uses, no rebound parameters) it measured 6.98x (CPython 6.394 s,
-  compiled 0.916 s): `diff_bisect` lets `text1` and `text2` out only once, at its end.
+  2.75x. **The checkpoint's diff_main bar (>= 6x) is met.** With the two rules below
+  (the allowlist of native uses, no rebound parameters) it measures 6.95x (CPython
+  6.047 s, compiled 0.870 s). `diff_bisect` keeps its specialization, since its loop only
+  indexes `text1` and `text2` and takes their `len`. This time pass 3 kept the
+  30-function region, whose timing (2.8 s) is within noise of `diff_bisect` alone;
+  three of its functions rebind an observed parameter and are not specialized.
 - **pydantic `model_json_schema()`: 0.99x** (14.41 ms against 14.32 ms, 31 rounds). Pass
   3 keeps none of 55 candidates. **The checkpoint's schema bar (>= 1.05x) is missed.**
 
