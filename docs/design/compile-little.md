@@ -392,10 +392,11 @@ interpreter does, and calls its helper only when the check fails
 
 | operation | inline path | CPython's |
 |---|---|---|
-| `a + b`, `a - b`, `a += 1` | two compact `int`s (a native operand a small word): the sum, one `PyLong_FromLongLong` | `BINARY_OP_ADD_INT` |
+| `a + b`, `a - b`, `a & b`, `a \| b`, `a ^ b`, `a += 1` | two compact `int`s (a native operand a small word): the result, one `PyLong_FromLongLong` | `BINARY_OP_ADD_INT` |
 | `a < b` ... in a condition | two compact `int`s: compared by value; `==`/`!=` of two exact ASCII `str`s: answered when they are one object, or their lengths or computed hashes differ | `COMPARE_OP_INT`, `COMPARE_OP_STR` |
 | `s == "lit"` | an exact compact ASCII `str`: its length, then its bytes | `COMPARE_OP_STR` |
-| `s[i]` | an exact compact ASCII `str` and a compact `int` in range: the cached one-character `str` | `BINARY_SUBSCR_STR_INT` |
+| `s[i]` | an exact compact ASCII `str` and a compact `int` in range: the cached one-character `str`; an exact `bytes` or `bytearray`: its byte | `BINARY_SUBSCR_STR_INT` |
+| `b[i] = v` | an exact `bytearray`, a compact `int` index in range and a value in `range(256)`: the byte stored | `STORE_SUBSCR` |
 | `c in s` | an exact `str` in an exact `set` or `frozenset`: `PySet_Contains`, the item unpacked | `CONTAINS_OP_SET` |
 | `isinstance(o, dict)` (a builtin class) | `o` exactly of that class: `True` | |
 | a module global | a per-site cache of the namespace dict, its version and the value | `LOAD_GLOBAL_MODULE` |

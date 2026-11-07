@@ -106,6 +106,26 @@ def kinds(v):
     return "other"
 
 
+def bits(a, b):
+    return (a & b, a | b, a ^ b)
+
+
+def undo_sub(scanline, result):
+    ai = 0
+    for i in range(1, len(result)):
+        result[i] = (scanline[i] + result[ai]) & 0xFF
+        ai += 1
+    return result
+
+
+def store(buf, i, v):
+    try:
+        buf[i] = v
+        return buf
+    except (IndexError, TypeError, ValueError):
+        return "refused"
+
+
 def read_limit():
     return LIMIT + 1
 
@@ -151,6 +171,23 @@ def main():
         print(member(c, s))
     for v in [{}, [], 1, True, "s", MyInt(1), MyStr("s"), (), 1.0]:
         print(kinds(v))
+    for a, b in [(12, 10), (-1, 255), (big, 3), (True, False), (MyInt(6), 3), (1, 2.0)]:
+        try:
+            print(bits(a, b))
+        except TypeError:
+            print("TypeError")
+    print(undo_sub(b"\x01\x02\xff\x80", bytearray(b"\x05\x00\x00\x00")))
+    print(undo_sub(bytearray(b"\x10" * 6), bytearray(6)))
+    for i in [0, 3, 4, -1, -4, -5, True, big]:
+        print(index(b"ab\xffc", i), index(bytearray(b"ab\xffc"), i))
+    for buf, i, v in [(bytearray(3), 0, 7), (bytearray(3), -1, 255), (bytearray(3), 3, 1),
+                      (bytearray(3), 1, 256), (bytearray(3), 1, -1), (bytearray(3), 1, True),
+                      (bytearray(3), 1, b"x"[0]), (bytearray(), 0, 1), ([0, 0], 1, 9), ({}, 1, 2)]:
+        print(store(buf, i, v))
+    view = bytearray(b"xyz")
+    m = memoryview(view)
+    print(store(view, 1, 65), bytes(m))
+    m.release()
     global LIMIT
     print(read_limit())
     LIMIT = 10

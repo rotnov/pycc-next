@@ -16,7 +16,10 @@
  *   `lv_tag < 16`, and its value is `(1 - (lv_tag & 3)) * digit`;
  * - `str` (`PyASCIIObject`): the length at 16, the hash at 24 (-1 before
  *   it is computed), the state at 32 (`0x60` set: compact and ASCII), the
- *   ASCII text at 40.
+ *   ASCII text at 40;
+ * - `bytes` (`PyBytesObject`): the length at 16, the bytes at 32;
+ * - `bytearray` (`PyByteArrayObject`): the length at 16, a pointer to the
+ *   first byte (`ob_start`) at 40.
  *
  * `pycc_ext_fast_init` checks them against objects made at module exec and
  * fills `pycc_ext_fast` only when every check passes: the type pointers
@@ -35,8 +38,8 @@ typedef struct {
     PyTypeObject *int_type;
     PyObject *chars[128];
     /* `pycc_ext_obj_isinstance`'s built-in classes, by its selector, then
-     * `set` and `frozenset`. */
-    PyTypeObject *classes[9];
+     * `set`, `frozenset`, `bytes` and `bytearray`. */
+    PyTypeObject *classes[11];
 } PyccExtFast;
 
 static PyccExtFast pycc_ext_fast;
@@ -121,6 +124,21 @@ static void pycc_ext_fast_init(void)
         ok = o != NULL && PYCC_FAST_STR_LENGTH(o) == 6 && (PYCC_FAST_STR_STATE(o) & 0x60u) != 0x60u;
         Py_XDECREF(o);
     }
+    if (ok) {
+        PyObject *b = PyBytes_FromStringAndSize("pycc\x00\xff", 6);
+        PyObject *ba = PyByteArray_FromStringAndSize("pycc\x00\xff", 6);
+
+        ok = b != NULL && ba != NULL && PYCC_FAST_TYPE(b) == &PyBytes_Type
+             && PYCC_FAST_TYPE(ba) == &PyByteArray_Type && *(Py_ssize_t *)((char *)b + 16) == 6
+             && memcmp((char *)b + 32, "pycc\x00\xff", 6) == 0 && *(Py_ssize_t *)((char *)ba + 16) == 6
+             && *(char **)((char *)ba + 40) == PyByteArray_AsString(ba)
+             && memcmp(*(char **)((char *)ba + 40), "pycc\x00\xff", 6) == 0;
+        if (ok && PyByteArray_Resize(ba, 2000) == 0) {
+            ok = *(Py_ssize_t *)((char *)ba + 16) == 2000 && *(char **)((char *)ba + 40) == PyByteArray_AsString(ba);
+        }
+        Py_XDECREF(b);
+        Py_XDECREF(ba);
+    }
     for (i = 0; ok && i < 128; i++) {
         char c = (char)i;
 
@@ -144,6 +162,8 @@ static void pycc_ext_fast_init(void)
     pycc_ext_fast.classes[6] = &PyTuple_Type;
     pycc_ext_fast.classes[7] = &PySet_Type;
     pycc_ext_fast.classes[8] = &PyFrozenSet_Type;
+    pycc_ext_fast.classes[9] = &PyBytes_Type;
+    pycc_ext_fast.classes[10] = &PyByteArray_Type;
     pycc_ext_fast.str_type = &PyUnicode_Type;
     pycc_ext_fast.int_type = &PyLong_Type;
 }

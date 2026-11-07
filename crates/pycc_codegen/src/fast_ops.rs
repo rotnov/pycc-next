@@ -54,13 +54,20 @@ const CHARS: u64 = 16;
 const CHAR_COUNT: u64 = 128;
 /// The built-in classes by `pycc_ext_obj_isinstance`'s selector: `int`,
 /// `str`, `float`, `bool`, `list`, `dict`, `tuple`; then `set` and
-/// `frozenset` ([`SET`], [`FROZENSET`]).
+/// `frozenset`, `bytes` and `bytearray` ([`SET`], [`FROZENSET`], [`BYTES`],
+/// [`BYTEARRAY`]).
 const CLASSES: u64 = CHARS + CHAR_COUNT * 8;
-const CLASS_COUNT: u64 = 9;
+const CLASS_COUNT: u64 = 11;
 /// The selectors of `str`, `set` and `frozenset` in the classes.
 pub(crate) const STR: u64 = 1;
 pub(crate) const SET: u64 = 7;
 pub(crate) const FROZENSET: u64 = 8;
+pub(crate) const BYTES: u64 = 9;
+pub(crate) const BYTEARRAY: u64 = 10;
+/// `bytes`'s and `bytearray`'s length, and where their bytes are.
+const BYTES_LENGTH: u64 = 16;
+const BYTES_DATA: u64 = 32;
+const BYTEARRAY_START: u64 = 40;
 const FAST_SIZE: u64 = CLASSES + CLASS_COUNT * 8;
 
 /// The object layouts `fast_ops.c` checks (its file comment).
@@ -385,6 +392,85 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         let phi = builder.build_phi(bool_type, &format!("{name}_equal")).expect("phi");
         phi.add_incoming(&[(&bool_type.const_zero(), entry), (&equal, compare_end)]);
         phi.as_basic_value().into_int_value()
+    }
+
+    /// The length of `object` and a pointer to its first byte, requiring
+    /// an exact `bytes` (`bytes_too`) or `bytearray`. A `bytearray`'s
+    /// length and buffer are read anew each time: it can be resized.
+    pub(crate) fn byte_buffer(&self, object: PointerValue<'ctx>, bytes_too: bool, name: &str) -> (IntValue<'ctx>, PointerValue<'ctx>) {
+        let ptr = self.context.ptr_type(AddressSpace::default());
+        let i64_type = self.context.i64_type();
+        if !bytes_too {
+            self.require_class_in(object, &[BYTEARRAY], name);
+            let length = self
+                .load(i64_type.into(), self.at(object, BYTES_LENGTH, &format!("{name}_length_at")), false, &format!("{name}_length"))
+                .into_int_value();
+            let start = self
+                .load(ptr.into(), self.at(object, BYTEARRAY_START, &format!("{name}_start_at")), false, &format!("{name}_start"))
+                .into_pointer_value();
+            return (length, start);
+        }
+        self.require_class_in(object, &[BYTES, BYTEARRAY], name);
+        let actual = self
+            .load(ptr.into(), self.at(object, OB_TYPE, &format!("{name}_type_at")), true, &format!("{name}_type"))
+            .into_pointer_value();
+        let bytes_type = self.fast_field(CLASSES + BYTES * 8, &format!("{name}_bytes_type"));
+        let is_bytes = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, actual, bytes_type, &format!("{name}_is_bytes"))
+            .expect("icmp");
+        let length = self
+            .load(i64_type.into(), self.at(object, BYTES_LENGTH, &format!("{name}_length_at")), false, &format!("{name}_length"))
+            .into_int_value();
+        let inline = self.at(object, BYTES_DATA, &format!("{name}_inline"));
+        // A `bytearray`'s pointer to its bytes; of a `bytes`, which holds its
+        // bytes inline, a field every object has is read instead, unused.
+        let field = self
+            .builder
+            .build_select(
+                is_bytes,
+                self.at(object, OB_TYPE, &format!("{name}_unused_at")),
+                self.at(object, BYTEARRAY_START, &format!("{name}_start_at")),
+                &format!("{name}_field"),
+            )
+            .expect("select")
+            .into_pointer_value();
+        let loaded = self.load(ptr.into(), field, false, &format!("{name}_loaded")).into_pointer_value();
+        let start = self
+            .builder
+            .build_select(is_bytes, inline, loaded, &format!("{name}_start"))
+            .expect("select")
+            .into_pointer_value();
+        (length, start)
+    }
+
+    /// `at` adjusted as a Python index into `length` items (a negative one
+    /// from the end), requiring it to be in range.
+    pub(crate) fn index_within(&self, at: IntValue<'ctx>, length: IntValue<'ctx>, name: &str) -> IntValue<'ctx> {
+        let builder = self.builder;
+        let negative = builder
+            .build_int_compare(IntPredicate::SLT, at, self.i64(0), &format!("{name}_negative"))
+            .expect("icmp");
+        let from_end = builder.build_int_add(at, length, &format!("{name}_from_end")).expect("add");
+        let at = builder
+            .build_select(negative, from_end, at, &format!("{name}_at"))
+            .expect("select")
+            .into_int_value();
+        let within = builder
+            .build_int_compare(IntPredicate::ULT, at, length, &format!("{name}_within"))
+            .expect("icmp");
+        self.require(within, &format!("{name}_within"));
+        at
+    }
+
+    /// A pointer `offset` bytes past `base`.
+    pub(crate) fn byte_at(&self, base: PointerValue<'ctx>, offset: IntValue<'ctx>, name: &str) -> PointerValue<'ctx> {
+        // SAFETY: `offset` is within the buffer, checked by the caller.
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(self.context.i8_type(), base, &[offset], name)
+                .expect("gep")
+        }
     }
 
     /// A compact ASCII `str`'s cached hash (-1 before it is computed).

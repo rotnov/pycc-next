@@ -817,7 +817,8 @@ pub(super) fn emit_subscript<'ctx>(
         .into()
     } else if crate::foreign_arith::fast_int_operand(index) {
         // `BINARY_SUBSCR_STR_INT`: a compact ASCII `str` indexed by a
-        // compact `int` in range is its cached one-character `str`.
+        // compact `int` in range is its cached one-character `str`; a
+        // `bytes` or `bytearray` item is its byte as an `int`.
         crate::fast_ops::guarded(
             context,
             builder,
@@ -826,27 +827,32 @@ pub(super) fn emit_subscript<'ctx>(
             |fast| {
                 let length = fast.ascii_str(base_ptr, "fast_base");
                 let at = crate::foreign_arith::fast_int_value(fast, index, "fast_index");
-                let negative = builder
-                    .build_int_compare(
-                        inkwell::IntPredicate::SLT,
-                        at,
-                        context.i64_type().const_zero(),
-                        "fast_index_negative",
-                    )
-                    .expect("icmp");
-                let from_end = builder.build_int_add(at, length, "fast_index_from_end").expect("add");
-                let at = builder
-                    .build_select(negative, from_end, at, "fast_index_at")
-                    .expect("select")
-                    .into_int_value();
-                let within = builder
-                    .build_int_compare(inkwell::IntPredicate::ULT, at, length, "fast_index_within")
-                    .expect("icmp");
-                fast.require(within, "fast_index_within");
+                let at = fast.index_within(at, length, "fast_index");
                 let byte = fast.ascii_byte(base_ptr, at, "fast_index");
                 fast.char_str(rt, byte, "fast_char").into()
             },
-            call,
+            || {
+                crate::fast_ops::guarded(
+                    context,
+                    builder,
+                    module,
+                    "fast_bytes_index",
+                    |fast| {
+                        let (length, start) = fast.byte_buffer(base_ptr, true, "fast_bytes");
+                        let at = crate::foreign_arith::fast_int_value(fast, index, "fast_bytes_index");
+                        let at = fast.index_within(at, length, "fast_bytes_index");
+                        let byte = builder
+                            .build_load(context.i8_type(), fast.byte_at(start, at, "fast_byte_at"), "fast_byte")
+                            .expect("load")
+                            .into_int_value();
+                        let value = builder
+                            .build_int_z_extend(byte, context.i64_type(), "fast_byte_value")
+                            .expect("zext");
+                        fast.int_object(value, "fast_byte_int").into()
+                    },
+                    call,
+                )
+            },
         )
     } else {
         call()

@@ -32,7 +32,7 @@ fn generic_operations_match_cpython_with_the_fast_paths_on_and_off() {
         .expect("pycc should spawn");
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    for name in ["add", "bump", "less", "equal", "index", "first_chars", "is_quote", "member", "kinds", "read_limit", "count_in"] {
+    for name in ["add", "bump", "less", "equal", "index", "first_chars", "is_quote", "member", "kinds", "read_limit", "count_in", "bits", "undo_sub", "store"] {
         assert!(report.contains(&format!("compiled: {module}:{name}\n")), "{name}\n{report}");
     }
     // The extension runs without its source beside it, so the module's
