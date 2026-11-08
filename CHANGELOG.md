@@ -28,6 +28,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- A `--release` module's object release is split: its `NULL` and immortality tests are
+  inlined at each site, and only a mortal object's decrement and `_Py_Dealloc` stay one
+  call into the module's own `pycc_ext_obj_release_count`. Most releases in a generic body
+  are of an empty slot, a cached one-character `str`, a small `int` or `None`. They now
+  cost a test and a branch instead of a call. tomli `loads()`: 23.77M -> 22.81M
+  instructions.
 - Operations on CPython objects in generic bodies (attribute get, method and plain calls,
   `len`, subscripts, unpacking, comparisons, arithmetic, displays, `isinstance`, `in`,
   slices, boxing and unboxing) no longer test the thread's pending exception after the
@@ -217,6 +223,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   timsort, run detection, binary insertion, powersort merges and galloping included, so a
   `nan` among floats ends where CPython leaves it (`sorted([2.675, 0, nan])` is
   `[0, nan, 2.675]`). Before, a merge sort put it elsewhere (found by the fuzzer).
+- The differential fuzzer no longer compares the warnings CPython writes to stderr: a
+  `DeprecationWarning` (`~` on a `bool`) printed before an uncaught `SystemExit`'s message,
+  which has no traceback to separate them, was reported as a different exception (nightly
+  runs since 2026-11-04). `docs/DEVIATIONS.md` documents that compiled `~` on a `bool`
+  does not warn.
 - A compiled body's values that an exception unwinds (the items of a list or tuple display
   before the one that raised, a loop's iterator) are released with the exception set
   aside, as CPython's unwinding drops them. A `__del__` they run, compiled or not, no
