@@ -413,6 +413,10 @@ pub(super) struct RtFns<'ctx> {
     /// The current function's locals that hold borrowed references
     /// (`borrowed_locals`).
     pub(super) borrowed_locals: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The current function's `object` local slots that may hold a tagged
+    /// word, a small `int` or an ASCII character, instead of a reference
+    /// (`tagged_locals`).
+    pub(super) tagged_slots: std::cell::RefCell<std::collections::HashSet<PointerValue<'ctx>>>,
     /// The names of the current function's `int` parameters and locals,
     /// whose slots its epilogue releases (#625): `return n` of one moves
     /// the slot's reference out instead of retaining a second one.
@@ -1011,6 +1015,7 @@ pub(super) fn declare_rt_functions<'ctx>(
         exception_classes: std::cell::RefCell::new(Default::default()),
         class_records: std::cell::RefCell::new(HashMap::new()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
+        tagged_slots: std::cell::RefCell::new(std::collections::HashSet::new()),
         owned_int_names: std::cell::RefCell::new(std::collections::HashSet::new()),
         int_ranges: std::cell::RefCell::new(Default::default()),
         loop_list_slots: std::cell::RefCell::new(HashMap::new()),

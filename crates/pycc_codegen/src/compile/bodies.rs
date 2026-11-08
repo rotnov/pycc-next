@@ -334,6 +334,52 @@ pub(super) fn emit_function_bodies<'ctx>(
                 } else {
                     None
                 };
+            // The `object` locals whose slots may hold a tagged word
+            // (`tagged_locals`): not in a generator, whose frame is a
+            // coroutine's; their epilogue release skips a tagged word.
+            {
+                let tagged = if generator_element.is_some() {
+                    Default::default()
+                } else {
+                    crate::tagged_locals::tagged_locals(
+                        name,
+                        body,
+                        fn_locals
+                            .iter()
+                            .filter(|(local, slot)| {
+                                slot.ty == pycc_mir::Ty::Object
+                                    && slot.ptr.as_instruction().is_some_and(|inst| {
+                                        inst.get_opcode() == inkwell::values::InstructionOpcode::Alloca
+                                    })
+                                    && !rt.borrowed_locals.borrow().contains(*local)
+                            })
+                            .map(|(local, _)| local),
+                    )
+                };
+                let slots: std::collections::HashSet<PointerValue> =
+                    tagged.iter().map(|local: &String| fn_locals[local].ptr).collect();
+                for (slot, kind) in &mut owned_heap_slots {
+                    if slots.contains(slot) {
+                        *kind = heap_rc::HeapKind::TaggedObject;
+                    }
+                }
+                *rt.tagged_slots.borrow_mut() = slots;
+                // An `object` parameter the body only reads holds the
+                // argument it was passed, never null: the assumption lets a
+                // fast path's null test of it fold away, and so its type
+                // and layout loads leave a loop.
+                if generator_element.is_none() {
+                    for (i, (param, ty)) in params.iter().enumerate() {
+                        if *ty == pycc_mir::Ty::Object && crate::tagged_locals::read_only(body, param) {
+                            let incoming = f
+                                .get_nth_param(i as u32)
+                                .expect("declared with `params.len()` parameters")
+                                .into_pointer_value();
+                            crate::tagged_locals::assume_nonnull(module, builder, incoming);
+                        }
+                    }
+                }
+            }
             // #1054: when this function owns at least one entry-block
             // `str` slot, every way out of it is routed through a single
             // synthetic outermost `finally` frame whose block releases

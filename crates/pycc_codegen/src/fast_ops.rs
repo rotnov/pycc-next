@@ -333,6 +333,48 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         self.builder.build_int_mul(sign, digit, &format!("{name}_value")).expect("mul")
     }
 
+    /// The value of a tagged local's word (`tagged_locals`) as an `i64`:
+    /// a small `int`'s from its tag, or an exact compact `int` object's;
+    /// requiring one of the two (an ASCII character's tag or any other
+    /// object takes the helper).
+    pub(crate) fn tagged_int(&self, word: IntValue<'ctx>, name: &str) -> IntValue<'ctx> {
+        let builder = self.builder;
+        let tag = builder.build_and(word, self.i64(1), &format!("{name}_int_tag")).expect("and");
+        let tagged = builder
+            .build_int_compare(IntPredicate::NE, tag, self.i64(0), &format!("{name}_tagged"))
+            .expect("icmp");
+        let from_tag = self.context.append_basic_block(self.function, &format!("{name}_from_tag"));
+        let from_object = self.context.append_basic_block(self.function, &format!("{name}_from_object"));
+        let join = self.context.append_basic_block(self.function, &format!("{name}_int"));
+        let branch = builder
+            .build_conditional_branch(tagged, from_tag, from_object)
+            .expect("build_conditional_branch should not fail for an i1");
+        crate::int_fast::weight_branch(self.context, branch, true);
+        builder.position_at_end(from_tag);
+        let tag_value = builder
+            .build_right_shift(word, self.i64(1), true, &format!("{name}_tag_value"))
+            .expect("ashr");
+        builder.build_unconditional_branch(join).expect("branch");
+        builder.position_at_end(from_object);
+        let low = builder
+            .build_and(word, self.i64(crate::tagged_locals::TAG_MASK), &format!("{name}_low"))
+            .expect("and");
+        let reference = builder
+            .build_int_compare(IntPredicate::EQ, low, self.i64(0), &format!("{name}_reference"))
+            .expect("icmp");
+        self.require(reference, &format!("{name}_reference"));
+        let object = builder
+            .build_int_to_ptr(word, self.context.ptr_type(AddressSpace::default()), &format!("{name}_object"))
+            .expect("inttoptr");
+        let object_value = self.compact_int(object, name);
+        let object_end = builder.get_insert_block().expect("positioned");
+        builder.build_unconditional_branch(join).expect("branch");
+        builder.position_at_end(join);
+        let phi = builder.build_phi(self.context.i64_type(), &format!("{name}_value")).expect("phi");
+        phi.add_incoming(&[(&tag_value, from_tag), (&object_value, object_end)]);
+        phi.as_basic_value().into_int_value()
+    }
+
     /// Whether `object`, a compact `int` read by [`Fast::compact_int`] on
     /// this path, can be given `value` in place ([`Fast::store_int`]) by a
     /// rebinding of the one slot that references it: its reference count
@@ -643,15 +685,22 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
     /// two-way cache ([`EXT_ASCII_MASKS_SYMBOL`]) and computed on a miss
     /// ([`EXT_ASCII_MASK_FILL_SYMBOL`], `fast_ops.c`).
     pub(crate) fn ascii_member(&self, set: PointerValue<'ctx>, item: PointerValue<'ctx>, name: &str) -> IntValue<'ctx> {
-        let builder = self.builder;
-        let i64_type = self.context.i64_type();
-        let ptr = self.context.ptr_type(AddressSpace::default());
         let length = self.ascii_str(item, &format!("{name}_item"));
-        let single = builder
+        let single = self
+            .builder
             .build_int_compare(IntPredicate::EQ, length, self.i64(1), &format!("{name}_single"))
             .expect("icmp");
         self.require(single, &format!("{name}_single"));
         let byte = self.ascii_byte(item, self.i64(0), &format!("{name}_char"));
+        self.ascii_byte_member(set, byte, name)
+    }
+
+    /// [`Fast::ascii_member`] for the one-character ASCII `str` of code
+    /// `byte` (below 128), requiring an exact `frozenset` of exact `str`s.
+    pub(crate) fn ascii_byte_member(&self, set: PointerValue<'ctx>, byte: IntValue<'ctx>, name: &str) -> IntValue<'ctx> {
+        let builder = self.builder;
+        let i64_type = self.context.i64_type();
+        let ptr = self.context.ptr_type(AddressSpace::default());
         self.require_class_in(set, &[FROZENSET], &format!("{name}_set"));
         let masks = self
             .module
