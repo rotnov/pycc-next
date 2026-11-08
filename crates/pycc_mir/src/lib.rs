@@ -45,6 +45,7 @@ mod comp_source;
 mod stmt;
 mod unpack_display;
 pub mod multi_return;
+pub mod multi_return_object;
 mod optional_str;
 mod str_scan;
 mod visit_mut;
@@ -495,6 +496,7 @@ pub fn build(hir: &HirModule) -> MirModule {
     unpack_display::rewrite(&mut module);
     optional_str::rewrite(&mut module);
     multi_return::rewrite(&mut module);
+    multi_return_object::rewrite(&mut module);
     // #1337 (D-254): every user-method call runs the body its static
     // receiver class resolves to; re-derived independently of the routing
     // sites and checked on every debug (so every test) build.

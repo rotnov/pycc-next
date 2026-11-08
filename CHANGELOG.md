@@ -56,6 +56,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   left out take the call as before. `isinstance` against a builtin also answers `False`
   inline when the object is exactly another builtin, and packing an object argument is an
   inline reference increment.
+- `a, b = f(...)` in a generic body, where `f` names one compiled function whose
+  `return x, y` displays all have that many items, builds no tuple: the direct call runs
+  a twin of `f` that stores the items after the first through out-pointers. Any other
+  result of `f` (another return, a rebound `f`, a replaced `__code__`) is unpacked at the
+  call site as before (`docs/design/compile-little.md`, section 2.5). Lifted bodies no
+  longer get unused strict-mode multi-value twins.
 - `x += 1` (and `x = x + y`, `-`, `&`, `|`, `^`) on an object local in a generic body
   writes the result into `x`'s `int` when the local holds its only reference, the result
   is a compact `int` and not one of CPython's cached small ints, instead of making a new

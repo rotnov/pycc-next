@@ -462,6 +462,31 @@ Wall time of `_sort_recursive`, best of 9: 184.8 us against CPython's 189.3 us (
 230.9 us). mistune's `.text` grows from 1.79 MB to 1.87 MB (+4.5%), and its build from 6.0 s
 to 6.4 s.
 
+**Unpacking a call without the tuple.** tomli's parsers return `(pos, value)` and their
+callers unpack it at once (`pos, key = parse_key(src, pos)`): each such call built a
+tuple, unpacked it through the generic protocol and freed it, about 450 instructions
+per call. A lifted body whose `return` displays all have `n` items, or whose other
+returns forward a call of such a body (`return parse_basic_str(src, pos,
+multiline=False)`), now gets a twin (`0gen_multi<n>_<lift>`,
+`crates/pycc_mir/src/multi_return_object.rs`) when an unpacking assignment into `n`
+targets calls it. In the twin, `return a, b` stores `b` through an out-pointer and
+returns `a`; every other `return` is unchanged and its value is the whole result; a
+forward passes the twin's own out-pointers to the forwarded body's twin. The call
+site (`MirStmt::AssignMulti`, `crates/pycc_codegen/src/multi_out.rs`) clears its
+out-pointers and calls the twin on the direct path (section 2.8). A stored first
+out-pointer means the items are there. A null one means the result is whole (the
+forwarder ran, or the body returned something else), and the site unpacks it as
+before, so a list, a string, a wrong length or a non-iterable is unpacked or raises at
+the call site as in CPython, after the callee's frame is gone. A twin has its body's
+name in tracebacks and `sys._getframe`. A body with a `finally` (which could raise
+after the items were stored), a generator statement or a closure gets no twin.
+`tests/multi_returns.rs` checks these paths, with the direct calls on and off, against
+CPython.
+
+Local callgrind on CPython 3.15.2, `--select all`, per call: tomli `loads()` of a 38.6 KB
+`Cargo.lock` 26.76M → 24.72M (CPython 45.9M); a loop of `i, x = g(s, i)` 963 → 475
+instructions per iteration.
+
 **Rebinding an `int` in place.** In a scanning loop (`pos += 1`, `i -= 1`), every step
 made a new `int` and freed the old one: `PyLong_FromLongLong`, then the release and
 `long_dealloc`. CPython pays the same, through its free list. A statement `x = x op y`

@@ -204,13 +204,15 @@ pub(super) fn emit_direct_call<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     callee: &MirExpr,
     args: &[MirExpr],
+    multi: Option<&crate::direct_call::MultiCall<'ctx>>,
 ) -> Scalar<'ctx> {
     let callee_scalar = emit_expr(context, builder, module, rt, user_functions, locals, callee);
     let held_callee = object_release::hold(context, module, rt, callee, &callee_scalar);
     let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
     held_callee.consumed(rt);
     let direct =
-        crate::direct_call::global_target(module, user_functions, callee, args.scalars.len(), &[]);
+        crate::direct_call::global_target(module, user_functions, callee, args.scalars.len(), &[])
+            .map(|target| target.with_multi(user_functions, multi));
     let result = foreign_call::emit_object_call(
         context,
         builder,
@@ -258,6 +260,7 @@ fn emit_bound_method<'ctx>(
 /// exactly as for a positional call. The keyword values are evaluated after
 /// every positional argument and handed to `foreign_call::emit_call_kw`
 /// behind them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_keyword_call<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -266,6 +269,7 @@ pub(super) fn emit_keyword_call<'ctx>(
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
     call: &ObjKeywordCall,
+    multi: Option<&crate::direct_call::MultiCall<'ctx>>,
 ) -> Scalar<'ctx> {
     if let MirExpr::ObjMethodCall {
         base, method, args, ..
@@ -324,7 +328,8 @@ pub(super) fn emit_keyword_call<'ctx>(
             callee,
             args.len(),
             &call.names,
-        ),
+        )
+        .map(|target| target.with_multi(user_functions, multi)),
         _ => None,
     };
     let (consume, callable, held_callable, positional) = match &call.call {
@@ -392,4 +397,44 @@ pub(super) fn emit_keyword_call<'ctx>(
     );
     args.release(context, builder, rt);
     result
+}
+
+/// Emits the object call `call` (an `ObjCall` or an `ObjKeywordCall`), its
+/// direct path calling the twin `multi` asks for
+/// (`pycc_mir::multi_return_object`); `None` for any other expression.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_multi_call<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    call: &MirExpr,
+    multi: &crate::direct_call::MultiCall<'ctx>,
+) -> Option<Scalar<'ctx>> {
+    Some(match call {
+        MirExpr::ObjCall { callee, args } => emit_direct_call(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            callee,
+            args,
+            Some(multi),
+        ),
+        MirExpr::ObjKeywordCall(keyword) => emit_keyword_call(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            keyword,
+            Some(multi),
+        ),
+        _ => return None,
+    })
 }

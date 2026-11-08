@@ -73,10 +73,49 @@ pub(crate) fn define_cell<'ctx>(context: &'ctx Context, module: &Module<'ctx>, n
 /// The body a call may run directly, and its cell.
 pub(crate) struct DirectTarget<'ctx> {
     function: FunctionValue<'ctx>,
+    /// The body's name among the module's functions.
+    name: String,
     cell: PointerValue<'ctx>,
     /// How many arguments the call passes positionally, the receiver of a
     /// method call included: what the cell's counts are tested against.
     positional: u32,
+    /// The body's multi-value twin the direct path calls instead, with the
+    /// out-pointers it passes (`crate::multi_out`).
+    multi: Option<(FunctionValue<'ctx>, Vec<PointerValue<'ctx>>)>,
+}
+
+/// An unpacking call's request for its callee's multi-value twin
+/// (`pycc_mir::multi_return_object`): the twin of arity `outs.len() + 1`
+/// of `body` (of whichever body the call runs directly, when `None`), and
+/// the out-pointers it stores the results after the first through.
+pub(crate) struct MultiCall<'ctx> {
+    pub(crate) body: Option<String>,
+    pub(crate) outs: Vec<PointerValue<'ctx>>,
+}
+
+impl<'ctx> DirectTarget<'ctx> {
+    /// This target, calling its body's twin on the direct path when
+    /// `multi` asks for it and the module has that twin.
+    pub(crate) fn with_multi(
+        mut self,
+        user_functions: &HashMap<&str, UserFunction<'ctx>>,
+        multi: Option<&MultiCall<'ctx>>,
+    ) -> Self {
+        let Some(multi) = multi else {
+            return self;
+        };
+        if multi.body.as_ref().is_some_and(|body| *body != self.name) {
+            return self;
+        }
+        let twin = pycc_mir::multi_return_object::twin_name(&self.name, multi.outs.len() + 1);
+        if let Some(twin) = user_functions
+            .get(twin.as_str())
+            .and_then(|f| f.direct_value)
+        {
+            self.multi = Some((twin, multi.outs.clone()));
+        }
+        self
+    }
 }
 
 /// The direct target of a call of the source function `source` with
@@ -118,8 +157,10 @@ fn target<'ctx>(
         }
         found = Some(DirectTarget {
             function: body,
+            name: (*name).to_string(),
             cell: cell.as_pointer_value(),
             positional: u32::try_from(positional).ok()?,
+            multi: None,
         });
     }
     found.filter(|target| target.positional < 64)
@@ -317,10 +358,17 @@ pub(crate) fn emit<'ctx>(
     branch(entered, call_bb, slow_bb);
 
     builder.position_at_end(call_bb);
-    let operands: Vec<BasicMetadataValueEnum<'ctx>> =
+    let mut operands: Vec<BasicMetadataValueEnum<'ctx>> =
         args.iter().map(|arg| (*arg).into()).collect();
+    let function = match &target.multi {
+        Some((twin, outs)) => {
+            operands.extend(outs.iter().map(|out| BasicMetadataValueEnum::from(*out)));
+            *twin
+        }
+        None => target.function,
+    };
     let result = builder
-        .build_call(target.function, &operands, "direct_result")
+        .build_call(function, &operands, "direct_result")
         .expect("build_call should not fail for a direct call")
         .try_as_basic_value()
         .expect_basic("a lifted body returns PyObject *")

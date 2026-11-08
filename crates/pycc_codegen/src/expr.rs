@@ -621,6 +621,7 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             locals,
             callee,
             args,
+            None,
         ),
         // Part 8 of #1371: either call above with keyword arguments.
         // `foreign_call_emit` carries the order and the ownership split.
@@ -632,6 +633,7 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             user_functions,
             locals,
             call,
+            None,
         ),
         // Part 3 of #1026 (PR 3a of #1082): `len(o)`. `foreign_len` carries
         // the contract -- why the D-141 encode happens inside the shim

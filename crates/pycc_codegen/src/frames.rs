@@ -266,6 +266,16 @@ fn source_qualname(mangled: &str) -> String {
         .or_else(|| m.strip_suffix(".static"))
         .or_else(|| m.strip_suffix(".setter"))
         .unwrap_or(m);
+    // An object multi-value twin (`0gen_multi2___pycc_lift7_f__`) is its
+    // lifted body.
+    let m = match pycc_mir::multi_return_object::twin_arity(m) {
+        Some(_) => m
+            .trim_start_matches("0gen_multi")
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .strip_prefix('_')
+            .unwrap_or(m),
+        None => m,
+    };
     let m = m.strip_prefix("0gen_").unwrap_or(m);
     match m.split_once('.') {
         Some((class, rest)) => format!("{}.{rest}", pycc_hir::namespace::plain_name(class)),
