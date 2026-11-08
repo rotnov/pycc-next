@@ -304,29 +304,10 @@ fn releasing_aside<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>, releases: im
         .expect("pycc_rt_exception_take returns a value");
     releases();
     // Nothing is pending where an import's failure is still CPython's own
-    // error (`foreign_fail::emit_failure`): then nothing is raised again.
-    let raised = raised.into_pointer_value();
-    let function = builder
-        .get_insert_block()
-        .and_then(|block| block.get_parent())
-        .expect("a release is emitted inside a function");
-    let context = function.get_type().get_context();
-    let again = context.append_basic_block(function, "unwind_exc_again");
-    let done = context.append_basic_block(function, "unwind_exc_done");
-    let pending = builder
-        .build_is_not_null(raised, "unwind_exc_pending")
-        .expect("build_is_not_null should not fail");
+    // error (`foreign_fail::emit_failure`): then nothing is restored.
     builder
-        .build_conditional_branch(pending, again, done)
-        .expect("build_conditional_branch should not fail");
-    builder.position_at_end(again);
-    builder
-        .build_call(rt.exception_raise, &[raised.into()], "")
-        .expect("build_call should not fail for pycc_rt_exception_raise");
-    builder
-        .build_unconditional_branch(done)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(done);
+        .build_call(rt.exception_restore, &[raised.into()], "")
+        .expect("build_call should not fail for pycc_rt_exception_restore");
 }
 
 /// One entry of `ExceptionCodegenState::loop_iterators`: an enclosing

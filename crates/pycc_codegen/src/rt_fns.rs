@@ -330,6 +330,9 @@ pub(super) struct RtFns<'ctx> {
     pub(super) exception_alloc: FunctionValue<'ctx>,
     /// `exception_raise(obj: *mut PyExceptionObj)` — sets pending state (void).
     pub(super) exception_raise: FunctionValue<'ctx>,
+    /// `exception_restore(obj: *mut PyExceptionObj)` (void): makes a taken
+    /// exception pending again; nothing for null (`object_release`).
+    pub(super) exception_restore: FunctionValue<'ctx>,
     /// `exception_set_frame(obj: *mut PyExceptionObj, frame_function: *const
     /// u8, frame_function_len: usize)` (void, #707): records the enclosing
     /// function's source name on the exception object being raised, for
@@ -910,6 +913,10 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         exception_raise: declare(
             "pycc_rt_exception_raise",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        exception_restore: declare(
+            "pycc_rt_exception_restore",
             void_type.fn_type(&[ptr_type.into()], false),
         ),
         exception_raise_with_cause: declare(

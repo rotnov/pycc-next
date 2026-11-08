@@ -123,7 +123,7 @@ pub use exception::{
     pycc_rt_exception_alloc, pycc_rt_exception_clear, pycc_rt_exception_decref,
     pycc_rt_exception_group_alloc, pycc_rt_exception_group_partition,
     pycc_rt_exception_incref, pycc_rt_exception_live_objects, pycc_rt_exception_message,
-    pycc_rt_exception_raise, pycc_rt_exception_take,
+    pycc_rt_exception_raise, pycc_rt_exception_restore, pycc_rt_exception_take,
     pycc_rt_exception_raise_with_cause, pycc_rt_exception_type_matches,
     pycc_rt_ext_pending_message, pycc_rt_ext_pending_type,
 };
