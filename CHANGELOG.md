@@ -213,6 +213,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- The differential fuzzer no longer compares the warnings CPython writes to stderr: a
+  `DeprecationWarning` (`~` on a `bool`) printed before an uncaught `SystemExit`'s message,
+  which has no traceback to separate them, was reported as a different exception (nightly
+  runs since 2026-11-04). `docs/DEVIATIONS.md` documents that compiled `~` on a `bool`
+  does not warn.
 - A compiled body's values that an exception unwinds (the items of a list or tuple display
   before the one that raised, a loop's iterator) are released with the exception set
   aside, as CPython's unwinding drops them. A `__del__` they run, compiled or not, no

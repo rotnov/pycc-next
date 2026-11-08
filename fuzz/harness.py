@@ -4,7 +4,9 @@ An outcome is (stdout, exception, exit status). The exception is the text of the
 last exception CPython's traceback reports (its type and message), with the
 module prefix of a class defined in the program (`__main__.`, the extension
 module's name) removed; frames are not compared (compiled code prints only the
-last line, a documented deviation).
+last line, a documented deviation). Warnings CPython writes to stderr are not
+part of an outcome either (docs/DEVIATIONS.md): their lines are dropped, also
+when no traceback separates them from the exception (an uncaught `SystemExit`).
 """
 
 from __future__ import annotations
@@ -56,13 +58,18 @@ class Build:
     seconds_out: bool = False
 
 
+# The first line of a warning `warnings.showwarning` prints:
+# `<file>:<line>: <category>: <message>` (the source line after it is indented).
+WARNING_LINE = re.compile(r"^.*:\d+: [\w.]*Warning: ")
+
+
 def last_exception(stderr: str, module: str) -> str:
     """The final exception's text from a traceback (or a bare message)."""
     text = stderr.replace("\r\n", "\n")
     marker = "Traceback (most recent call last):\n"
     if marker in text:
         text = text[text.rindex(marker) + len(marker):]
-    lines = [ln for ln in text.split("\n") if not ln.startswith("  ")]
+    lines = [ln for ln in text.split("\n") if not ln.startswith("  ") and not WARNING_LINE.match(ln)]
     out = "\n".join(lines).strip("\n")
     for prefix in ("__main__.", module + "."):
         out = re.sub(r"^" + re.escape(prefix), "", out, flags=re.M)

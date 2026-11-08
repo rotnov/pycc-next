@@ -456,3 +456,26 @@ fn a_star_constructor_suggests_its_own_receiver_spelling() {
     assert!(expected.stdout.contains("Did you mean 'this'?"), "{expected:?}");
     assert_eq!(run(&compiled), expected);
 }
+
+/// `~` on a `bool` inverts its int value in every mode. CPython 3.15 also
+/// writes a `DeprecationWarning` to stderr (in `__main__`), which compiled
+/// code does not (docs/DEVIATIONS.md); the outcome compared here, as by the
+/// fuzzer, is stdout, the exception and the status.
+#[test]
+fn bitwise_inversion_of_a_bool_is_the_int_inversion() {
+    assert_matches_cpython("fuzz_bool_invert");
+}
+
+/// The reduced nightly finding: a `~False` statement, then an uncaught
+/// `SystemExit` whose message CPython prints with no traceback after its
+/// warning (`--non-strict`; strict mode refuses `SystemExit`).
+#[test]
+fn bool_inversion_before_a_system_exit_message() {
+    let name = "fuzz_bool_invert_system_exit";
+    let source = fixture(&format!("{name}.py"));
+    let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
+    assert_eq!(expected.error, "bye");
+    let got = support::run_native(name, &source, &["--release", "--non-strict"]);
+    assert_eq!(got, expected);
+    assert_ext_non_strict_matches(name);
+}
