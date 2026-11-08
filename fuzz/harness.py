@@ -4,7 +4,9 @@ An outcome is (stdout, exception, exit status). The exception is the text of the
 last exception CPython's traceback reports (its type and message), with the
 module prefix of a class defined in the program (`__main__.`, the extension
 module's name) removed; frames are not compared (compiled code prints only the
-last line, a documented deviation).
+last line, a documented deviation). Warnings CPython writes to stderr are not
+part of an outcome either (docs/DEVIATIONS.md): their lines are dropped, also
+when no traceback separates them from the exception (an uncaught `SystemExit`).
 """
 
 from __future__ import annotations
@@ -56,13 +58,35 @@ class Build:
     seconds_out: bool = False
 
 
+# The first line of a warning `warnings.showwarning` prints:
+# `<file>:<line>: <category>: <message>`, then the indented source line.
+WARNING_LINE = re.compile(r"^\S.*:\d+: [\w.]*Warning: ")
+
+
+def drop_warnings(lines: list[str]) -> list[str]:
+    """`lines` without the warnings (each one's first line and indented source line)."""
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if WARNING_LINE.match(lines[i]) and i + 1 < len(lines) and lines[i + 1].startswith("  "):
+            i += 2
+            continue
+        out.append(lines[i])
+        i += 1
+    return out
+
+
 def last_exception(stderr: str, module: str) -> str:
     """The final exception's text from a traceback (or a bare message)."""
     text = stderr.replace("\r\n", "\n")
     marker = "Traceback (most recent call last):\n"
     if marker in text:
-        text = text[text.rindex(marker) + len(marker):]
-    lines = [ln for ln in text.split("\n") if not ln.startswith("  ")]
+        # Warnings print before the traceback: nothing after it is one.
+        lines = text[text.rindex(marker) + len(marker):].split("\n")
+    else:
+        # No traceback (an uncaught `SystemExit`): the warnings precede the message.
+        lines = drop_warnings(text.split("\n"))
+    lines = [ln for ln in lines if not ln.startswith("  ")]
     out = "\n".join(lines).strip("\n")
     for prefix in ("__main__.", module + "."):
         out = re.sub(r"^" + re.escape(prefix), "", out, flags=re.M)
