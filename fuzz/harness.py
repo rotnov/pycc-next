@@ -59,8 +59,21 @@ class Build:
 
 
 # The first line of a warning `warnings.showwarning` prints:
-# `<file>:<line>: <category>: <message>` (the source line after it is indented).
-WARNING_LINE = re.compile(r"^.*:\d+: [\w.]*Warning: ")
+# `<file>:<line>: <category>: <message>`, then the indented source line.
+WARNING_LINE = re.compile(r"^\S.*:\d+: [\w.]*Warning: ")
+
+
+def drop_warnings(lines: list[str]) -> list[str]:
+    """`lines` without the warnings (each one's first line and indented source line)."""
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if WARNING_LINE.match(lines[i]) and i + 1 < len(lines) and lines[i + 1].startswith("  "):
+            i += 2
+            continue
+        out.append(lines[i])
+        i += 1
+    return out
 
 
 def last_exception(stderr: str, module: str) -> str:
@@ -68,8 +81,12 @@ def last_exception(stderr: str, module: str) -> str:
     text = stderr.replace("\r\n", "\n")
     marker = "Traceback (most recent call last):\n"
     if marker in text:
-        text = text[text.rindex(marker) + len(marker):]
-    lines = [ln for ln in text.split("\n") if not ln.startswith("  ") and not WARNING_LINE.match(ln)]
+        # Warnings print before the traceback: nothing after it is one.
+        lines = text[text.rindex(marker) + len(marker):].split("\n")
+    else:
+        # No traceback (an uncaught `SystemExit`): the warnings precede the message.
+        lines = drop_warnings(text.split("\n"))
+    lines = [ln for ln in lines if not ln.startswith("  ")]
     out = "\n".join(lines).strip("\n")
     for prefix in ("__main__.", module + "."):
         out = re.sub(r"^" + re.escape(prefix), "", out, flags=re.M)

@@ -123,6 +123,9 @@ jobs:
       # Differential fuzzing smoke (v0.6 accept 4; .github/workflows/fuzz.yml runs
       # 30 minutes nightly): two minutes of generated programs, each compared with
       # CPython in every build mode; any mismatch or compiler crash fails the job.
+      - name: Fuzz harness unit tests
+        if: matrix.os == 'ubuntu-24.04'
+        run: python3 fuzz/test_harness.py
       - name: Differential fuzzing smoke
         if: matrix.os == 'ubuntu-24.04'
         run: python3 fuzz/fuzz.py --seconds 120 -j 4 --seed 1 --reduce-seconds 120 --findings fuzz-findings
