@@ -69,6 +69,12 @@ impl Range {
         }
     }
 
+    /// Whether every value's negation is a smallint too: all but the most
+    /// negative smallint, `-2**62`, whose negation `2**62` is a bigint.
+    pub(crate) fn negates_to_small(self) -> bool {
+        i128::from(self.lo) > SMALL_MIN
+    }
+
     fn bounds(self) -> (i128, i128) {
         (i128::from(self.lo), i128::from(self.hi))
     }
