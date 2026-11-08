@@ -213,6 +213,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- `abs(-2**62)`, the most negative smallint, is `2**62` where the argument's range is known
+  at compile time (a literal, a local, a `range()` loop variable); it printed
+  `-4611686018427387904` (found by the fuzzer).
 - A compiled body's values that an exception unwinds (the items of a list or tuple display
   before the one that raised, a loop's iterator) are released with the exception set
   aside, as CPython's unwinding drops them. A `__del__` they run, compiled or not, no

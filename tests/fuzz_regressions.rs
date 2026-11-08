@@ -199,6 +199,14 @@ fn float_repr_breaks_ties_like_cpython() {
     assert_matches_cpython("fuzz_float_repr_ties");
 }
 
+/// `abs(-2**62)`: the most negative smallint's absolute value is a bigint,
+/// even when the argument's range is proven (a literal, a local, a `range()`
+/// loop variable).
+#[test]
+fn abs_of_the_most_negative_smallint_is_a_bigint() {
+    assert_matches_cpython("fuzz_abs_min_smallint");
+}
+
 /// `for ... in zip(...)` sees the sequences change under it as CPython's
 /// iterators do (shrinking, growing, the name rebound), `else` included.
 #[test]

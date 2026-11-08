@@ -134,8 +134,15 @@ pub(super) fn emit_call<'ctx>(
         ("abs", [x]) if matches!(x.ty(), Ty::Int | Ty::Bool) => {
             let scalar = emit(x);
             let word = to_numeric_encoded_int(context, builder, scalar);
-            let result = if x.ty() == Ty::Int && rt.int_ranges.borrow().of(x).is_some() {
-                // A smallint (`int_range`): `2v + 1` negated is `2 - word`.
+            let small = x.ty() == Ty::Int
+                && rt
+                    .int_ranges
+                    .borrow()
+                    .of(x)
+                    .is_some_and(crate::int_range::Range::negates_to_small);
+            let result = if small {
+                // A smallint (`int_range`) other than `-2**62`, whose
+                // absolute value is a bigint: `2v + 1` negated is `2 - word`.
                 crate::int_small::emit_abs(context, builder, word)
             } else {
                 emit_int_abs(context, builder, rt, word)
