@@ -65,6 +65,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   left out take the call as before. `isinstance` against a builtin also answers `False`
   inline when the object is exactly another builtin, and packing an object argument is an
   inline reference increment.
+- `a, b = f(...)` in a generic body, where `f` names one compiled function whose
+  `return x, y` displays all have that many items, builds no tuple: the direct call runs
+  a twin of `f` that stores the items after the first through out-pointers. Any other
+  result of `f` (another return, a rebound `f`, a replaced `__code__`) is unpacked at the
+  call site as before (`docs/design/compile-little.md`, section 2.5). Lifted bodies no
+  longer get unused strict-mode multi-value twins.
 - `x += 1` (and `x = x + y`, `-`, `&`, `|`, `^`) on an object local in a generic body
   writes the result into `x`'s `int` when the local holds its only reference, the result
   is a compact `int` and not one of CPython's cached small ints, instead of making a new
@@ -207,6 +213,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- A compiled body's values that an exception unwinds (the items of a list or tuple display
+  before the one that raised, a loop's iterator) are released with the exception set
+  aside, as CPython's unwinding drops them. A `__del__` they run, compiled or not, no
+  longer sees the pending exception as its own failure. Before, it was reported as
+  ignored and the original exception became a `SystemError`.
 - A non-strict `--ext` build no longer fails on a selected function whose comprehension
   holds a walrus (`[y for x in xs if (y := f(x))]`, in pydantic's `_fields.py` and
   `networks.py`): the walrus target is the function's own local (PEP 572), not a module

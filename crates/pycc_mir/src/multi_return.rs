@@ -60,6 +60,17 @@ fn collect_out_tys(body: &[MirStmt], found: &mut Vec<Option<Ty>>) {
     }
 }
 
+/// The out-pointer result types of the function `name` with body `body`:
+/// an object twin's (`crate::multi_return_object`) by its arity, any other
+/// function's by [`out_tys`].
+#[must_use]
+pub fn function_out_tys(name: &str, body: &[MirStmt]) -> Vec<Ty> {
+    match crate::multi_return_object::twin_arity(name) {
+        Some(arity) => vec![Ty::Object; arity - 1],
+        None => out_tys(body),
+    }
+}
+
 /// The prefix of the tuple temporary an unpacking assignment is lowered
 /// through (`stmt::lower_stmt`).
 pub(crate) const UNPACK_TEMP: &str = "0unpack_";
@@ -169,6 +180,9 @@ fn candidates(module: &MirModule) -> HashMap<String, Abi> {
         if definitions[name.as_str()] != 1
             || name.starts_with('0')
             || name.starts_with("_pycc_")
+            // A lifted body is only ever called as an object
+            // (`crate::multi_return_object`).
+            || name.starts_with("__pycc_lift")
             || name.contains('.')
             || INTERCEPTED.contains(&name.as_str())
         {

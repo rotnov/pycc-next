@@ -197,6 +197,26 @@ pub(crate) fn emit_return_stmt<'ctx>(
                     &expected_return_ty,
                     "return value",
                 )
+            } else if let Some(items) = crate::multi_out::emit_object_display_return(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                expr,
+            ) {
+                items
+            } else if let Some(forwarded) = crate::multi_out::emit_object_forward(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                expr,
+            ) {
+                forwarded
             } else {
                 emit_expr(context, builder, module, rt, user_functions, locals, expr)
             };

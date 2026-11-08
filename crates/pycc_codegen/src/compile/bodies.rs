@@ -160,7 +160,7 @@ pub(super) fn emit_function_bodies<'ctx>(
             // can tell that it owes the wrapper a `has_slice = 0`.
             // A multi-value twin's out-pointers, by result index
             // (`multi_out::out_key`), after its parameters.
-            for (offset, ty) in pycc_mir::multi_return::out_tys(body)
+            for (offset, ty) in pycc_mir::multi_return::function_out_tys(name, body)
                 .into_iter()
                 .enumerate()
             {

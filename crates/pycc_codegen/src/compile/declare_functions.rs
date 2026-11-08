@@ -70,7 +70,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
             // A multi-value twin (`pycc_mir::multi_return`) stores its
             // results after the first through one trailing out-pointer
             // each (`MirStmt::SetOut`).
-            for _ in pycc_mir::multi_return::out_tys(body) {
+            for _ in pycc_mir::multi_return::function_out_tys(name, body) {
                 param_types.push(context.ptr_type(inkwell::AddressSpace::default()).into());
             }
             let fn_type = match return_ty {

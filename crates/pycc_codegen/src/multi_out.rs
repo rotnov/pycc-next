@@ -11,6 +11,7 @@
 //! leaves the caller's out slots untouched and its temporaries unbound.
 
 use super::*;
+use inkwell::values::PointerValue;
 
 /// The frame key of a twin's out-pointer for result `index` (from 1).
 pub(crate) fn out_key(index: usize) -> String {
@@ -61,6 +62,19 @@ pub(crate) fn emit_assign_multi_stmt<'ctx>(
     let MirStmt::AssignMulti(multi) = stmt else {
         unreachable!()
     };
+    if pycc_mir::multi_return_object::twin_arity(&multi.twin).is_some() {
+        return emit_object_assign_multi(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            multi,
+            expected_return_ty,
+            finally_stack,
+        );
+    }
     let resolved = user_functions
         .get(multi.original.as_str())
         .filter(|original| original.direct_value.is_some() || original.single_def.is_some())
@@ -128,6 +142,249 @@ pub(crate) fn emit_assign_multi_stmt<'ctx>(
         heap_rc::release_old(context, builder, rt, old);
     }
     Ok(())
+}
+
+/// An object `AssignMulti` (`pycc_mir::multi_return_object`): the call
+/// its fallback unpacks, made with its twin on the direct path. When the
+/// twin stored the results after the first, they bind the temporaries;
+/// otherwise the call's value is whole and is unpacked as the fallback
+/// unpacks it.
+#[allow(clippy::too_many_arguments)]
+fn emit_object_assign_multi<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &mut HashMap<String, StorageSlot<'ctx>>,
+    multi: &pycc_mir::AssignMulti,
+    expected_return_ty: pycc_mir::Ty,
+    finally_stack: &mut Vec<FinallyTarget<'ctx>>,
+) -> Result<(), String> {
+    let Some(MirStmt::Assign {
+        target: tuple,
+        value: MirExpr::ObjUnpack { value: call, arity },
+    }) = multi.fallback.first()
+    else {
+        unreachable!("an object AssignMulti's fallback starts with its unpacking")
+    };
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let outs: Vec<PointerValue<'ctx>> = (1..*arity)
+        .map(|_| {
+            entry_slots::alloca_at_entry(
+                builder,
+                inkwell::types::BasicTypeEnum::from(ptr),
+                "multi_out",
+            )
+        })
+        .collect();
+    for out in &outs {
+        builder
+            .build_store(*out, ptr.const_null())
+            .expect("build_store should not fail for an out slot");
+    }
+    let request = crate::direct_call::MultiCall {
+        body: Some(multi.original.clone()),
+        outs: outs.clone(),
+    };
+    let Some(Scalar::Object(result)) = crate::foreign_call_emit::emit_multi_call(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        call,
+        &request,
+    ) else {
+        unreachable!("an object AssignMulti unpacks an object call")
+    };
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an AssignMulti is emitted inside a function");
+    let stored_bb = context.append_basic_block(function, "multi_stored");
+    let whole_bb = context.append_basic_block(function, "multi_whole");
+    let done_bb = context.append_basic_block(function, "multi_done");
+    let first_out = builder
+        .build_load(ptr, outs[0], "multi_first_out")
+        .expect("build_load should not fail for an out slot")
+        .into_pointer_value();
+    let stored = builder
+        .build_is_not_null(first_out, "multi_stored")
+        .expect("build_is_not_null should not fail");
+    let branch = builder
+        .build_conditional_branch(stored, stored_bb, whole_bb)
+        .expect("build_conditional_branch should not fail");
+    crate::int_fast::weight_branch(context, branch, true);
+
+    builder.position_at_end(stored_bb);
+    let mut results = vec![result];
+    for out in &outs {
+        results.push(
+            builder
+                .build_load(ptr, *out, "multi_result")
+                .expect("build_load should not fail for an out slot")
+                .into_pointer_value(),
+        );
+    }
+    for ((temp, _), result) in multi.temps.iter().zip(results) {
+        let old = locals
+            .get(temp)
+            .and_then(|slot| heap_rc::take_slot_old(context, builder, rt, &slot.ty, slot.ptr));
+        emit_assign(context, builder, rt, locals, temp, Scalar::Object(result));
+        heap_rc::release_old(context, builder, rt, old);
+    }
+    builder
+        .build_unconditional_branch(done_bb)
+        .expect("build_unconditional_branch should not fail");
+
+    // The whole result, unpacked as `ObjUnpack` unpacks its value.
+    builder.position_at_end(whole_bb);
+    let held = object_release::hold_new_reference(context, module, rt, result);
+    let unpacked = crate::foreign_unpack::emit_unpack(
+        context,
+        builder,
+        module,
+        rt,
+        Scalar::Object(result),
+        *arity,
+    );
+    held.release(builder, rt);
+    let old = locals
+        .get(tuple)
+        .and_then(|slot| heap_rc::take_slot_old(context, builder, rt, &slot.ty, slot.ptr));
+    emit_assign(context, builder, rt, locals, tuple, unpacked);
+    heap_rc::release_old(context, builder, rt, old);
+    emit_body(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        &multi.fallback[1..],
+        expected_return_ty,
+        finally_stack,
+    )?;
+    if builder
+        .get_insert_block()
+        .is_some_and(|block| block.get_terminator().is_none())
+    {
+        builder
+            .build_unconditional_branch(done_bb)
+            .expect("build_unconditional_branch should not fail");
+    }
+    builder.position_at_end(done_bb);
+    Ok(())
+}
+
+/// `return g(...)` in an object twin, `g` a lifted body: the call made with
+/// `g`'s twin of this twin's arity on its direct path, passing this twin's
+/// own out-pointers on, so whatever `g` stores is this twin's result. A
+/// whole result stays whole. `None` when the function is not an object
+/// twin or `expr` is not such a call.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_object_forward<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Option<Scalar<'ctx>> {
+    if !matches!(expr, MirExpr::ObjCall { .. } | MirExpr::ObjKeywordCall(_)) {
+        return None;
+    }
+    let outs = object_twin_outs(builder, locals)?;
+    let request = crate::direct_call::MultiCall { body: None, outs };
+    crate::foreign_call_emit::emit_multi_call(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        expr,
+        &request,
+    )
+}
+
+/// The out-pointers of the object twin being emitted
+/// (`pycc_mir::multi_return_object`), or `None` outside one.
+fn object_twin_outs<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+) -> Option<Vec<PointerValue<'ctx>>> {
+    let outs: Vec<PointerValue<'ctx>> = (1..)
+        .map_while(|index| locals.get(&out_key(index)))
+        .filter(|slot| slot.ty == pycc_mir::Ty::Object)
+        .map(|slot| slot.ptr)
+        .collect();
+    let in_twin = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .is_some_and(|function| {
+            let name = function.get_name().to_string_lossy();
+            name.strip_prefix("pyfn_")
+                .and_then(pycc_mir::multi_return_object::twin_arity)
+                .is_some_and(|arity| arity == outs.len() + 1)
+        });
+    in_twin.then_some(outs)
+}
+
+/// `return a, b, ...` in an object twin, with one item per result: the
+/// items are evaluated in order, each a reference of its own held until the
+/// last item exists, so an item that raises releases the earlier ones on
+/// its exception edge, as CPython's unwinding drops the values a tuple
+/// display has pushed. Then every item after the first goes through its
+/// out-pointer, and the first is the returned value. `None` (nothing
+/// emitted) for any other return.
+pub(crate) fn emit_object_display_return<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Option<Scalar<'ctx>> {
+    let MirExpr::ObjDisplay {
+        kind: pycc_mir::ObjDisplayKind::Tuple,
+        elements,
+    } = expr
+    else {
+        return None;
+    };
+    let outs = object_twin_outs(builder, locals)?;
+    if elements.len() != outs.len() + 1
+        || elements.iter().any(|element| element.ty() != pycc_mir::Ty::Object)
+    {
+        return None;
+    }
+    let mut items = Vec::with_capacity(elements.len());
+    let mut holds = Vec::with_capacity(elements.len());
+    for element in elements {
+        let scalar = emit_expr(context, builder, module, rt, user_functions, locals, element);
+        let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, element, scalar);
+        let Scalar::Object(item) = scalar else {
+            unreachable!("an object twin's returned item is an object")
+        };
+        holds.push(crate::object_release::hold_new_reference(
+            context, module, rt, item,
+        ));
+        items.push(item);
+    }
+    for held in holds.into_iter().rev() {
+        held.consumed(rt);
+    }
+    for (out, item) in outs.iter().zip(&items[1..]) {
+        builder
+            .build_store(*out, *item)
+            .expect("build_store should not fail through a twin's out-pointer");
+    }
+    Some(Scalar::Object(items[0]))
 }
 
 /// `target = temp` followed by `ReleaseName(temp)`, for a compiler

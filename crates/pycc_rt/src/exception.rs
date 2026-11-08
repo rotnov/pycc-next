@@ -374,6 +374,18 @@ pub extern "C" fn pycc_rt_exception_raise(obj: *mut PyExceptionObj) {
     pycc_rt_exception_decref(old);
 }
 
+/// Makes `obj`, taken by [`pycc_rt_exception_take`], pending again, taking
+/// over the caller's reference; nothing when `obj` is null (nothing was
+/// pending when it was taken). Generated code sets a pending exception
+/// aside with the pair while an exception edge releases the values it
+/// unwinds, whose finalizers must not see it.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_exception_restore(obj: *mut PyExceptionObj) {
+    if !obj.is_null() {
+        pycc_rt_exception_raise(obj);
+    }
+}
+
 /// Raises `obj` with `cause` as its `__cause__`, taking over the caller's
 /// reference to each.
 ///
