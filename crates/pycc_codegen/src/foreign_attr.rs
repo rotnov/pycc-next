@@ -74,10 +74,11 @@ pub(super) fn expect_object_pointer(scalar: Scalar<'_>) -> PointerValue<'_> {
 /// `pycc_ext_obj_getattr` returns `NULL` with *CPython's* error indicator
 /// set. That is a second failure protocol next to pycc's own pending state
 /// (D-173, `pycc_rt_exception_active`), and the standard pending-exception
-/// guard `emit_expr` emits right after this call -- `expression_can_set_exception`
-/// answers `true` for this node -- reads pycc's state, which a CPython-set
-/// exception leaves untouched. It therefore takes the no-exception edge and
-/// cannot stop the module body on its own. PR 2a's own review found what
+/// guard `emit_expr` emits after a fallible node reads pycc's state, which a
+/// CPython-set exception leaves untouched. Such a guard would take the
+/// no-exception edge and could not stop the module body on its own, so
+/// `expression_can_set_exception` answers `false` for this node and emits
+/// none: the edge below is the whole of its failure handling. PR 2a's own review found what
 /// that costs: `import numpy` followed by `numpy.definitely_not_there` ran
 /// the whole module body to completion and CPython reported `SystemError:
 /// execution of module n raised unreported exception` instead of the real
