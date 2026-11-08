@@ -939,6 +939,7 @@ pub(crate) mod deque;
 pub(crate) mod heap;
 pub(crate) mod ops;
 pub(crate) mod order;
+pub(crate) mod timsort;
 
 #[cfg(test)]
 mod tests;

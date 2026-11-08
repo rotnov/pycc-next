@@ -28,6 +28,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- `pycc profile`'s pass 3 selects a larger winning set over a smaller one only when it
+  is faster beyond the noise of both (its compiled third quartile under the smaller one's
+  first quartile); before, the lower median won, so two winners with overlapping
+  interquartile ranges flipped from run to run (diff-match-patch: a 30-function region or
+  `diff_bisect` alone).
 - A `--release` module's object release is split: its `NULL` and immortality tests are
   inlined at each site, and only a mortal object's decrement and `_Py_Dealloc` stay one
   call into the module's own `pycc_ext_obj_release_count`. Most releases in a generic body
@@ -222,6 +227,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - `abs(-2**62)`, the most negative smallint, is `2**62` where the argument's range is known
   at compile time (a literal, a local, a `range()` loop variable); it printed
   `-4611686018427387904` (found by the fuzzer).
+- `sorted()` and `list.sort()` (with or without `key=`/`reverse=`) are CPython's own
+  timsort, run detection, binary insertion, powersort merges and galloping included, so a
+  `nan` among floats ends where CPython leaves it (`sorted([2.675, 0, nan])` is
+  `[0, nan, 2.675]`). Before, a merge sort put it elsewhere (found by the fuzzer).
 - The differential fuzzer no longer compares the warnings CPython writes to stderr: a
   `DeprecationWarning` (`~` on a `bool`) printed before an uncaught `SystemExit`'s message,
   which has no traceback to separate them, was reported as a different exception (nightly

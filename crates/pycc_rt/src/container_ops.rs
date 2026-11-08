@@ -311,7 +311,7 @@ fn keyed_pairs(pairs: *mut PyListObj) -> Vec<KeyedPair> {
 }
 
 /// The positions of `pairs` in CPython's `sorted(..., key=...,
-/// reverse=...)` order: a stable sort consulting only `<` on the keys, and
+/// reverse=...)` order: CPython's timsort consulting only `<` on the keys, and
 /// for `reverse` CPython's own reverse-sort-reverse, which keeps equal keys
 /// in their original order.
 fn order_by_keys(pairs: &[KeyedPair], reverse: bool) -> Vec<i64> {
@@ -319,7 +319,7 @@ fn order_by_keys(pairs: &[KeyedPair], reverse: bool) -> Vec<i64> {
     if reverse {
         positions.reverse();
     }
-    crate::list::ops::merge_sort(&mut positions, &|a, b| {
+    crate::list::timsort::sort(&mut positions, &|a, b| {
         let ((kind, x), (_, y)) = (pairs[a as usize].0, pairs[b as usize].0);
         value::lt_or_raise(kind, x, y)
     });

@@ -2,10 +2,9 @@
 //! ordering (`sorted`, `sort`, `min`, `max`), `sum`, `any`/`all`, and the
 //! element-searching and copying methods.
 //!
-//! Ordering is CPython's: only `<` is consulted, and sorting is stable, so a
-//! list holding a `nan` sorts exactly as CPython's merge-based sort leaves
-//! it whenever `<` is a consistent order -- the merge sort here never
-//! assumes totality.
+//! Ordering is CPython's: only `<` is consulted, and sorting is CPython's own
+//! timsort (`super::timsort`), so a list holding a `nan` sorts exactly as
+//! CPython leaves it.
 
 use super::*;
 
@@ -35,44 +34,7 @@ pub(crate) fn edit_words<R>(list: &mut PyListObj, f: impl FnOnce(&mut Vec<i64>) 
     }
 }
 
-/// Stable merge sort consulting only `lt`.
-pub(crate) fn merge_sort(items: &mut Vec<i64>, lt: &dyn Fn(i64, i64) -> bool) {
-    let n = items.len();
-    if n < 2 {
-        return;
-    }
-    // Insertion sort for short runs keeps small sorts cheap.
-    if n <= 16 {
-        for i in 1..n {
-            let mut j = i;
-            while j > 0 && lt(items[j], items[j - 1]) {
-                items.swap(j, j - 1);
-                j -= 1;
-            }
-        }
-        return;
-    }
-    let mut right = items.split_off(n / 2);
-    merge_sort(items, lt);
-    merge_sort(&mut right, lt);
-    let left = std::mem::take(items);
-    items.reserve(n);
-    let (mut i, mut j) = (0, 0);
-    while i < left.len() && j < right.len() {
-        // Take from the right only when strictly smaller: stability.
-        if lt(right[j], left[i]) {
-            items.push(right[j]);
-            j += 1;
-        } else {
-            items.push(left[i]);
-            i += 1;
-        }
-    }
-    items.extend_from_slice(&left[i..]);
-    items.extend_from_slice(&right[j..]);
-}
-
-fn sort_words(kind: i64, items: &mut Vec<i64>) {
+fn sort_words(kind: i64, items: &mut [i64]) {
     match kind {
         // Fast paths with a genuine total order on the words' values.
         LIST_KIND_INT if items.iter().all(|w| inline_int_value(*w).is_some()) => {
@@ -84,7 +46,7 @@ fn sort_words(kind: i64, items: &mut Vec<i64>) {
                 .bytes()
                 .cmp((*(*b as *mut PyStrObj)).bytes())
         }),
-        _ => merge_sort(items, &|a, b| word_lt(kind, a, b)),
+        _ => super::timsort::sort(items, &|a, b| word_lt(kind, a, b)),
     }
 }
 
