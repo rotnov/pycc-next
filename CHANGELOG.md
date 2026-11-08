@@ -224,6 +224,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- `abs(-2**62)`, the most negative smallint, is `2**62` where the argument's range is known
+  at compile time (a literal, a local, a `range()` loop variable); it printed
+  `-4611686018427387904` (found by the fuzzer).
 - `sorted()` and `list.sort()` (with or without `key=`/`reverse=`) are CPython's own
   timsort, run detection, binary insertion, powersort merges and galloping included, so a
   `nan` among floats ends where CPython leaves it (`sorted([2.675, 0, nan])` is
