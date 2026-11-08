@@ -18,8 +18,9 @@
 //!    reserved for this check before any region is measured.
 //!
 //! The selection is exactly one set measured as a whole that won (the
-//! compiled median under CPython's first quartile): the one with the lowest
-//! median, the smaller on a tie ([`decide`]). It is never a union of sets
+//! compiled median under CPython's first quartile): the smallest, unless a
+//! larger one is faster beyond the noise of both, its compiled third
+//! quartile under the smaller one's first ([`replaces`], [`decide`]). It is never a union of sets
 //! measured apart, so a region pulls a cold function in only when that
 //! pays, and when the regions together cannot be measured, or lose, the
 //! best single winner is kept.
@@ -186,6 +187,19 @@ impl Check {
     }
 }
 
+/// Whether a winning set of `larger` functions timed `challenger` replaces
+/// one of `smaller` functions timed `incumbent` (`larger >= smaller`): only
+/// when it is faster beyond the noise of both, its compiled third quartile
+/// under the incumbent's compiled first quartile. Two medians whose
+/// interquartile ranges overlap do not order the sets: the pick between them
+/// would flip from run to run, and each function more costs build time,
+/// size and risk, so the smaller set stays. A set of the same size
+/// replaces the one measured first (more self time) the same way.
+fn replaces(challenger: &Check, larger: usize, incumbent: &Check, smaller: usize) -> bool {
+    debug_assert!(larger >= smaller);
+    challenger.compiled[2] < incumbent.compiled[0]
+}
+
 /// Pass 3 over `candidates` (the selection rule's picks from `profile`):
 /// records a [`Measured`] on each. `core` holds the candidates hot on their
 /// own (at least the rule's share and calls): a region pulls its colder
@@ -295,8 +309,8 @@ pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 
 ///
 /// The invariant: the functions selected are exactly one set that was
 /// measured as a whole and won (its compiled median under CPython's first
-/// quartile), the one with the lowest median, the smaller on a tie; never
-/// a union of sets each measured alone. The sets measured are all the
+/// quartile): the smallest, unless a larger one is faster beyond the noise
+/// ([`replaces`]); never a union of sets each measured alone. The sets measured are all the
 /// candidates and their hot core; when neither wins, each region and its
 /// hot core, most self time first; then the regions that won, together.
 /// One build of the budget is reserved for that last check before any
@@ -406,9 +420,9 @@ impl<'r, 's> Pass<'r, 's> {
     }
 
     /// Checks `set` and, when its hot functions (`set` and `core`) are not
-    /// all of it, those alone, within `limit` builds: the measurement of
-    /// the two that won with the lower median (the hot ones on a tie), if
-    /// either won.
+    /// all of it, those alone, within `limit` builds: of the two that won,
+    /// the hot ones, unless the whole set is faster beyond the noise
+    /// ([`replaces`]); or None when neither won.
     fn best_of(
         &mut self,
         set: &BTreeSet<FunctionKey>,
@@ -425,9 +439,13 @@ impl<'r, 's> Pass<'r, 's> {
             return Ok(self.winning(whole).then_some(whole));
         }
         let alone = self.measure(hot, limit)?;
-        let median = |i: usize| self.winning(i).then(|| self.entries[i].check.as_ref().map(|c| c.compiled[1]));
-        Ok(match (median(whole).flatten(), alone.and_then(|i| median(i).flatten())) {
-            (Some(w), Some(a)) if w < a => Some(whole),
+        let won = |i: usize| self.winning(i).then(|| self.entries[i].check.as_ref()).flatten();
+        Ok(match (won(whole), alone.and_then(|i| won(i).map(|c| (i, c)))) {
+            // The hot functions are a subset of the whole set: it replaces
+            // them only when it wins beyond the noise.
+            (Some(w), Some((i, a))) if replaces(w, self.entries[whole].set.len(), a, self.entries[i].set.len()) => {
+                Some(whole)
+            }
             (_, Some(_)) => alone,
             (Some(_), None) => Some(whole),
             (None, None) => None,
@@ -509,19 +527,29 @@ impl<'r, 's> Pass<'r, 's> {
     }
 
     /// The selection, settled: of the measurements still valid (each won as
-    /// a whole), the one with the lowest median (the smaller on a tie) is
-    /// compiled, whole, on its own times; every other function measured is
-    /// not. One that the selection left out of a set it was measured in
+    /// a whole), taken smallest first (the first measured among sets of one
+    /// size), a set replaces the one selected so far only when it is faster
+    /// beyond the noise ([`replaces`]). The selection is compiled, whole, on
+    /// its own times; every other function measured is not. One that the selection left out of a set it was measured in
     /// (the selection is part of that set), or whose own set won too,
     /// records the selection's times (`without`). The verdicts and the
     /// builds made.
     fn finish(self) -> (BTreeMap<FunctionKey, Measured>, usize) {
-        let best = self
+        let mut winners: Vec<(&Measurement, &Check)> = self
             .entries
             .iter()
             .filter(|m| m.valid)
             .filter_map(|m| m.check.as_ref().map(|c| (m, c)))
-            .min_by_key(|(m, c)| (c.compiled[1], m.set.len()));
+            .collect();
+        // Stable: among sets of one size, the first measured comes first.
+        winners.sort_by_key(|(m, _)| m.set.len());
+        let best = winners.into_iter().reduce(|best, next| {
+            if replaces(next.1, next.0.set.len(), best.1, best.0.set.len()) {
+                next
+            } else {
+                best
+            }
+        });
         let mut verdicts = self.verdicts;
         for (key, m) in &mut verdicts {
             if m.refused.is_some() {

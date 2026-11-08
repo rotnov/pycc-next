@@ -672,3 +672,72 @@ fn the_selection_is_always_one_valid_measured_winner_and_the_build_compiles_it()
         }
     }
 }
+
+fn timed(q1: u64, median: u64, q3: u64) -> Check {
+    Check {
+        cpython: [200, 210, 220],
+        compiled: [q1, median, q3],
+        instructions: None,
+    }
+}
+
+/// A larger winning set replaces a smaller one only beyond the noise: its
+/// third quartile under the smaller one's first. Overlapping interquartile
+/// ranges keep the smaller set, whichever median is lower.
+#[test]
+fn a_larger_set_replaces_a_smaller_one_only_beyond_the_noise() {
+    let small = timed(100, 110, 120);
+    assert!(replaces(&timed(80, 90, 99), 30, &small, 1));
+    // Touching or overlapping ranges: not an ordering.
+    assert!(!replaces(&timed(80, 90, 100), 30, &small, 1));
+    assert!(!replaces(&timed(95, 105, 115), 30, &small, 1));
+    // A lower median alone is noise.
+    assert!(!replaces(&timed(60, 109, 140), 30, &small, 1));
+    // Same size: the one measured first stays unless beaten the same way.
+    assert!(!replaces(&timed(98, 108, 118), 1, &small, 1));
+    assert!(replaces(&timed(90, 95, 99), 1, &small, 1));
+}
+
+/// The diff-match-patch case CI flipped on: a 30-function region and its
+/// one hot function alone both win, the region's median the lower but
+/// inside the hot function's interquartile range. The hot function alone is
+/// selected, in every order the measurements come in; a region faster
+/// beyond the noise is selected instead.
+#[test]
+fn overlapping_winners_select_the_smaller_set_every_run() {
+    let region: Vec<FunctionKey> = (0..30).map(|i| k(&format!("f{i}"))).collect();
+    let hot = k("f0");
+    let core: BTreeSet<FunctionKey> = [hot.clone()].into_iter().collect();
+    let pick = |region_ns: [u64; 3], alone_ns: [u64; 3]| {
+        let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+            let compiled = if set.len() == 1 { alone_ns } else { region_ns };
+            Ok(Ok(Check { cpython: [4800, 4890, 4950], compiled, instructions: None }))
+        };
+        let (verdicts, builds) = decide(&region, std::slice::from_ref(&region), &core, &BTreeMap::new(), 8, &mut run).unwrap();
+        assert_eq!(builds, 2);
+        compiled(&verdicts)
+    };
+    // Medians either way round inside each other's ranges: the hot one.
+    assert_eq!(pick([1650, 1700, 1800], [1680, 1750, 1850]), core);
+    assert_eq!(pick([1700, 1760, 1850], [1650, 1700, 1800]), core);
+    // The region's third quartile under the hot one's first: the region.
+    let all: BTreeSet<FunctionKey> = region.iter().cloned().collect();
+    assert_eq!(pick([1500, 1550, 1599], [1600, 1700, 1800]), all);
+    // The same in the settling over every valid measurement: regions
+    // measured apart with overlapping ranges keep the smallest.
+    let (candidates, regions, core) = regions_of(&["a", "b"]);
+    let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+        // Everything loses but region b's hot function alone (85) and region
+        // a whole (80, inside 85's range): b_hot alone is selected.
+        let ms: u64 = if set.len() == 1 && set.contains(&k("b_hot")) {
+            85
+        } else if set.len() == 2 && set.contains(&k("a_hot")) && set.contains(&k("a_cold")) {
+            80
+        } else {
+            150
+        };
+        Ok(Ok(Check { cpython: [90, 100, 110], compiled: [ms - 6, ms, ms + 6], instructions: None }))
+    };
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
+    assert_eq!(compiled(&verdicts), [k("b_hot")].into_iter().collect());
+}
