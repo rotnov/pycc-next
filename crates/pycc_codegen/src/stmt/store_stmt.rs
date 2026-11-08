@@ -308,7 +308,20 @@ pub(crate) fn emit_assign_stmt<'ctx>(
         return Ok(());
     }
     let ty = value.ty();
+    // A call's result stored into a tagged slot may stay a word
+    // (`direct_call`).
+    let word_target = matches!(value, MirExpr::ObjCall { .. })
+        && crate::tagged_locals::tagged_read(
+            rt,
+            locals,
+            &MirExpr::Name { name: target.clone(), ty: pycc_mir::Ty::Object },
+        )
+        .is_some();
+    if word_target && let MirExpr::ObjCall { callee, .. } = value {
+        rt.word_result_callee.set(Some(callee.as_ref() as *const MirExpr));
+    }
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
+    rt.word_result_callee.set(None);
     // The slot owns one reference to a counted value: take it, and
     // release the one it holds (null before the first store) once
     // the new one is stored -- unless the local only ever borrows.

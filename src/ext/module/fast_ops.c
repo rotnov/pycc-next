@@ -289,11 +289,16 @@ int pycc_ext_fast_ops_enabled(void)
 
 /* Before a compiled call site calls a lifted body directly
  * (`pycc_codegen::direct_call`): what the call through the body's
- * forwarder checks (`pycc_fwd_target`). 1 when the call may go ahead
- * (`Py_LeaveRecursiveCall` follows it); 0 at the recursion limit, with no
+ * forwarder checks (`pycc_fwd_target`). 0 at the recursion limit, with no
  * exception set: the site then calls through the forwarder, which raises
- * CPython's `RecursionError` itself. */
-static long long pycc_ext_direct_count = 0;
+ * CPython's `RecursionError` itself. Else 1, and `pycc_ext_direct_leave`
+ * follows the call; or, on CPython 3.15, 2: there the check compares the
+ * C stack pointer with the thread's limit and `Py_LeaveRecursiveCall` does
+ * nothing, so the answer holds for every direct call the same invocation
+ * of a (non-generator) body makes from its fixed frame, which keeps it and
+ * calls neither function again. The site counts each call it makes
+ * directly in `pycc_ext_direct_count` itself. */
+long long pycc_ext_direct_count = 0;
 
 int pycc_ext_direct_enter(void)
 {
@@ -301,8 +306,7 @@ int pycc_ext_direct_enter(void)
         PyErr_Clear();
         return 0;
     }
-    pycc_ext_direct_count++;
-    return 1;
+    return (Py_Version >> 16) >= 0x030F ? 2 : 1;
 }
 
 /* How many direct calls `pycc_ext_direct_enter` let go ahead, which the

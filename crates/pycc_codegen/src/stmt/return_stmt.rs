@@ -174,7 +174,12 @@ pub(crate) fn emit_return_stmt<'ctx>(
     let value = object_return::object_return_value(&expected_return_ty, value, &bare_none);
     match value {
         Some(expr) => {
-            let scalar = if object_box::boxes_into(expr, &expected_return_ty) {
+            // A word-returning body's `return x` of a tagged local
+            // (`tagged_locals::emit_word_return`), a reference taken.
+            let word = crate::tagged_locals::emit_word_return(context, builder, rt, locals, expr);
+            let scalar = if let Some(word) = word {
+                word
+            } else if object_box::boxes_into(expr, &expected_return_ty) {
                 Scalar::Object(object_box::emit_boxed(
                     context,
                     builder,
@@ -220,7 +225,11 @@ pub(crate) fn emit_return_stmt<'ctx>(
             } else {
                 emit_expr(context, builder, module, rt, user_functions, locals, expr)
             };
-            let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, expr, scalar);
+            let scalar = if word.is_some() {
+                scalar
+            } else {
+                heap_rc::retain_if_heap_duplicate(context, builder, rt, expr, scalar)
+            };
             // #625: `return n` of an `int` slot the epilogue would release
             // next, with no user `finally` in between that could read it,
             // moves the slot's reference out instead of retaining a second

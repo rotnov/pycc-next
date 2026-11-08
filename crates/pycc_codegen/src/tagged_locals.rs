@@ -57,6 +57,7 @@ pub(crate) fn tagged_locals<'a>(
     function: &str,
     body: &[MirStmt],
     candidates: impl Iterator<Item = &'a String>,
+    word_sources: &HashSet<String>,
 ) -> HashSet<String> {
     let mut candidates: Vec<&String> = candidates.collect();
     candidates.sort();
@@ -68,7 +69,10 @@ pub(crate) fn tagged_locals<'a>(
     candidates
         .into_iter()
         .filter(|name| {
-            let mut mentions = Mentions::default();
+            let mut mentions = Mentions {
+                word_sources: Some(word_sources),
+                ..Mentions::default()
+            };
             mentions.stmts(body, name);
             let all = text.matches(&format!("{name:?}")).count();
             let tagged = mentions.producer && mentions.count == all;
@@ -111,19 +115,24 @@ pub(crate) fn assume_nonnull<'ctx>(
 
 /// A local's mentions found by the structural walk.
 #[derive(Default)]
-struct Mentions {
+struct Mentions<'w> {
     count: usize,
     reads: usize,
     producer: bool,
+    /// The source names of the word-returning bodies, whose direct call's
+    /// result is a producer too ([`word_call`]).
+    word_sources: Option<&'w HashSet<String>>,
 }
 
-impl Mentions {
+impl Mentions<'_> {
     fn stmts(&mut self, body: &[MirStmt], name: &str) {
         for stmt in body {
             match stmt {
                 MirStmt::Assign { target, value } if target == name => {
                     self.count += 1;
-                    self.producer |= rebinding(name, value).is_some() || char_load(value).is_some();
+                    self.producer |= rebinding(name, value).is_some()
+                        || char_load(value).is_some()
+                        || self.word_sources.is_some_and(|sources| word_call(value, sources));
                 }
                 MirStmt::ReleaseName(released) if released == name => self.count += 1,
                 _ => {}
@@ -157,6 +166,30 @@ fn rebinding<'e>(name: &str, value: &'e MirExpr) -> Option<(BinOpKind, &'e MirEx
     let reads_name = matches!(left.as_ref(), MirExpr::Name { name: read, ty: Ty::Object } if read == name);
     let simple = matches!(right.as_ref(), MirExpr::IntLiteral(_) | MirExpr::Name { ty: Ty::Object, .. });
     (reads_name && simple && matches!(op, BinOpKind::Add | BinOpKind::Sub)).then_some((*op, right))
+}
+
+/// Whether `value` calls a module global named in `sources` (a
+/// word-returning body's source name), whose direct call may give a word.
+fn word_call(value: &MirExpr, sources: &HashSet<String>) -> bool {
+    let MirExpr::ObjCall { callee, .. } = value else {
+        return false;
+    };
+    let MirExpr::ObjSubscript { base, index } = callee.as_ref() else {
+        return false;
+    };
+    matches!(
+        (base.as_ref(), index.as_ref()),
+        (MirExpr::Name { name: ns, .. }, MirExpr::StringLiteral(global))
+            if ns == crate::ext::FALLBACK_NS_NAME && sources.contains(global)
+    )
+}
+
+/// The source names of the word-returning bodies `word_returning`.
+pub(crate) fn word_sources(word_returning: &HashSet<String>) -> HashSet<String> {
+    word_returning
+        .iter()
+        .filter_map(|name| crate::direct_call::lifted_name(name).map(str::to_string))
+        .collect()
 }
 
 /// The base and index of `base[index]` read from names (or an index
@@ -709,4 +742,185 @@ pub(crate) fn emit_contains<'ctx>(
         contains_object,
     );
     Scalar::Bool(answer.into_int_value())
+}
+
+/// Whether the function `name` (not a generator, its parameters
+/// `params`) returns a tagged local's word as it is: some `return x` reads
+/// an `object` local or parameter that [`tagged_locals`] admits. Such a
+/// body is emitted as [`word_body`], which a direct call site calls, and
+/// its own symbol becomes [`emit_word_shim`], which boxes the word for
+/// every other caller.
+pub(crate) fn word_returning(
+    name: &str,
+    params: &[(String, Ty)],
+    body: &[MirStmt],
+    word_sources: &HashSet<String>,
+) -> bool {
+    let mut returned = Vec::new();
+    collect_returned_names(body, &mut returned);
+    returned.sort();
+    returned.dedup();
+    let locals = object_assigned(body);
+    let candidates: Vec<&String> = returned
+        .into_iter()
+        .filter(|returned| {
+            params.iter().any(|(param, ty)| param == *returned && *ty == Ty::Object) || locals.contains(*returned)
+        })
+        .collect();
+    !tagged_locals(name, body, candidates.into_iter(), word_sources).is_empty()
+}
+
+/// The names `return name` of an `object` reads in `body`.
+fn collect_returned_names<'b>(body: &'b [MirStmt], out: &mut Vec<&'b String>) {
+    for stmt in body {
+        if let MirStmt::Return(Some(MirExpr::Name { name, ty: Ty::Object })) = stmt {
+            out.push(name);
+        }
+        for inner in stmt.bodies() {
+            collect_returned_names(inner, out);
+        }
+    }
+}
+
+/// The names assigned an `object` in `body` (a rebinding or a character
+/// load is one).
+fn object_assigned(body: &[MirStmt]) -> HashSet<&String> {
+    let mut out = HashSet::new();
+    fn walk<'b>(body: &'b [MirStmt], out: &mut HashSet<&'b String>) {
+        for stmt in body {
+            if let MirStmt::Assign { target, value } = stmt
+                && value.ty() == Ty::Object
+            {
+                out.insert(target);
+            }
+            for inner in stmt.bodies() {
+                walk(inner, out);
+            }
+        }
+    }
+    walk(body, &mut out);
+    out
+}
+
+/// The internal function a word-returning `function`'s body is emitted
+/// into (`<name>.w`, `function`'s type), declared on first use.
+pub(crate) fn word_body<'ctx>(
+    module: &inkwell::module::Module<'ctx>,
+    function: FunctionValue<'ctx>,
+) -> FunctionValue<'ctx> {
+    let name = format!("{}.w", function.get_name().to_string_lossy());
+    module.get_function(&name).unwrap_or_else(|| {
+        module.add_function(&name, function.get_type(), Some(inkwell::module::Linkage::Internal))
+    })
+}
+
+/// `return name` of a tagged local in a word-returning body: the word
+/// itself, a reference taken when it is one; None for any other return.
+pub(crate) fn emit_word_return<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Option<Scalar<'ctx>> {
+    if !rt.returns_word.get() {
+        return None;
+    }
+    let slot = tagged_read(rt, locals, expr)?;
+    let word = load_word(context, builder, &slot);
+    let as_pointer = builder
+        .build_int_to_ptr(word, ptr_type(context), "word_return")
+        .expect("inttoptr");
+    let reference = has_tag(context, builder, word, 0);
+    let object = builder
+        .build_select(reference, as_pointer, ptr_type(context).const_null(), "word_return_object")
+        .expect("select")
+        .into_pointer_value();
+    heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::Object, object);
+    Some(Scalar::Object(as_pointer))
+}
+
+/// The object `word` (a word-returning body's result) stands for: itself
+/// when it is a reference, else its box, a new reference, with a failure
+/// taken on the current statement's edge.
+pub(crate) fn box_if_tagged<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    result: PointerValue<'ctx>,
+) -> PointerValue<'ctx> {
+    let ptr = ptr_type(context);
+    let word = builder
+        .build_ptr_to_int(result, context.i64_type(), "word_result")
+        .expect("ptrtoint");
+    let reference = has_tag(context, builder, word, 0);
+    let function = function_of(builder);
+    let entry = builder.get_insert_block().expect("positioned");
+    let boxing = context.append_basic_block(function, "word_box");
+    let done = context.append_basic_block(function, "word_boxed");
+    let branch = builder
+        .build_conditional_branch(reference, done, boxing)
+        .expect("build_conditional_branch should not fail for an i1");
+    crate::int_fast::weight_branch(context, branch, true);
+    builder.position_at_end(boxing);
+    let edge = ForeignFailEdge::for_current(builder);
+    let boxed = box_tag(context, builder, module, word);
+    route_null(context, builder, module, rt, edge, boxed, "word_box");
+    let boxed_end = builder.get_insert_block().expect("positioned");
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(done);
+    let phi = builder.build_phi(ptr, "word_object").expect("phi");
+    phi.add_incoming(&[(&result, entry), (&boxed, boxed_end)]);
+    phi.as_basic_value().into_pointer_value()
+}
+
+/// Emits `entry`, the symbol of a word-returning body `body`
+/// ([`word_body`]), as what every caller but a direct call site sees: it
+/// calls `body` and boxes a tagged word; a box that fails leaves a pycc
+/// exception pending and returns null, as a body that raised does.
+pub(crate) fn emit_word_shim<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    entry: FunctionValue<'ctx>,
+    body: FunctionValue<'ctx>,
+) {
+    let start = context.append_basic_block(entry, "entry");
+    builder.position_at_end(start);
+    let args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+        entry.get_param_iter().map(Into::into).collect();
+    let result = builder
+        .build_call(body, &args, "word_result")
+        .expect("build_call should not fail for a word-returning body")
+        .try_as_basic_value()
+        .expect_basic("a word-returning body returns PyObject *")
+        .into_pointer_value();
+    let word = builder
+        .build_ptr_to_int(result, context.i64_type(), "word")
+        .expect("ptrtoint");
+    let reference = has_tag(context, builder, word, 0);
+    let boxing = context.append_basic_block(entry, "word_box");
+    let returned = context.append_basic_block(entry, "word_returned");
+    let failed = context.append_basic_block(entry, "word_box_failed");
+    let branch = builder
+        .build_conditional_branch(reference, returned, boxing)
+        .expect("build_conditional_branch should not fail for an i1");
+    crate::int_fast::weight_branch(context, branch, true);
+    builder.position_at_end(returned);
+    builder.build_return(Some(&result)).expect("build_return");
+    builder.position_at_end(boxing);
+    let boxed = box_tag(context, builder, module, word);
+    let null = builder.build_is_null(boxed, "word_box_null").expect("icmp");
+    let ok = context.append_basic_block(entry, "word_box_ok");
+    builder
+        .build_conditional_branch(null, failed, ok)
+        .expect("build_conditional_branch should not fail for an i1");
+    builder.position_at_end(ok);
+    builder.build_return(Some(&boxed)).expect("build_return");
+    builder.position_at_end(failed);
+    builder
+        .build_call(crate::foreign_fail::obj_error_bridge_fn(context, module), &[], "word_box_bridged")
+        .expect("build_call should not fail for pycc_ext_obj_error_bridge");
+    builder.build_return(Some(&ptr_type(context).const_null())).expect("build_return");
 }

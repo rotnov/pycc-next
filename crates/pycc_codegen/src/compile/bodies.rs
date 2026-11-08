@@ -33,6 +33,35 @@ pub(super) fn emit_function_bodies<'ctx>(
     // body must be emitted into its own function value, not the first
     // definition's.
     let mut body_def_iter = function_defs_in_order.iter();
+    // The bodies that return a tagged local's word (`tagged_locals`):
+    // known before any body is emitted, since a direct call site calls
+    // such a body's word entry.
+    // Twice: a body returning what a word-returning body's call gave it
+    // returns a word too.
+    let mut word_returning = std::collections::HashSet::new();
+    for _ in 0..2 {
+        let sources = crate::tagged_locals::word_sources(&word_returning);
+        word_returning = mir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MirItem::Function {
+                    name,
+                    params,
+                    return_ty,
+                    body,
+                } if *return_ty == pycc_mir::Ty::Object
+                    && !pycc_mir::body_yields(body)
+                    && crate::tagged_locals::word_returning(name, params, body, &sources) =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+    }
+    let word_sources = crate::tagged_locals::word_sources(&word_returning);
+    *rt.word_returning.borrow_mut() = word_returning;
     for item in &mir.items {
         if let MirItem::Function {
             name,
@@ -51,6 +80,16 @@ pub(super) fn emit_function_bodies<'ctx>(
             if crate::sibling_class::producer_method(name).is_some() {
                 continue;
             }
+            // A word-returning body is emitted into its word entry, and
+            // `f` boxes its result (`tagged_locals::emit_word_shim`).
+            let returns_word = rt.word_returning.borrow().contains(name.as_str());
+            rt.returns_word.set(returns_word);
+            let entry_fn = f;
+            let f = if returns_word {
+                crate::tagged_locals::word_body(module, f)
+            } else {
+                f
+            };
             let block = context.append_basic_block(f, "entry");
             builder.position_at_end(block);
             rt.emitting_ctor
@@ -354,6 +393,7 @@ pub(super) fn emit_function_bodies<'ctx>(
                                     && !rt.borrowed_locals.borrow().contains(*local)
                             })
                             .map(|(local, _)| local),
+                        &word_sources,
                     )
                 };
                 let slots: std::collections::HashSet<PointerValue> =
@@ -771,6 +811,10 @@ pub(super) fn emit_function_bodies<'ctx>(
             // Every `ret` of the function exists now (`frames::exit_frame`).
             crate::frames::end_function(context, module, rt);
             *rt.int_ranges.borrow_mut() = Default::default();
+            if returns_word {
+                crate::tagged_locals::emit_word_shim(context, builder, module, entry_fn, f);
+            }
+            rt.returns_word.set(false);
         }
     }
     Ok(())

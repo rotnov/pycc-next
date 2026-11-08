@@ -417,6 +417,17 @@ pub(super) struct RtFns<'ctx> {
     /// word, a small `int` or an ASCII character, instead of a reference
     /// (`tagged_locals`).
     pub(super) tagged_slots: std::cell::RefCell<std::collections::HashSet<PointerValue<'ctx>>>,
+    /// Per function, the entry-block slot holding what its first direct
+    /// call's recursion check answered (`direct_call`).
+    pub(super) direct_entered: std::cell::RefCell<HashMap<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+    /// The functions whose body returns a tagged local's word as it is
+    /// (`tagged_locals::word_returning`), by MIR name.
+    pub(super) word_returning: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Whether the body being emitted is one of `word_returning`.
+    pub(super) returns_word: std::cell::Cell<bool>,
+    /// The callee of the call whose result an assignment stores into a
+    /// tagged slot as a word (`direct_call`), by address.
+    pub(super) word_result_callee: std::cell::Cell<Option<*const MirExpr>>,
     /// The names of the current function's `int` parameters and locals,
     /// whose slots its epilogue releases (#625): `return n` of one moves
     /// the slot's reference out instead of retaining a second one.
@@ -1016,6 +1027,10 @@ pub(super) fn declare_rt_functions<'ctx>(
         class_records: std::cell::RefCell::new(HashMap::new()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
         tagged_slots: std::cell::RefCell::new(std::collections::HashSet::new()),
+        direct_entered: std::cell::RefCell::new(HashMap::new()),
+        word_returning: std::cell::RefCell::new(std::collections::HashSet::new()),
+        returns_word: std::cell::Cell::new(false),
+        word_result_callee: std::cell::Cell::new(None),
         owned_int_names: std::cell::RefCell::new(std::collections::HashSet::new()),
         int_ranges: std::cell::RefCell::new(Default::default()),
         loop_list_slots: std::cell::RefCell::new(HashMap::new()),

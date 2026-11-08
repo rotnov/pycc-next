@@ -206,13 +206,19 @@ pub(super) fn emit_direct_call<'ctx>(
     args: &[MirExpr],
     multi: Option<&crate::direct_call::MultiCall<'ctx>>,
 ) -> Scalar<'ctx> {
+    // Whether the assignment this call is the value of keeps a word
+    // (`store_stmt`), asked before any argument's call can.
+    let word_result = rt
+        .word_result_callee
+        .take()
+        .is_some_and(|word_callee| std::ptr::eq(word_callee, callee));
     let callee_scalar = emit_expr(context, builder, module, rt, user_functions, locals, callee);
     let held_callee = object_release::hold(context, module, rt, callee, &callee_scalar);
     let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
     held_callee.consumed(rt);
     let direct =
         crate::direct_call::global_target(module, user_functions, callee, args.scalars.len(), &[])
-            .map(|target| target.with_multi(user_functions, multi));
+            .map(|target| target.with_multi(user_functions, multi).with_word_result(word_result));
     let result = foreign_call::emit_object_call(
         context,
         builder,

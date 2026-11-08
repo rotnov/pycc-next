@@ -83,7 +83,7 @@ impl<'ctx> ForeignFailEdge<'ctx> {
 }
 
 /// Declares `int pycc_ext_obj_error_bridge(void)` once per module.
-fn obj_error_bridge_fn<'ctx>(
+pub(crate) fn obj_error_bridge_fn<'ctx>(
     context: &'ctx Context,
     module: &inkwell::module::Module<'ctx>,
 ) -> FunctionValue<'ctx> {
