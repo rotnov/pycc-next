@@ -239,8 +239,17 @@ If neither is faster, each region (the candidates connected by calls among them,
 self time first) is checked the same way alone, then the regions that won are checked
 together once more; at most 8 builds, one of them reserved for that last check before any
 region is measured. The selection is always exactly one set that was measured as a whole
-and won: the winner with the lowest median, the smaller on a tie, never a union of sets
-measured apart. When the regions together cannot be built within the budget, or lose,
+and won, never a union of sets measured apart: the smallest winner, unless a larger one is
+faster beyond the noise of both, its compiled third quartile under the smaller one's first
+quartile (sets of one size: the one measured first, more self time, unless beaten the same
+way). A lower median alone does not order two winners: with overlapping interquartile
+ranges the pick flipped from run to run, and on diff-match-patch CI selected a 30-function
+region (a build of about 9 s, near `bench/package_check.py`'s `--max-build-seconds 10`) in
+one run and `diff_bisect` alone (1.4 s) in the next. Each function more costs build time,
+size and risk, so a larger set must earn its place by more than noise. The quartiles
+compared are each check's own compiled runs: every check interleaves its rounds with
+CPython's, so drift inside a check is controlled, and normalizing by each check's CPython
+median would add that median's noise to the comparison. When the regions together cannot be built within the budget, or lose,
 the best single winner is kept (a region, a core, or nothing). A function the winner
 leaves out of a set it was measured in is rejected ("faster without it",
 `measured.without`). Pass 3 enforces this structurally:

@@ -28,6 +28,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- `pycc profile`'s pass 3 selects a larger winning set over a smaller one only when it
+  is faster beyond the noise of both (its compiled third quartile under the smaller one's
+  first quartile); before, the lower median won, so two winners with overlapping
+  interquartile ranges flipped from run to run (diff-match-patch: a 30-function region or
+  `diff_bisect` alone).
 - A `--release` module's object release is split: its `NULL` and immortality tests are
   inlined at each site, and only a mortal object's decrement and `_Py_Dealloc` stay one
   call into the module's own `pycc_ext_obj_release_count`. Most releases in a generic body
