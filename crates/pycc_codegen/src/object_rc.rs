@@ -16,10 +16,13 @@
 //!   are skipped; `ob_refcnt` is decremented and `_Py_Dealloc` (a stable-ABI
 //!   function) called at zero.
 //!
-//! The retain is always inlined (four instructions); the release, whose
-//! branches and `_Py_Dealloc` call are most of an inlined copy, stays one
-//! call into the module's own copy: inlining it everywhere doubled LLVM's
-//! time on mistune's modules for 0.7% fewer instructions at run time.
+//! The retain is always inlined (four instructions). The release is split:
+//! its `NULL` and immortality tests are inlined, and a mortal object's
+//! decrement and `_Py_Dealloc` stay one call into the module's own
+//! `pycc_ext_obj_release_count`. Inlining the whole release everywhere
+//! doubled LLVM's time on mistune's modules for 0.7% fewer instructions at
+//! run time; the tests alone are what most releases in a generic body need
+//! (a `NULL` slot, a cached one-character `str`, a small `int`, `None`).
 //!
 //! The shim keeps its own external definitions for its C callers; the
 //! module's are internal, so the two never clash at link time. Only a
@@ -30,6 +33,10 @@ use inkwell::module::{Linkage, Module};
 use inkwell::targets::TargetData;
 use inkwell::values::FunctionValue;
 use inkwell::{AddressSpace, IntPredicate};
+
+/// The module's own out-of-line part of a release: a mortal object's
+/// decrement and its `_Py_Dealloc` at zero.
+const RELEASE_COUNT_SYMBOL: &str = "pycc_ext_obj_release_count";
 
 /// Defines the module's `pycc_ext_obj_retain`/`pycc_ext_obj_release`
 /// declarations inline (module doc). Returns how many it defined.
@@ -106,7 +113,7 @@ fn define_retain(module: &Module<'_>, function: FunctionValue<'_>) {
 }
 
 fn define_release(module: &Module<'_>, function: FunctionValue<'_>) {
-    internal(module, function, false);
+    internal(module, function, true);
     let context = module.get_context();
     let builder = context.create_builder();
     let i32_type = context.i32_type();
@@ -119,26 +126,47 @@ fn define_release(module: &Module<'_>, function: FunctionValue<'_>) {
             Some(Linkage::External),
         )
     });
+    let count_fn = module.add_function(
+        RELEASE_COUNT_SYMBOL,
+        context.void_type().fn_type(&[ptr_type.into()], false),
+        Some(Linkage::Internal),
+    );
+    internal(module, count_fn, false);
+
+    // The inlined part: `NULL` and immortal objects are skipped at the site.
     let object = function.get_nth_param(0).expect("one parameter").into_pointer_value();
     let entry = context.append_basic_block(function, "entry");
     let check = context.append_basic_block(function, "check");
     let count = context.append_basic_block(function, "count");
-    let free = context.append_basic_block(function, "free");
     let done = context.append_basic_block(function, "done");
     builder.position_at_end(entry);
     let null = builder.build_is_null(object, "null").expect("is_null");
     builder.build_conditional_branch(null, done, check).expect("branch");
     builder.position_at_end(check);
-    let refcnt = builder
-        .build_load(i64_type, object, "refcnt")
+    let low = builder
+        .build_load(i32_type, object, "low")
         .expect("load")
         .into_int_value();
-    let low = builder.build_int_truncate(refcnt, i32_type, "low").expect("trunc");
     let immortal = builder
         .build_int_compare(IntPredicate::SLT, low, i32_type.const_zero(), "immortal")
         .expect("compare");
     builder.build_conditional_branch(immortal, done, count).expect("branch");
     builder.position_at_end(count);
+    builder.build_call(count_fn, &[object.into()], "").expect("call");
+    builder.build_unconditional_branch(done).expect("branch");
+    builder.position_at_end(done);
+    builder.build_return(None).expect("return");
+
+    // The out-of-line part: a mortal object's count, freed at zero.
+    let object = count_fn.get_nth_param(0).expect("one parameter").into_pointer_value();
+    let entry = context.append_basic_block(count_fn, "entry");
+    let free = context.append_basic_block(count_fn, "free");
+    let done = context.append_basic_block(count_fn, "done");
+    builder.position_at_end(entry);
+    let refcnt = builder
+        .build_load(i64_type, object, "refcnt")
+        .expect("load")
+        .into_int_value();
     let next = builder
         .build_int_sub(refcnt, i64_type.const_int(1, false), "next")
         .expect("sub");
@@ -178,6 +206,7 @@ mod tests {
         let ir = crate::llvm_string_to_owned(module.print_to_string());
         assert!(ir.contains("define internal void @pycc_ext_obj_retain(ptr"), "{ir}");
         assert!(ir.contains("define internal void @pycc_ext_obj_release(ptr"), "{ir}");
+        assert!(ir.contains("define internal void @pycc_ext_obj_release_count(ptr"), "{ir}");
         assert!(ir.contains("load i32, ptr"), "{ir}");
         assert!(ir.contains("icmp slt i32"), "{ir}");
         assert!(ir.contains("call void @_Py_Dealloc(ptr"), "{ir}");
