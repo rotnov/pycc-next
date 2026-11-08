@@ -691,6 +691,59 @@ instance overrides it. The replay targets of PR 7 in section 8 are not measured 
 - **Target.** pydantic's extension drops from 10.9 MB to about 1 MB or less, from
   measurements, not a fixed rule.
 
+**Measured: generic bodies lose to the interpreter on I1 misses, and layout cannot win it
+back.** On main 40b65df, each workload built with `--select all` (every function a
+generic body), per call, under callgrind's default I1 (32 KB, 8-way, 64-byte lines):
+
+| workload | instructions, pycc / CPython | I1 misses, pycc / CPython | `.text` |
+|---|---|---|---|
+| pystache benchmark example | 0.452M / 0.369M | 16.0K / 5.6K | 0.67 MB |
+| `mistune.html` of the benchmark cases | 59.8M / 54.3M | 1.27M / 0.59M | 1.89 MB |
+| pydantic define (5 reps) | 178.9M / 157.9M | 4.07M / 2.78M | 4.14 MB |
+| pydantic schema (5 reps) | 524.0M / 547.1M | 8.72M / 5.04M | 4.14 MB |
+
+The extra misses are capacity misses, not conflicts. Raising the simulated I1 removes
+them: pystache's misses per iteration are 6.5K (CPython) and 16.7K (compiled) at 32 KB,
+2.5K and 7.5K at 64 KB, 0 and 374 at 256 KB. The compiled code a pystache iteration
+executes covers about 110 KB of cache lines: about 56 KB of generic bodies (84% of each
+line's bytes executed), 25 KB of shim helpers (56%), and 20 KB of forwarders and wrappers.
+One generic body is several KB of machine code (`parse` is 28 KB). The interpreter's own
+loop stays resident; compiled bodies add their code on top of it. For pydantic's schema,
+the `.so` takes 3.13M of the 3.68M extra misses: bodies 1.10M, shim helpers 1.01M, the
+runtime 0.32M, wrappers 0.27M, the rest 0.43M.
+
+In LLVM instructions, a generic body of pydantic's `json_schema` is 17.6% inline fast
+paths, 15% inline reference counts, 12.5% frame entry and exit, 10.3% pending-exception
+tests after object operations, and 9.5% failure and traceback blocks. The tests after
+object operations are dead: each operation routes its own failure
+(`crates/pycc_codegen/src/foreign_fail.rs`). Removing them (#102) cuts
+`.text` by 4% to 7.5% and I1 misses by 2% to 4%. Nothing else measured gave more:
+
+| tried | I1 misses | instructions | verdict |
+|---|---|---|---|
+| frame entry and exit as calls, not inline | -0.5% (define) to -8% (pystache) | +0.3% to +1.8% | not adopted: more instructions, about 5% smaller `.text` |
+| no inline fast paths | higher on every workload | +8.6% mistune | not adopted |
+| shim helpers built with `-Os` | no change | higher | not adopted |
+| LLVM `hotcoldsplit` | -3.6% schema, about 0 elsewhere | about 0 | not adopted |
+
+Shrinking or reordering compiled code moves I1 misses by 8% at most, while the gap to
+CPython is 1.5x to 2.9x. A cycle estimate from instructions, I1 misses and
+mispredictions also predicts less of the measured wall penalty than there is (schema:
+0.97x estimated, about 0.8x measured), so wall time stays the selection measure. Two
+decisions follow:
+
+- **Default.** A build compiles pass 3's measured winners (profile mode) and nothing
+  else. On pystache (0 of 64 candidates kept), mistune (0 of 63) and pydantic, that set is
+  empty today and the build equals CPython. `--select all` stays for tests and the
+  instruction gate.
+- **Gate.** Pass 3 keeps a set only when its median wall time is below CPython's first
+  quartile, on the training workload. On a 4-vCPU VM, identical builds measured 0.87x to
+  0.98x of each other over 11 rounds, so a weaker rule would select noise.
+
+Schema >= 1.2x therefore needs generic bodies that execute fewer instructions, not a
+different layout: exceptions as control flow (section 2.7) and idiom lowering (section
+2.6) remove whole operations; a smaller layout does not.
+
 ### 2.10 What does not change
 
 - Strict mode and every strict `--ext` mechanism stay as they are: compiled module bodies,
@@ -827,7 +880,7 @@ request that makes it unnecessary.
 | 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
 | 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34) |
 | 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally |
-| 11 | Size and layout (section 2.9); item 10's decision; item 18's re-measure; item 23 dead-helper sweep | pydantic `.so` <= 1.5 MB; import >= 1.0x with no regression of any phase |
+| 11 | Size and layout (section 2.9); item 10's decision; item 18's re-measure; item 23 dead-helper sweep | pydantic `.so` <= 1.5 MB; import >= 1.0x with no regression of any phase. The I1 measurement in section 2.9 limits what this PR can win: the dead pending-exception tests are gone, and the other layout changes tried moved I1 misses by 8% at most |
 | 12 | CI confirmation: `bench.yml` on both runners, ROADMAP accept | every section 4 target on both runners, cited by run id |
 
 PRs 7-10 each touch a separate code seam (call lowering, guards, `try` lowering,
