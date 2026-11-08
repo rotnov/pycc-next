@@ -42,8 +42,40 @@ pub const DIRECT_CELL_SUFFIX: &str = "__pycc_dcell";
 
 /// `int pycc_ext_direct_enter(void)` and `void pycc_ext_direct_leave(void)`
 /// (`src/ext/module/fast_ops.c`): the recursion check around a direct call.
+/// The enter answers 0 at the limit, 1 when the leave must follow, and 2
+/// when the answer holds for the rest of the calling body's invocation.
 const EXT_DIRECT_ENTER_SYMBOL: &str = "pycc_ext_direct_enter";
 const EXT_DIRECT_LEAVE_SYMBOL: &str = "pycc_ext_direct_leave";
+/// `long long pycc_ext_direct_count`: the direct calls made, which each
+/// site counts (the tests read it through `pycc_ext_direct_calls`).
+const EXT_DIRECT_COUNT_SYMBOL: &str = "pycc_ext_direct_count";
+/// The enter's answer that holds for the invocation.
+const ENTERED_FOR_INVOCATION: u64 = 2;
+
+/// The entry-block slot of the function being emitted that keeps its first
+/// direct call's recursion check (0 before it), or None in a generator body,
+/// which a resume may run at another depth.
+fn entered_slot<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    function: FunctionValue<'ctx>,
+) -> Option<PointerValue<'ctx>> {
+    if rt.gen_frame.borrow().is_some() {
+        return None;
+    }
+    let mut slots = rt.direct_entered.borrow_mut();
+    Some(*slots.entry(function).or_insert_with(|| {
+        crate::entry_slots::build_at_entry_block(builder, function, |b| {
+            let slot = b
+                .build_alloca(context.i32_type(), "direct_entered_slot")
+                .expect("build_alloca should not fail");
+            b.build_store(slot, context.i32_type().const_zero())
+                .expect("build_store should not fail");
+            slot
+        })
+    }))
+}
 
 /// The byte offset of `func_code` in a `PyFunctionObject` on CPython 3.13
 /// and 3.15 (`PYCC_FUNC_CODE` in `forward.c`, checked by its probe before
@@ -335,8 +367,32 @@ pub(crate) fn emit<'ctx>(
     branch(ok, enter_bb, slow_bb);
 
     // The recursion check the forwarder's call makes; at the limit the
-    // forwarder raises `RecursionError` itself.
+    // forwarder raises `RecursionError` itself. An answer that holds for the
+    // invocation is kept in the body's slot and not asked again.
+    let i32_type = context.i32_type();
+    let slot = entered_slot(context, builder, rt, function);
+    let ask_bb = context.append_basic_block(function, "direct_ask");
     builder.position_at_end(enter_bb);
+    if let Some(slot) = slot {
+        let kept = builder
+            .build_load(i32_type, slot, "direct_kept")
+            .expect("build_load should not fail")
+            .into_int_value();
+        let held = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                kept,
+                i32_type.const_int(ENTERED_FOR_INVOCATION, false),
+                "direct_held",
+            )
+            .expect("icmp");
+        branch(held, call_bb, ask_bb);
+    } else {
+        builder
+            .build_unconditional_branch(ask_bb)
+            .expect("build_unconditional_branch should not fail");
+    }
+    builder.position_at_end(ask_bb);
     let entered = builder
         .build_call(
             shim_void_fn(context, module, EXT_DIRECT_ENTER_SYMBOL, true),
@@ -347,20 +403,38 @@ pub(crate) fn emit<'ctx>(
         .try_as_basic_value()
         .expect_basic("pycc_ext_direct_enter returns int")
         .into_int_value();
-    let entered = builder
-        .build_int_compare(
-            IntPredicate::NE,
-            entered,
-            context.i32_type().const_zero(),
-            "direct_entered_ok",
-        )
+    if let Some(slot) = slot {
+        builder.build_store(slot, entered).expect("build_store should not fail");
+    }
+    let entered_ok = builder
+        .build_int_compare(IntPredicate::NE, entered, i32_type.const_zero(), "direct_entered_ok")
         .expect("icmp");
-    branch(entered, call_bb, slow_bb);
+    branch(entered_ok, call_bb, slow_bb);
 
     builder.position_at_end(call_bb);
+    let answer = builder.build_phi(i32_type, "direct_answer").expect("build_phi should not fail");
+    answer.add_incoming(&[(&entered, ask_bb)]);
+    if slot.is_some() {
+        answer.add_incoming(&[(&i32_type.const_int(ENTERED_FOR_INVOCATION, false), enter_bb)]);
+    }
+    let count = module.get_global(EXT_DIRECT_COUNT_SYMBOL).unwrap_or_else(|| {
+        let global = module.add_global(i64_type, None, EXT_DIRECT_COUNT_SYMBOL);
+        global.set_linkage(Linkage::External);
+        global
+    });
+    let counted = builder
+        .build_load(i64_type, count.as_pointer_value(), "direct_count")
+        .expect("build_load should not fail")
+        .into_int_value();
+    let counted = builder
+        .build_int_add(counted, i64_type.const_int(1, false), "direct_count_next")
+        .expect("add");
+    builder
+        .build_store(count.as_pointer_value(), counted)
+        .expect("build_store should not fail");
     let mut operands: Vec<BasicMetadataValueEnum<'ctx>> =
         args.iter().map(|arg| (*arg).into()).collect();
-    let function = match &target.multi {
+    let callee_fn = match &target.multi {
         Some((twin, outs)) => {
             operands.extend(outs.iter().map(|out| BasicMetadataValueEnum::from(*out)));
             *twin
@@ -368,11 +442,23 @@ pub(crate) fn emit<'ctx>(
         None => target.function,
     };
     let result = builder
-        .build_call(function, &operands, "direct_result")
+        .build_call(callee_fn, &operands, "direct_result")
         .expect("build_call should not fail for a direct call")
         .try_as_basic_value()
         .expect_basic("a lifted body returns PyObject *")
         .into_pointer_value();
+    let leave_bb = context.append_basic_block(function, "direct_leave");
+    let left_bb = context.append_basic_block(function, "direct_left");
+    let held = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            answer.as_basic_value().into_int_value(),
+            i32_type.const_int(ENTERED_FOR_INVOCATION, false),
+            "direct_no_leave",
+        )
+        .expect("icmp");
+    branch(held, left_bb, leave_bb);
+    builder.position_at_end(leave_bb);
     builder
         .build_call(
             shim_void_fn(context, module, EXT_DIRECT_LEAVE_SYMBOL, false),
@@ -380,6 +466,10 @@ pub(crate) fn emit<'ctx>(
             "",
         )
         .expect("build_call should not fail");
+    builder
+        .build_unconditional_branch(left_bb)
+        .expect("build_unconditional_branch should not fail");
+    builder.position_at_end(left_bb);
     if consumes_callee {
         crate::object_release::release_now(context, module, builder, callee);
     }

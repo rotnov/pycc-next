@@ -327,6 +327,11 @@ pub(crate) fn emit_name_expr<'ctx>(
         // (`heap_rc::is_borrowed_read`); a consumer that keeps it
         // retains it, and an operand pinned across a sibling that
         // may rebind it is retained by `emit_expr`.
+        // A tagged local's slot may hold a small `int` or a character as
+        // a word of its own (`tagged_locals`): an object read boxes it.
+        Ty::Object if rt.tagged_slots.borrow().contains(&slot.ptr) => {
+            Scalar::Object(crate::tagged_locals::read_object(context, builder, module, rt, slot))
+        }
         Ty::Object => {
             let loaded = builder
                 .build_load(

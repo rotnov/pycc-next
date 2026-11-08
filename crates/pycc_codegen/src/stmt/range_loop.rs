@@ -26,6 +26,11 @@ fn emit_condition<'ctx>(
     ) {
         return cond;
     }
+    if let Some(cond) =
+        crate::str_words::emit_truth(context, builder, module, rt, user_functions, locals, test)
+    {
+        return cond;
+    }
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, test);
     let held = object_release::hold(context, module, rt, test, &scalar);
     let cond = crate::optional_ptr::truthy(context, builder, module, rt, &test.ty(), scalar)

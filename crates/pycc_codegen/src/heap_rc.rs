@@ -65,6 +65,10 @@ pub(crate) enum HeapKind {
     Dict,
     Set,
     Object,
+    /// An `object` local's slot that may hold a tagged word instead of a
+    /// reference (`tagged_locals`): released as [`HeapKind::Object`] only
+    /// when it holds a reference.
+    TaggedObject,
     /// A generator object, counted through `pycc_rt_gen_incref`/`_decref`
     /// (whose last release closes an unfinished generator).
     Generator,
@@ -113,6 +117,7 @@ pub(crate) fn rc_kind_byte(rt: &RtFns<'_>, ty: &Ty) -> u8 {
         Some(HeapKind::Generator) => b'g',
         Some(HeapKind::Closure) => b'f',
         Some(HeapKind::Exception) => b'x',
+        Some(HeapKind::TaggedObject) => unreachable!("a type's kind is never a tagged slot's"),
         None => b'w',
     }
 }
@@ -168,6 +173,15 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
         // A pointer-represented `T | None` is a `T` pointer that may be null.
         Ty::Optional(inner) if pycc_hir::is_pointer_optional_inner(inner) => heap_kind(rt, inner),
         _ => None,
+    }
+}
+
+/// The counted kind of the value the slot at `slot_ptr`, of type `ty`,
+/// holds: [`HeapKind::TaggedObject`] for a tagged local's slot.
+pub(crate) fn slot_kind<'ctx>(rt: &RtFns<'ctx>, ty: &Ty, slot_ptr: PointerValue<'ctx>) -> Option<HeapKind> {
+    match heap_kind(rt, ty)? {
+        HeapKind::Object if rt.tagged_slots.borrow().contains(&slot_ptr) => Some(HeapKind::TaggedObject),
+        kind => Some(kind),
     }
 }
 
@@ -346,6 +360,7 @@ pub(crate) fn emit_incref<'ctx>(
         HeapKind::Closure => Some(rt.closures.incref),
         HeapKind::Exception => Some(rt.exc_incref),
         HeapKind::List | HeapKind::Instance => None,
+        HeapKind::TaggedObject => unreachable!("a tagged slot's word is never retained as such"),
     };
     if let Some(incref) = out_of_line {
         builder
@@ -390,6 +405,10 @@ pub(crate) fn emit_decref<'ctx>(
         HeapKind::List => rt.list_free,
         HeapKind::Instance => rt.instance_free,
         HeapKind::Object => rt.obj_release,
+        HeapKind::TaggedObject => {
+            crate::tagged_locals::release_word(context, builder, rt, ptr);
+            return;
+        }
         HeapKind::Generator => rt.gens.decref,
         HeapKind::Closure => rt.closures.decref,
         HeapKind::Exception => rt.exc_decref,
@@ -501,7 +520,7 @@ pub(crate) fn release_slot<'ctx>(
     ty: &Ty,
     slot_ptr: PointerValue<'ctx>,
 ) {
-    let Some(kind) = heap_kind(rt, ty) else {
+    let Some(kind) = slot_kind(rt, ty, slot_ptr) else {
         return;
     };
     let old = builder
@@ -527,7 +546,7 @@ pub(crate) fn take_slot_old<'ctx>(
     ty: &Ty,
     slot_ptr: PointerValue<'ctx>,
 ) -> Option<(HeapKind, PointerValue<'ctx>)> {
-    let kind = heap_kind(rt, ty)?;
+    let kind = slot_kind(rt, ty, slot_ptr)?;
     let old = builder
         .build_load(
             context.ptr_type(inkwell::AddressSpace::default()),

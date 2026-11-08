@@ -358,6 +358,45 @@ PyObject *pycc_ext_obj_getslice_int(PyObject *o, long long start, long long stop
 }
 
 /*
+ * `s[start:stop]` of an exact `str` `s` with `Py_ssize_t`-range bounds and
+ * no step (`str_words` in `crates/pycc_codegen`): an absent start is 0 and
+ * an absent stop `PY_SSIZE_T_MAX`. The bounds are clamped as
+ * `PySlice_AdjustIndices` clamps them for a step of 1, so the result is the
+ * object `unicode_subscript` builds: the empty string for an empty slice,
+ * `s` itself sliced whole, `PyUnicode_Substring` otherwise (a cached
+ * one-character string for one Latin-1 character). No `slice` object or
+ * bound `int` is made. Returns a new reference or `NULL` with the
+ * exception set (a failed allocation).
+ */
+PyObject *pycc_ext_str_slice(PyObject *s, long long start, long long stop)
+{
+    Py_ssize_t size = PyUnicode_GetLength(s);
+    Py_ssize_t lo = (Py_ssize_t)start;
+    Py_ssize_t hi = (Py_ssize_t)stop;
+
+    if (lo < 0) {
+        lo += size;
+        if (lo < 0) {
+            lo = 0;
+        }
+    } else if (lo > size) {
+        lo = size;
+    }
+    if (hi < 0) {
+        hi += size;
+        if (hi < 0) {
+            hi = 0;
+        }
+    } else if (hi > size) {
+        hi = size;
+    }
+    if (hi <= lo) {
+        return PyUnicode_FromStringAndSize("", 0);
+    }
+    return PyUnicode_Substring(s, lo, hi);
+}
+
+/*
  * Part 2c of #1371: `del o[start:stop:step]` with a CPython object `o`
  * (`EXT_OBJ_DELSLICE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`), the
  * statement twin of `pycc_ext_obj_getslice`.

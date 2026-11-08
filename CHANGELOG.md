@@ -28,6 +28,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- Generic bodies keep a scanner's `int` position and current one-character `str` as
+  machine words (`docs/design/compile-little.md`, "Tagged locals"): an `object` local
+  rebound as `x = x ± y` or `c = s[i]` and read as a word (an index, a comparison with a
+  one-character or `int` literal, `in`, a `str` slice bound) holds a tagged small `int`
+  or ASCII character, boxed only where another read needs the object. `s[a:b]` and the
+  truth of `s.startswith(t, a)` on an exact `str` with small-`int` operands no longer
+  build a `slice`, box the bounds or call a bound method. A direct call checks the
+  recursion limit once per invocation of the calling body on CPython 3.15. Local
+  callgrind, `--select all`: tomli `loads()` of `Cargo.lock` 22.92M -> 19.91M
+  instructions; package checks diff-match-patch 158.84M -> 157.28M, tomli 2.95M ->
+  2.75M, pypng 147.20M -> 141.88M, mistune 59.25M -> 58.85M, pystache 0.45M -> 0.44M;
+  pydantic's `schema` phase 513.4M -> 510.5M.
 - `pycc profile`'s pass 3 selects a larger winning set over a smaller one only when it
   is faster beyond the noise of both (its compiled third quartile under the smaller one's
   first quartile); before, the lower median won, so two winners with overlapping

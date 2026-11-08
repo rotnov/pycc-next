@@ -12,7 +12,7 @@
 //! function (the native runtime), or one of the shim's helpers that run
 //! no Python code that looks at frames: packing a value, a reference
 //! count (a finalizer a release runs sees the line of the last call out),
-//! an error's bridge, a global's re-read, the frame helpers, and the
+//! an error's bridge, a global's re-read, a `str` slice, the frame helpers, and the
 //! `memcmp` of an inline `str` comparison (`fast_ops`). Traceback
 //! records carry their position themselves.
 
@@ -40,6 +40,7 @@ fn reaches_cpython(instruction: InstructionValue<'_>) -> bool {
                 | "pycc_ext_obj_error_bridge"
                 | "pycc_ext_obj_retain"
                 | "pycc_ext_obj_release"
+                | "pycc_ext_str_slice"
                 | "pycc_ext_name_error"
                 | "pycc_ext_global_sync"
                 | "memcmp"

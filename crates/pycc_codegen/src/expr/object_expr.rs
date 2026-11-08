@@ -219,6 +219,13 @@ pub(crate) fn emit_obj_subscript_expr<'ctx>(
     };
     let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
     let held_base = object_release::hold(context, module, rt, base, &base_scalar);
+    if let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, index) {
+        // A tagged index (`tagged_locals`): a small `int`'s word is the key
+        // itself, with no `int` object read.
+        let result = crate::tagged_locals::emit_subscript(context, builder, module, rt, base_scalar, &slot);
+        held_base.release(builder, rt);
+        return result;
+    }
     let index_scalar = object_unbox::emit_pack_operand(
         context,
         builder,
@@ -300,6 +307,58 @@ pub(crate) fn emit_obj_compare_condition<'ctx>(
     };
     if matches!(op, pycc_mir::CmpOpKind::Is | pycc_mir::CmpOpKind::IsNot) {
         return None;
+    }
+    if let Some((text, other, _)) = text_equality(*op, left, right)
+        && let [byte] = text.as_bytes()
+        && byte.is_ascii()
+        && let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, other)
+    {
+        // A tagged local against a one-character literal
+        // (`tagged_locals`): a character's word is compared with the
+        // literal's, with no `str` read.
+        let text_first = matches!(left.as_ref(), MirExpr::StringLiteral(_));
+        return Some(crate::tagged_locals::emit_eq_char(context, builder, module, rt, &slot, *op, *byte, |object| {
+            foreign_compare::emit_eq_text_truth(
+                context,
+                builder,
+                module,
+                rt,
+                *op,
+                Scalar::Object(object),
+                text,
+                text_first,
+            )
+        }));
+    }
+    if let Some((literal, other, literal_first)) = crate::tagged_locals::int_comparison(*op, left, right)
+        && let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, other)
+    {
+        // A tagged local against an `int` literal (`tagged_locals`): a
+        // small `int`'s word is compared as a machine integer, with no box.
+        return Some(crate::tagged_locals::emit_compare_int(
+            context,
+            builder,
+            module,
+            rt,
+            &slot,
+            *op,
+            literal,
+            literal_first,
+            |object| {
+                let operand = Scalar::Object(object);
+                let literal = object_unbox::emit_pack_operand(
+                    context,
+                    builder,
+                    module,
+                    rt,
+                    user_functions,
+                    locals,
+                    if literal_first { left } else { right },
+                );
+                let (l, r) = if literal_first { (literal, operand) } else { (operand, literal) };
+                foreign_compare::emit_compare_truth(context, builder, module, rt, *op, Some(l), Some(r))
+            },
+        ));
     }
     if let Some((text, other, text_first)) = text_equality(*op, left, right) {
         // The literal has no effect to order: only the object operand is
@@ -436,6 +495,19 @@ pub(crate) fn emit_obj_contains_expr<'ctx>(
     else {
         unreachable!()
     };
+    if let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, item)
+        && boxed_text_set_name(item, container).is_none()
+        && !crate::const_container::is_constant_sequence(container)
+    {
+        // A tagged item (`tagged_locals`): a name read has no effect to
+        // order before the container's evaluation, and the item's word is
+        // tested only once both are known.
+        let container_scalar = emit_expr(context, builder, module, rt, user_functions, locals, container);
+        let held_container = object_release::hold(context, module, rt, container, &container_scalar);
+        let result = crate::tagged_locals::emit_contains(context, builder, module, rt, &slot, *negate, container_scalar);
+        held_container.release(builder, rt);
+        return result;
+    }
     let item_scalar =
         object_unbox::emit_pack_operand(context, builder, module, rt, user_functions, locals, item);
     let held_item = object_release::hold(context, module, rt, item, &item_scalar);
@@ -546,6 +618,11 @@ pub(crate) fn emit_obj_slice_expr<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     expr: &MirExpr,
 ) -> Scalar<'ctx> {
+    if let Some(result) =
+        crate::str_words::emit_slice(context, builder, module, rt, user_functions, locals, expr)
+    {
+        return result;
+    }
     let MirExpr::ObjSlice {
         base,
         start,
