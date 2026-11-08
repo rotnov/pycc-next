@@ -199,6 +199,14 @@ fn float_repr_breaks_ties_like_cpython() {
     assert_matches_cpython("fuzz_float_repr_ties");
 }
 
+/// `sorted()`/`list.sort()` of floats holding a `nan` leave it where
+/// CPython's timsort does (run detection, binary insertion, galloping
+/// merges), `reverse=` and `key=` included.
+#[test]
+fn a_nan_lands_where_cpythons_sort_leaves_it() {
+    assert_matches_cpython("fuzz_sort_nan");
+}
+
 /// `for ... in zip(...)` sees the sequences change under it as CPython's
 /// iterators do (shrinking, growing, the name rebound), `else` included.
 #[test]

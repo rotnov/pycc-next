@@ -213,6 +213,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- `sorted()` and `list.sort()` (with or without `key=`/`reverse=`) are CPython's own
+  timsort, run detection, binary insertion, powersort merges and galloping included, so a
+  `nan` among floats ends where CPython leaves it (`sorted([2.675, 0, nan])` is
+  `[0, nan, 2.675]`). Before, a merge sort put it elsewhere (found by the fuzzer).
 - A compiled body's values that an exception unwinds (the items of a list or tuple display
   before the one that raised, a loop's iterator) are released with the exception set
   aside, as CPython's unwinding drops them. A `__del__` they run, compiled or not, no
