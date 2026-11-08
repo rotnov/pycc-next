@@ -423,6 +423,13 @@ pub(crate) fn emit_move<'ctx>(
     if source.ty != destination.ty || !counted || rt.borrowed_locals.borrow().contains(target) {
         return false;
     }
+    // A tagged temporary's word moves only into a tagged slot; any other
+    // target takes the assignment, which boxes it (`tagged_locals`).
+    let tagged = rt.tagged_slots.borrow();
+    if tagged.contains(&source.ptr) && !tagged.contains(&destination.ptr) {
+        return false;
+    }
+    drop(tagged);
     let pointer = context.ptr_type(inkwell::AddressSpace::default());
     let value = builder
         .build_load(pointer, source.ptr, "moved")

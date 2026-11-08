@@ -96,6 +96,8 @@ pub use sibling_class::SiblingClass;
 mod ext_thunk;
 mod direct_call;
 mod fast_ops;
+mod str_words;
+mod tagged_locals;
 mod foreign_arith;
 mod foreign_attr;
 mod foreign_call;

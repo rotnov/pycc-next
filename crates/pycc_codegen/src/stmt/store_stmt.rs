@@ -275,6 +275,13 @@ pub(crate) fn emit_assign_stmt<'ctx>(
     if emit_int_self_update(context, builder, module, rt, user_functions, locals, target, value) {
         return Ok(());
     }
+    // A tagged local's producers (`tagged_locals`): a small `int` or a
+    // character stored as a word of its own.
+    if crate::tagged_locals::emit_rebinding(context, builder, module, rt, user_functions, locals, target, value)
+        || crate::tagged_locals::emit_char_load(context, builder, module, rt, user_functions, locals, target, value)
+    {
+        return Ok(());
+    }
     if emit_object_int_rebinding(context, builder, module, rt, user_functions, locals, target, value) {
         return Ok(());
     }

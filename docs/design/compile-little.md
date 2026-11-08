@@ -514,6 +514,64 @@ value escapes. It would touch every reader of a local slot (frames, cells, relea
 exception cleanup) for the same saving in these loops. tomli `loads()`: 31.8M → 28.8M
 instructions; the others move by less than 1% (pypng +0.6%, from the plain loads).
 
+**Tagged locals.** That alternative, narrowed, is now what a scanner's position and
+current character get (`crates/pycc_codegen/src/tagged_locals.rs`). An `object` local or
+parameter of a non-generator body whose every mention is a read, an assignment or a
+release, that some statement rebinds as `x = x ± y` or `c = s[i]`, and that some
+expression reads as a word, holds a word: a small `int` `v` as `v << 1 | 1`, an ASCII
+character as `c << 3 | 2`, or a reference. The producers make words with no object made
+or changed; an index into an exact `list`, `tuple`, `str`, `bytes` or `bytearray` (any
+other `__getitem__` may keep or return its key, so it gets the local's object), a
+comparison with a one-character literal, a comparison with an `int` literal in a
+condition, `c in frozenset` and the `str` operations below read them as words, each
+after the same unbound-local check an object read makes; every other read boxes the word (CPython's cached object for a small `int` or
+a character) and stores the box back into the slot, so later reads of the same value see
+the same object, as a CPython local would. A local no expression reads as a word is left
+an object: pypng's `undo_filter_paeth` rebinds `a = result[ai]` from a `bytearray`, and
+tagging `a` only moved the box to its arithmetic (+1.1% on `read()`). A read-only object
+parameter is also declared non-null to LLVM.
+
+A direct call (section 2.8) on CPython 3.15 asks `Py_EnterRecursiveCall` once per
+invocation of the calling body, not once per call: there the check compares the C stack
+pointer with the thread's limit and `Py_LeaveRecursiveCall` does nothing, so its answer
+holds for every call the body makes from its frame (`pycc_ext_direct_enter` answers 2;
+a generator body, which a resume may run at another depth, asks every time). Returning a
+tagged local's word from a body to a direct caller was tried and dropped: the box moved
+to the caller's next boundary, and `loads()` did not get faster.
+
+**`str` operations with word operands.** Tagging alone left tomli's `int` boxes where
+they were: about 9,500 per `loads()` of `Cargo.lock` on main and after, each made where
+the position leaves a local, as an argument, a returned tuple item, or an operand of a
+`str` method or slice. Counting the calls into CPython showed where the cost was instead:
+2,274 `src[a:b]` per `loads()`, each boxing its bounds, building a `slice`, dispatching
+through `PyObject_GetItem` and freeing all three (about 540 instructions with the
+substring), and 1,615 `src.startswith(t, pos)` through a bound method call. Where the
+receiver is a local holding an exact `str` and each `int` operand is a small-`int`
+literal, a local holding a small `int` (tagged or a compact `int` object) or the sum or
+difference of two of these (`crates/pycc_codegen/src/str_words.rs`):
+- `s[a:b]` calls `pycc_ext_str_slice`, which clamps the bounds as
+  `PySlice_AdjustIndices` does and returns what `unicode_subscript` returns: the empty
+  string, `s` itself sliced whole, else `PyUnicode_Substring` (a cached one-character
+  string for one Latin-1 character);
+- the truth of `s.startswith(t)` or `s.startswith(t, a)` in an `if`, a `while` or a
+  `not`, `t` a literal of one to eight ASCII characters and `s` compact ASCII, compares
+  the bytes inline after `ADJUST_INDICES`' clamping.
+
+Any other receiver or operand (a `str` subclass, a big `int`, a `bool`, a list, an object
+whose `__getitem__` sees the `slice`) takes CPython's own operation from the same
+receiver; the operands are names and literals, so evaluating them again there has no
+visible effect. A receiver read that `operand_pin` pins (in `src[pos : pos + 1]` the
+`pos + 1` evaluated after `src` may run code) is a new reference, held on the pending
+stack until the operation is done. `tests/tagged_words.rs` checks both paths, with the
+fast paths on and off, against CPython, and that the pinned receiver's count is
+unchanged.
+
+Local callgrind on CPython 3.15.0b4, `--select all`, `PYTHONHASHSEED=0`, per `loads()`
+of the 38.6 KB `Cargo.lock`: main 22.92M → tagged locals 21.82M → recursion check per
+invocation 21.45M → `str` word operands, and only word-read locals tagged, 19.91M (no
+`slice` object or `startswith` call left in `loads()`) → the indexed object's class checked
+before a word index, and the unbound-local check before each word read, 20.16M.
+
 `specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
 reasons:
 - a dunder runs through a slot;

@@ -647,7 +647,7 @@ pub(crate) fn emit_not_expr<'ctx>(
     let MirExpr::Not(operand) = expr else {
         unreachable!()
     };
-    let operand_scalar = emit_expr(
+    let truthy_cond = match crate::str_words::emit_truth(
         context,
         builder,
         module,
@@ -655,13 +655,33 @@ pub(crate) fn emit_not_expr<'ctx>(
         user_functions,
         locals,
         operand,
-    );
-    let held = object_release::hold(context, module, rt, operand, &operand_scalar);
-    let truthy_cond =
-        crate::optional_ptr::truthy(context, builder, module, rt, &operand.ty(), operand_scalar)
+    ) {
+        Some(cond) => cond,
+        None => {
+            let operand_scalar = emit_expr(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                operand,
+            );
+            let held = object_release::hold(context, module, rt, operand, &operand_scalar);
+            let cond = crate::optional_ptr::truthy(
+                context,
+                builder,
+                module,
+                rt,
+                &operand.ty(),
+                operand_scalar,
+            )
             .unwrap_or_else(|| truthy(context, builder, module, rt, operand_scalar));
-    held.release(builder, rt);
-    release_scalar_if_temporary(context, builder, rt, operand, &operand_scalar);
+            held.release(builder, rt);
+            release_scalar_if_temporary(context, builder, rt, operand, &operand_scalar);
+            cond
+        }
+    };
     let inverted = builder
         .build_not(truthy_cond, "not_truthy")
         .expect("build_not should not fail inverting a well-formed i1");

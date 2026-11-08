@@ -8,7 +8,7 @@ mod arith_expr;
 mod buffer_expr;
 mod call_expr;
 pub(crate) mod container_expr;
-mod name_read;
+pub(crate) mod name_read;
 pub(crate) mod object_expr;
 
 pub(crate) fn emit_expr<'ctx>(

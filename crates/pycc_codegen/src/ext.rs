@@ -453,6 +453,8 @@ pub const FALLBACK_NS_NAME: &str = "__pycc_fallback_ns";
 /// `o[a:b]` with native `int` bounds and no step: [`EXT_OBJ_GETSLICE_SYMBOL`]
 /// without building a `slice` for an exact `tuple` or `list`.
 pub const EXT_OBJ_GETSLICE_INT_SYMBOL: &str = "pycc_ext_obj_getslice_int";
+/// `s[a:b]` of an exact `str` with word bounds (`str_words::emit_slice`).
+pub const EXT_STR_SLICE_SYMBOL: &str = "pycc_ext_str_slice";
 
 /// The fixed C shim's rich-comparison helper (Part 1 of #1371): it takes two
 /// `PyObject *` operands, CPython's `Py_LT`..`Py_GE` selector and an

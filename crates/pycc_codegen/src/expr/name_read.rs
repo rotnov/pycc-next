@@ -3,24 +3,20 @@
 use super::*;
 use pycc_mir::Ty;
 
-pub(crate) fn emit_name_expr<'ctx>(
+/// Raises CPython's `UnboundLocalError` (a local) or `NameError` (a
+/// global) when `slot` has a definite-assignment flag that reads unbound;
+/// a module global is first synced from the module (`global_sync`).
+/// Every read of a slot that may be unbound runs this first, including
+/// the word reads of a tagged local (`tagged_locals`).
+pub(crate) fn emit_bound_check<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     module: &inkwell::module::Module<'ctx>,
     rt: &RtFns<'ctx>,
-    locals: &HashMap<String, StorageSlot<'ctx>>,
-    expr: &MirExpr,
-) -> Scalar<'ctx> {
-    let MirExpr::Name { name, ty } = expr else {
-        unreachable!()
-    };
-    let slot = locals
-        .get(name)
-        .unwrap_or_else(|| panic!("pycc_codegen: internal error: `{name}` has no local slot"));
-    debug_assert_eq!(
-        &slot.ty, ty,
-        "pycc_codegen: internal error: local type drifted"
-    );
+    name: &str,
+    slot: &StorageSlot<'ctx>,
+) {
+    let ty = &slot.ty;
     if let Some(initialized_ptr) = slot.initialized {
         // A module global (its flag is a module global, a local's an
         // `alloca`) other code may rebind (`global_sync`).
@@ -99,6 +95,27 @@ pub(crate) fn emit_name_expr<'ctx>(
         }
         builder.position_at_end(ready);
     }
+}
+
+pub(crate) fn emit_name_expr<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Scalar<'ctx> {
+    let MirExpr::Name { name, ty } = expr else {
+        unreachable!()
+    };
+    let slot = locals
+        .get(name)
+        .unwrap_or_else(|| panic!("pycc_codegen: internal error: `{name}` has no local slot"));
+    debug_assert_eq!(
+        &slot.ty, ty,
+        "pycc_codegen: internal error: local type drifted"
+    );
+    emit_bound_check(context, builder, module, rt, name, slot);
     // Deviation from the task brief: the brief's version matched
     // `ty` twice -- once to pick `load_ty` (a `BasicTypeEnum`) for
     // `build_load`, once more to wrap the loaded value in the
@@ -327,6 +344,11 @@ pub(crate) fn emit_name_expr<'ctx>(
         // (`heap_rc::is_borrowed_read`); a consumer that keeps it
         // retains it, and an operand pinned across a sibling that
         // may rebind it is retained by `emit_expr`.
+        // A tagged local's slot may hold a small `int` or a character as
+        // a word of its own (`tagged_locals`): an object read boxes it.
+        Ty::Object if rt.tagged_slots.borrow().contains(&slot.ptr) => {
+            Scalar::Object(crate::tagged_locals::read_object(context, builder, module, rt, slot))
+        }
         Ty::Object => {
             let loaded = builder
                 .build_load(
