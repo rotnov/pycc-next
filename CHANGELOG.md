@@ -28,6 +28,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- A `--release` module's object release is split: its `NULL` and immortality tests are
+  inlined at each site, and only a mortal object's decrement and `_Py_Dealloc` stay one
+  call into the module's own `pycc_ext_obj_release_count`. Most releases in a generic body
+  are of an empty slot, a cached one-character `str`, a small `int` or `None`. They now
+  cost a test and a branch instead of a call. tomli `loads()`: 23.77M -> 22.81M
+  instructions.
 - Operations on CPython objects in generic bodies (attribute get, method and plain calls,
   `len`, subscripts, unpacking, comparisons, arithmetic, displays, `isinstance`, `in`,
   slices, boxing and unboxing) no longer test the thread's pending exception after the
