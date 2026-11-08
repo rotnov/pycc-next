@@ -51,12 +51,10 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     let mut later = blocks(&ir, "foreign_attr_fail");
     assert_eq!(later.len(), 3, "{ir}");
     assert_eq!(releases(later.remove(0)), 1, "{ir}");
-    // The filter's and the element's attribute loads and their effect
-    // checks, the filter's truth test, `next()` and the insertion: each
-    // releases both.
-    let unwinds = blocks(&ir, "effect_exc_unwind");
-    assert_eq!(unwinds.len(), 2, "{ir}");
-    later.extend(unwinds);
+    // The filter's and the element's attribute loads, the filter's truth
+    // test, `next()` and the insertion: each releases both. The loads
+    // route their own failure, so no effect check follows them.
+    assert!(blocks(&ir, "effect_exc_unwind").is_empty(), "{ir}");
     for label in [
         "foreign_iter_next_fail",
         "foreign_truthy_fail",
@@ -89,8 +87,8 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     assert_eq!(releases_of(after[0], ITERATOR), 1, "{ir}");
     // The comprehension hands its result to the statement, which releases
     // it once more on the normal path: nothing else is released.
-    assert_eq!(releases_of(&ir, ITERATOR), 9, "{ir}");
-    assert_eq!(releases_of(&ir, RESULT), 8, "{ir}");
+    assert_eq!(releases_of(&ir, ITERATOR), 7, "{ir}");
+    assert_eq!(releases_of(&ir, RESULT), 6, "{ir}");
 }
 
 /// A comprehension's result bound to a name is the binding's, not a

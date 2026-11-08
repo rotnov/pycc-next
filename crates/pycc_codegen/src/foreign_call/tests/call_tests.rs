@@ -97,10 +97,11 @@ fn a_failed_direct_call_returns_on_the_module_exec_failure_edge() {
     );
 }
 
-/// A direct call runs arbitrary CPython code, so it can leave an exception
-/// set.
+/// A direct call runs arbitrary CPython code, which can raise, but its
+/// emitter routes that failure itself (`foreign_fail`), so no pending pycc
+/// exception is left for a guard after the node.
 #[test]
-fn a_direct_call_can_set_an_exception() {
+fn a_direct_call_routes_its_own_exception() {
     let node = MirExpr::ObjCall {
         callee: Box::new(MirExpr::Name {
             name: "product".to_string(),
@@ -108,7 +109,7 @@ fn a_direct_call_can_set_an_exception() {
         }),
         args: Vec::new(),
     };
-    assert!(crate::exception::expression_can_set_exception(&node));
+    assert!(!crate::exception::expression_can_set_exception(&node));
 }
 
 /// The defensive arm in `foreign_attr::expect_object_pointer`, reached

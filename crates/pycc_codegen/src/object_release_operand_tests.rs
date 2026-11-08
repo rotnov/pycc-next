@@ -67,9 +67,9 @@ fn print_releases_each_produced_argument_after_writing_it() {
     assert_eq!(to_str.len(), 2, "{ir}");
     assert_eq!(releases(to_str[0]), 2, "{ir}");
     assert_eq!(releases(to_str[1]), 1, "{ir}");
-    // Plus the second argument's `NameError` exit and effect check (one
-    // each) and each argument's release after its write.
-    assert_eq!(releases(&ir), 8 + 2 * PINNED_LOAD, "{ir}");
+    // Plus the second argument's `NameError` exit and each argument's
+    // release after its write.
+    assert_eq!(releases(&ir), 7 + 2 * PINNED_LOAD, "{ir}");
     let borrowed = f_ir(
         "release_print_borrowed",
         vec![print(vec![
