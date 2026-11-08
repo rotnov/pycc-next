@@ -204,6 +204,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- A compiled body's values that an exception unwinds (the items of a list or tuple display
+  before the one that raised, a loop's iterator) are released with the exception set
+  aside, as CPython's unwinding drops them. A `__del__` they run, compiled or not, no
+  longer sees the pending exception as its own failure. Before, it was reported as
+  ignored and the original exception became a `SystemError`.
 - A non-strict `--ext` build no longer fails on a selected function whose comprehension
   holds a walrus (`[y for x in xs if (y := f(x))]`, in pydantic's `_fields.py` and
   `networks.py`): the walrus target is the function's own local (PEP 572), not a module

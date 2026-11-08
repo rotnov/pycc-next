@@ -343,39 +343,23 @@ fn twin_returns(
                 continue;
             }
         };
-        // Each item in a temporary, in display order, then the stores: a
-        // store cannot raise.
-        let mut out = Vec::new();
-        let temps: Vec<String> = elements
+        // Codegen splits the display (`multi_out::emit_object_display_return`):
+        // the items, each held until the last exists, then the stores. A
+        // native item boxes as the display would have boxed it.
+        let elements = elements
             .into_iter()
-            .enumerate()
-            .map(|(i, element)| {
-                let temp = temp_name(RESULT_TEMP, i, &Ty::Object);
-                // A native item boxes as the display would have boxed it.
-                let value = if element.ty() == Ty::Object {
+            .map(|element| {
+                if element.ty() == Ty::Object {
                     element
                 } else {
                     MirExpr::ObjectBox(Box::new(element))
-                };
-                out.push(MirStmt::Assign {
-                    target: temp.clone(),
-                    value,
-                });
-                temp
+                }
             })
             .collect();
-        let read = |temp: &String| MirExpr::Name {
-            name: temp.clone(),
-            ty: Ty::Object,
+        *value = MirExpr::ObjDisplay {
+            kind: ObjDisplayKind::Tuple,
+            elements,
         };
-        for (i, temp) in temps.iter().enumerate().skip(1) {
-            out.push(MirStmt::SetOut {
-                index: i,
-                value: read(temp),
-            });
-        }
-        out.push(MirStmt::Return(Some(read(&temps[0]))));
-        *stmt = MirStmt::Seq(out);
     }
 }
 

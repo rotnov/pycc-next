@@ -65,6 +65,9 @@ fn unpacked_calls_match_cpython_with_and_without_twins() {
         "frames",
         "keep_loop",
         "call_pair",
+        "guarded_pair",
+        "use_guarded",
+        "guarded_list",
     ] {
         assert!(
             report.contains(&format!("compiled: {module}:{name}\n")),

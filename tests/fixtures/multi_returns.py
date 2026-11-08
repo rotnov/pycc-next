@@ -104,6 +104,35 @@ def keep(x):
     return x, x
 
 
+class Res:
+    def __init__(self, log, name):
+        self.log = log
+        self.name = name
+
+    def __del__(self):
+        self.log.append("del " + self.name)
+
+
+def guarded_pair(log, fail):
+    try:
+        return Res(log, "a"), (1 // 0 if fail else Res(log, "b"))
+    except ZeroDivisionError:
+        log.append("handler")
+        return None, None
+
+
+def guarded_list(log):
+    try:
+        return [Res(log, "a"), 1 // 0]
+    except ZeroDivisionError:
+        log.append("handler")
+
+
+def use_guarded(log, fail):
+    a, b = guarded_pair(log, fail)
+    return a is None and b is None
+
+
 def other(s, pos):
     return pos + 10, "z"
 
@@ -227,6 +256,15 @@ def main():
     print(frames())
     print(refcounts())
     print(call_pair())
+    # An item that raises drops the items before it before the handler runs.
+    log = []
+    print(use_guarded(log, True), log)
+    log = []
+    print(use_guarded(log, False), sorted(log))
+    # So do a list display's items.
+    log = []
+    guarded_list(log)
+    print(log)
     global pair
     saved = pair
     pair = other

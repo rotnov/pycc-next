@@ -274,11 +274,59 @@ pub(super) fn release_if_produced<'ctx>(
 /// block that is about to leave the statement for an exception target or
 /// the module-exec failure return. The stack itself is untouched: the
 /// fallthrough still owns each entry's pop.
+///
+/// The exception being raised is set aside while they run
+/// ([`releasing_aside`]).
 pub(super) fn release_pending<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>) {
     let snapshot: Vec<PendingObject<'ctx>> = rt.exceptions.pending_object_releases.borrow().clone();
-    for object in snapshot.into_iter().rev() {
-        emit_release(builder, object);
+    if snapshot.is_empty() {
+        return;
     }
+    releasing_aside(builder, rt, || {
+        for object in snapshot.into_iter().rev() {
+            emit_release(builder, object);
+        }
+    });
+}
+
+/// Emits `releases` with the pending exception set aside: taken before and
+/// raised again after. CPython's unwinding holds the exception outside the
+/// thread's state while it drops a frame's values, so a `__del__` (or a
+/// generator's `finally`) a release runs neither sees it nor loses it. A
+/// compiled finalizer would otherwise read the pending state as its own
+/// failure. Only on an exception edge, where an exception is pending.
+fn releasing_aside<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>, releases: impl FnOnce()) {
+    let raised = builder
+        .build_call(rt.exception_take, &[], "unwind_exc")
+        .expect("build_call should not fail for pycc_rt_exception_take")
+        .try_as_basic_value()
+        .basic()
+        .expect("pycc_rt_exception_take returns a value");
+    releases();
+    // Nothing is pending where an import's failure is still CPython's own
+    // error (`foreign_fail::emit_failure`): then nothing is raised again.
+    let raised = raised.into_pointer_value();
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("a release is emitted inside a function");
+    let context = function.get_type().get_context();
+    let again = context.append_basic_block(function, "unwind_exc_again");
+    let done = context.append_basic_block(function, "unwind_exc_done");
+    let pending = builder
+        .build_is_not_null(raised, "unwind_exc_pending")
+        .expect("build_is_not_null should not fail");
+    builder
+        .build_conditional_branch(pending, again, done)
+        .expect("build_conditional_branch should not fail");
+    builder.position_at_end(again);
+    builder
+        .build_call(rt.exception_raise, &[raised.into()], "")
+        .expect("build_call should not fail for pycc_rt_exception_raise");
+    builder
+        .build_unconditional_branch(done)
+        .expect("build_unconditional_branch should not fail");
+    builder.position_at_end(done);
 }
 
 /// One entry of `ExceptionCodegenState::loop_iterators`: an enclosing
@@ -326,7 +374,7 @@ pub(super) fn enter_loop_iterator<'ctx>(
         .expect("every basic block belongs to a function");
     let block = context.append_basic_block(function, "foreign_iter_cleanup");
     builder.position_at_end(block);
-    emit_release(builder, iterator);
+    releasing_aside(builder, rt, || emit_release(builder, iterator));
     builder
         .build_unconditional_branch(enclosing)
         .expect("build_unconditional_branch should not fail for a fresh cleanup block");

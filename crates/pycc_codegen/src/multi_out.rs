@@ -297,6 +297,26 @@ pub(crate) fn emit_object_forward<'ctx>(
     if !matches!(expr, MirExpr::ObjCall { .. } | MirExpr::ObjKeywordCall(_)) {
         return None;
     }
+    let outs = object_twin_outs(builder, locals)?;
+    let request = crate::direct_call::MultiCall { body: None, outs };
+    crate::foreign_call_emit::emit_multi_call(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        expr,
+        &request,
+    )
+}
+
+/// The out-pointers of the object twin being emitted
+/// (`pycc_mir::multi_return_object`), or `None` outside one.
+fn object_twin_outs<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+) -> Option<Vec<PointerValue<'ctx>>> {
     let outs: Vec<PointerValue<'ctx>> = (1..)
         .map_while(|index| locals.get(&out_key(index)))
         .filter(|slot| slot.ty == pycc_mir::Ty::Object)
@@ -311,20 +331,60 @@ pub(crate) fn emit_object_forward<'ctx>(
                 .and_then(pycc_mir::multi_return_object::twin_arity)
                 .is_some_and(|arity| arity == outs.len() + 1)
         });
-    if !in_twin {
+    in_twin.then_some(outs)
+}
+
+/// `return a, b, ...` in an object twin, with one item per result: the
+/// items are evaluated in order, each a reference of its own held until the
+/// last item exists, so an item that raises releases the earlier ones on
+/// its exception edge, as CPython's unwinding drops the values a tuple
+/// display has pushed. Then every item after the first goes through its
+/// out-pointer, and the first is the returned value. `None` (nothing
+/// emitted) for any other return.
+pub(crate) fn emit_object_display_return<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Option<Scalar<'ctx>> {
+    let MirExpr::ObjDisplay {
+        kind: pycc_mir::ObjDisplayKind::Tuple,
+        elements,
+    } = expr
+    else {
+        return None;
+    };
+    let outs = object_twin_outs(builder, locals)?;
+    if elements.len() != outs.len() + 1
+        || elements.iter().any(|element| element.ty() != pycc_mir::Ty::Object)
+    {
         return None;
     }
-    let request = crate::direct_call::MultiCall { body: None, outs };
-    crate::foreign_call_emit::emit_multi_call(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        expr,
-        &request,
-    )
+    let mut items = Vec::with_capacity(elements.len());
+    let mut holds = Vec::with_capacity(elements.len());
+    for element in elements {
+        let scalar = emit_expr(context, builder, module, rt, user_functions, locals, element);
+        let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, element, scalar);
+        let Scalar::Object(item) = scalar else {
+            unreachable!("an object twin's returned item is an object")
+        };
+        holds.push(crate::object_release::hold_new_reference(
+            context, module, rt, item,
+        ));
+        items.push(item);
+    }
+    for held in holds.into_iter().rev() {
+        held.consumed(rt);
+    }
+    for (out, item) in outs.iter().zip(&items[1..]) {
+        builder
+            .build_store(*out, *item)
+            .expect("build_store should not fail through a twin's out-pointer");
+    }
+    Some(Scalar::Object(items[0]))
 }
 
 /// `target = temp` followed by `ReleaseName(temp)`, for a compiler
