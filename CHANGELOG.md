@@ -28,6 +28,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- Operations on CPython objects in generic bodies (attribute get, method and plain calls,
+  `len`, subscripts, unpacking, comparisons, arithmetic, displays, `isinstance`, `in`,
+  slices, boxing and unboxing) no longer test the thread's pending exception after the
+  statement that runs them: each emitter already routes a NULL or negative result to the
+  failure edge at once (`crates/pycc_codegen/src/foreign_fail.rs`), so the test was dead.
+  Dropping it shrinks pydantic's compiled `.text` by about 7% (4.14 MB to 3.83 MB with
+  `--select all`), its instructions by up to 3.7% and its I1 misses by 2 to 4%.
+  `tests/object_failure_edges.rs` checks every failing object operation against CPython,
+  with and without the inline fast paths.
 - A `str` that crosses from CPython into compiled code (an `--ext` argument, a value
   unboxed from an object) starts with its code-point count, which CPython keeps, so
   `len(s)`, `s[i]` and the ASCII test on it no longer count the text once per crossing:

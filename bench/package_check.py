@@ -119,6 +119,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -175,6 +176,25 @@ def tree_digest(base: pathlib.Path, paths: list[str]) -> str:
     return h.hexdigest()
 
 
+def download(url: str, attempts: int = 4) -> bytes:
+    """The bytes at `url`, retrying a timed-out or dropped connection.
+
+    A CI runner's download of a source archive sometimes stalls; the pinned
+    sha256 in `fetch` still decides whether the bytes are accepted.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                return r.read()
+        except (TimeoutError, ConnectionError, urllib.error.URLError) as e:
+            if attempt == attempts:
+                raise
+            print(f"  download of {url} failed ({e}); retry {attempt} of {attempts - 1}",
+                  file=sys.stderr)
+            time.sleep(5 * attempt)
+    raise AssertionError("unreachable")
+
+
 def fetch(pkg: Package, cache: pathlib.Path) -> pathlib.Path:
     cache.mkdir(parents=True, exist_ok=True)
     path = cache / pkg.archive
@@ -182,8 +202,7 @@ def fetch(pkg: Package, cache: pathlib.Path) -> pathlib.Path:
             and hashlib.sha256(path.read_bytes()).hexdigest() != pkg.sha256:
         path.unlink()
     if not path.exists():
-        with urllib.request.urlopen(pkg.url, timeout=60) as r:
-            data = r.read()
+        data = download(pkg.url)
         got = hashlib.sha256(data).hexdigest()
         if pkg.sha256 is not None and got != pkg.sha256:
             sys.exit(f"sha256 mismatch for {pkg.url}: got {got}, want {pkg.sha256}")

@@ -12,8 +12,9 @@
 //! **Failure.** `PyObject_Type` cannot fail for a live object. The helper
 //! answers `NULL` only for a `NULL` operand, as the defence in depth
 //! `pycc_ext_obj_len` documents; that `NULL` takes the
-//! foreign failure edge through `foreign_fail::route_null`, so
-//! `exception::expression_can_set_exception` answers `true` for the node.
+//! foreign failure edge through `foreign_fail::route_null`, so the node
+//! leaves no pending pycc exception behind and
+//! `exception::expression_can_set_exception` answers `false` for it.
 
 use super::*;
 use crate::foreign_attr::expect_object_pointer;

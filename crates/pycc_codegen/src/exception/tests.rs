@@ -127,11 +127,115 @@ fn exception_guard_classification_keeps_the_arithmetic_fast_path_clean() {
         }),
         index: Box::new(MirExpr::IntLiteral(0)),
     }));
-    // Part 2d of #1371: a list display built as a CPython `list` always
-    // may raise -- its elements are boxed and the list allocated --
-    // even an empty one.
-    assert!(expression_can_set_exception(&MirExpr::ObjList {
-        elements: Vec::new(),
-    }));
     assert!(!expression_can_set_exception(&MirExpr::IntLiteral(1)));
+}
+
+/// An operation on CPython objects routes its own failure through
+/// `foreign_fail`'s edge as soon as its helper fails, so it leaves no pending
+/// pycc exception behind and gets no guard after the node. That the routing
+/// holds for each of them -- a failure caught in the same function, and one
+/// propagating to its caller -- is `tests/object_failure_edges.rs`.
+#[test]
+fn object_operations_route_their_own_failure() {
+    use pycc_mir::Ty;
+    let object = || {
+        Box::new(MirExpr::Name {
+            name: "o".to_string(),
+            ty: Ty::Object,
+        })
+    };
+    let nodes = [
+        MirExpr::ObjAttrGet {
+            base: object(),
+            attr: "a".to_string(),
+            ty: Ty::Object,
+        },
+        MirExpr::ObjMethodCall {
+            base: object(),
+            method: "m".to_string(),
+            args: Vec::new(),
+        },
+        MirExpr::ObjCall {
+            callee: object(),
+            args: Vec::new(),
+        },
+        MirExpr::ObjKeywordCall(Box::new(pycc_mir::ObjKeywordCall {
+            call: MirExpr::ObjCall {
+                callee: object(),
+                args: Vec::new(),
+            },
+            names: vec!["k".to_string()],
+            values: vec![MirExpr::IntLiteral(1)],
+        })),
+        MirExpr::ObjLen { base: object() },
+        MirExpr::ObjSubscript {
+            base: object(),
+            index: object(),
+        },
+        MirExpr::ObjUnpackFloatTuple {
+            base: object(),
+            arity: 2,
+        },
+        MirExpr::ObjUnpack {
+            value: object(),
+            arity: 2,
+        },
+        MirExpr::ObjIsInstance {
+            value: object(),
+            class: pycc_mir::ObjIsInstanceClass::Object(object()),
+        },
+        MirExpr::ObjContains {
+            negate: false,
+            item: object(),
+            container: object(),
+        },
+        MirExpr::ObjSlice {
+            base: object(),
+            start: None,
+            stop: None,
+            step: None,
+        },
+        MirExpr::ObjType { base: object() },
+        MirExpr::ObjList {
+            elements: vec![MirExpr::IntLiteral(1)],
+        },
+        MirExpr::ObjectBox(Box::new(MirExpr::IntLiteral(1))),
+        MirExpr::ObjectUnbox(object(), Box::new(Ty::Int)),
+        MirExpr::ObjectCoerce(object(), Box::new(Ty::Int)),
+        MirExpr::TupleRebox(object(), Box::new(Ty::Object)),
+        MirExpr::ObjectIndex(object(), pycc_mir::IndexUse::List),
+        MirExpr::ObjBinOp {
+            op: pycc_mir::BinOpKind::Add,
+            in_place: false,
+            left: object(),
+            right: object(),
+        },
+        MirExpr::ObjDisplay {
+            kind: pycc_mir::ObjDisplayKind::Dict,
+            elements: vec![*object(), *object()],
+        },
+        MirExpr::ObjUnaryOp {
+            op: pycc_mir::UnaryOpKind::USub,
+            operand: object(),
+        },
+        MirExpr::ObjCompare {
+            op: pycc_mir::CmpOpKind::Lt,
+            left: object(),
+            right: object(),
+        },
+        MirExpr::ObjCompare {
+            op: pycc_mir::CmpOpKind::Is,
+            left: object(),
+            right: object(),
+        },
+    ];
+    for node in &nodes {
+        assert!(!expression_can_set_exception(node), "{node:?}");
+    }
+    // A call of a compiled function still sets pycc's own pending state.
+    assert!(expression_can_set_exception(&MirExpr::Call {
+        callee: "f".to_string(),
+        args: Vec::new(),
+        ty: Ty::Int,
+    }));
 }

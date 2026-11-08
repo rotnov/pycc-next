@@ -84,83 +84,74 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // A native `str | None` local's tests (`pycc_mir::optional_str`)
         // read a pointer and compare bytes; none of them raises.
         MirExpr::RtCall(call) if call.sig.symbol.starts_with("pycc_rt_optional_str_") => false,
+        // An operation on CPython objects raises nothing pycc's pending state
+        // (D-173) holds once it is done: its helper reports a failure
+        // CPython's way (a `NULL` result or a negative status, with
+        // CPython's error indicator set), and its emitter routes that
+        // failure itself, immediately, through `foreign_fail`'s edge -- in
+        // a function body the shim's error bridge and a branch to the
+        // innermost exception target, in the module body outside every
+        // module-level `try` the import's `-1` return. A direct call
+        // between compiled bodies (`direct_call`) tests the pending state
+        // itself right after the body returns. So on the success path the
+        // D-173 guard after the node could never fire: no pending
+        // exception reaches it. It used to be emitted anyway, as
+        // fail-closed conservatism, and it cost a load, a test and a
+        // branch after every object operation, plus a cold block each:
+        // a tenth of a generic body's LLVM instructions (pydantic's
+        // `json_schema`). `tests/object_failure_edges.rs` checks that
+        // every one of these operations still stops where CPython does
+        // when it fails.
+        //
+        // The emitters, by node: `foreign_attr::emit` (an attribute
+        // load); `foreign_call` (a method call, a call, its keyword form,
+        // a subscript, a list, a display); `foreign_len` (a length, a
+        // float-tuple unpack); `foreign_unpack::emit_unpack`;
+        // `foreign_compare` (`isinstance`, `in`, a rich comparison; an
+        // identity test cannot fail at all); `foreign_slice::emit_slice`;
+        // `foreign_type::emit_type`;
+        // `object_box::emit_boxed`; `object_unbox::emit_unboxed`;
+        // `object_coerce` (a conversion, an index); `tuple_rebox::emit`;
+        // `foreign_arith` (binary and unary operators).
+        MirExpr::ObjAttrGet { .. }
+        | MirExpr::ObjMethodCall { .. }
+        | MirExpr::ObjCall { .. }
+        | MirExpr::ObjKeywordCall(_)
+        | MirExpr::ObjLen { .. }
+        | MirExpr::ObjSubscript { .. }
+        | MirExpr::ObjUnpackFloatTuple { .. }
+        | MirExpr::ObjUnpack { .. }
+        | MirExpr::ObjIsInstance { .. }
+        | MirExpr::ObjContains { .. }
+        | MirExpr::ObjSlice { .. }
+        | MirExpr::ObjType { .. }
+        | MirExpr::ObjList { .. }
+        | MirExpr::ObjectBox(_)
+        | MirExpr::ObjectUnbox(_, _)
+        | MirExpr::ObjectCoerce(_, _)
+        | MirExpr::TupleRebox(_, _)
+        | MirExpr::ObjectIndex(..)
+        | MirExpr::ObjBinOp { .. }
+        | MirExpr::ObjDisplay { .. }
+        | MirExpr::ObjUnaryOp { .. }
+        | MirExpr::ObjCompare { .. } => false,
         // `AttrGet` is *not* in this group although it raises
         // `AttributeError` for a slot read before its assignment (#1388):
         // `attr_slot::emit_slot_load_checked` emits the guard itself, on the
         // cold unassigned path only, so the common read pays no flag test.
-        //
-        // `ObjAttrGet` is in the `true` group (D-244, Part 2 of #1026):
-        // unlike `AttrGet`'s compile-time-resolved slot, a foreign attribute
-        // load is a real `PyObject_GetAttrString` call
-        // that returns `NULL` with a CPython exception set whenever the
-        // attribute is missing or its descriptor raises.
-        //
-        // The guard this answer emits is not what *handles* that failure:
-        // it reads pycc's own pending state (D-173), which a CPython-set
-        // exception leaves untouched, so `foreign_attr::emit` emits its own
-        // `NULL` check ahead of it (PR 2a of #1081 review finding 1).
-        //
-        // `ObjMethodCall` (PR 2b of #1081) joins it for exactly the same
-        // reason: a missing method or a method that raises makes
-        // `pycc_ext_obj_call` return `NULL` with CPython's error indicator
-        // set, and `foreign_call::emit` owns the `NULL` check that actually
-        // stops the module body.
-        //
-        // So for both nodes the `true` answer is fail-closed conservatism
-        // rather than a live dependency: the emitter's own check is
-        // immediate. In the module body outside every module-level `try` it
-        // returns the `-1` status; anywhere else (#1316, Part 1 of #1096) it
-        // calls `pycc_ext_obj_error_bridge`,
-        // which moves CPython's exception into pycc's pending state, and
-        // branches straight to the innermost exception target
-        // (`foreign_fail.rs`). Either way the D-173 guard emitted after the
-        // node sees no pending exception on the path it guards, and this
-        // classification stays correct should a future emitter defer its
-        // branch to that guard instead.
         MirExpr::Call { .. }
         | MirExpr::CallClosure { .. }
         // A runtime builtin can raise (`int("x")`, `input()` at EOF, ...).
         | MirExpr::RtCall(_)
         | MirExpr::DictGet { .. }
         | MirExpr::Instantiate(_)
-        | MirExpr::ObjAttrGet { .. }
-        | MirExpr::ObjMethodCall { .. }
-        // #1313: a direct call joins `ObjMethodCall` on the identical
-        // argument -- a non-callable object or a raising call makes
-        // `pycc_ext_obj_call_borrowed` return `NULL`.
-        | MirExpr::ObjCall { .. }
-        // Part 8 of #1371: the keyword form, on the same argument (an
-        // unexpected keyword is CPython's own `TypeError`).
-        | MirExpr::ObjKeywordCall(_)
-        // PR 3a of #1082: `ObjLen` joins them on the identical argument --
-        // `PyObject_Size` raises `TypeError` for an operand with no length,
-        // and `foreign_len::emit_len` owns the `-1` check that actually
-        // stops the module body.
-        | MirExpr::ObjLen { .. }
-        // PR 3b of #1082: `ObjSubscript` joins them on the identical
-        // argument -- `PyObject_GetItem` raises `KeyError`, `IndexError` or
-        // `TypeError`, and `foreign_call::emit_subscript` owns the `NULL`
-        // check that actually stops the module body.
-        | MirExpr::ObjSubscript { .. }
-        // PR 4c of #1083: `ObjUnpackFloatTuple` joins them on the identical
-        // argument -- the shim raises `TypeError` for a non-tuple operand
-        // and for a wrong arity, and propagates whatever `PyNumber_Float`
-        // raises for an item it cannot convert;
-        // `foreign_len::emit_unpack_float_tuple` owns the `-1` check that
-        // actually stops the module body.
-        | MirExpr::ObjUnpackFloatTuple { .. }
-        // Part 1 of #891: `ObjUnpack` joins them -- the shim raises
-        // CPython's own `TypeError` for a non-iterable and `ValueError` for
-        // a wrong item count, and propagates a raising `__iter__` or
-        // `__next__`; `foreign_unpack::emit_unpack` owns the `NULL` check.
-        | MirExpr::ObjUnpack { .. }
-        // Part 2 of #1027: `BufferGet` joins them, and here the dependency
-        // *is* live rather than conservative -- `pycc_rt_buffer_f64_get`
-        // sets pycc's own D-173 pending state and returns a `0.0` sentinel
-        // for an index outside `[0, len)`, so this guard is the whole of
-        // the failure handling. A by-name entry rather than a widening of
-        // the `Subscript` arm below, which asks its base's type: a
-        // `BufferGet` is always fallible, with no base type to consult.
+        // Part 2 of #1027: `BufferGet` is fallible, and here the
+        // dependency is live -- `pycc_rt_buffer_f64_get` sets pycc's own
+        // D-173 pending state and returns a `0.0` sentinel for an index
+        // outside `[0, len)`, so this guard is the whole of the failure
+        // handling. A by-name entry rather than a widening of the
+        // `Subscript` arm below, which asks its base's type: a `BufferGet`
+        // is always fallible, with no base type to consult.
         | MirExpr::BufferGet { .. }
         // #1165: `BufferAlloc` joins `BufferGet` rather than `BufferLen`,
         // and here the dependency is live for the identical reason --
@@ -175,56 +166,7 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // iterable, condition and elements may each raise -- a `range` step
         // of `0` or a `1 // 0` element -- so it is always fallible, exactly
         // like the statement form the loop body already guards.
-        | MirExpr::Comprehension(_)
-        // Part 1 of #1371: `PyObject_IsInstance` raises for a class
-        // argument that is not a class, and propagates a raising
-        // `__instancecheck__`; `foreign_compare::emit_isinstance` owns the
-        // `-1` check.
-        | MirExpr::ObjIsInstance { .. }
-        // Part 2b of #1371: `PySequence_Contains` runs `__contains__` (or
-        // iteration), and `PyObject_GetItem` on a slice runs `__getitem__`;
-        // either may raise. `foreign_compare::emit_contains` owns the `-1`
-        // check and `foreign_slice::emit_slice` the `NULL` check.
-        | MirExpr::ObjContains { .. }
-        | MirExpr::ObjSlice { .. }
-        // Part 11 of #1371: `pycc_ext_obj_type` answers `NULL` for a `NULL`
-        // operand (its defence-in-depth guard), and
-        // `foreign_type::emit_type` owns that check.
-        | MirExpr::ObjType { .. }
-        // Part 2d of #1371: boxing an element or allocating the CPython
-        // `list` may fail, and `foreign_call::emit_list` owns the `NULL`
-        // check.
-        | MirExpr::ObjList { .. }
-        // Part 2 of #1387: boxing a native value into an `object` slot may
-        // fail (a bigint outside the inline range is `OverflowError`), and
-        // `object_box::emit_boxed` owns the `NULL` check.
-        | MirExpr::ObjectBox(_)
-        // #1476: a narrowed `object` read may fail (an `int` outside the
-        // inline range is `OverflowError`), and `object_unbox::emit_unboxed`
-        // owns the status check.
-        | MirExpr::ObjectUnbox(_, _)
-        // Non-strict mode: a converted object may be of another type
-        // (`TypeError`), and `object_coerce::emit_coerced` owns the check.
-        | MirExpr::ObjectCoerce(_, _)
-        // Boxing an element of a reboxed tuple may fail (a bigint outside
-        // the inline range), and `tuple_rebox::emit` owns the `NULL` check.
-        | MirExpr::TupleRebox(_, _)
-        // Non-strict mode: an object index may fail (`TypeError`), and
-        // `object_coerce::emit_index` owns the status check.
-        | MirExpr::ObjectIndex(..)
-        // Non-strict mode (#3): CPython's operators raise (`TypeError`,
-        // `ZeroDivisionError`, ...); `foreign_arith` owns the `NULL` check.
-        | MirExpr::ObjBinOp { .. }
-        | MirExpr::ObjDisplay { .. }
-        | MirExpr::ObjUnaryOp { .. } => true,
-        // Part 1 of #1371: a rich comparison runs the operands' own
-        // `__eq__`/`__lt__`/..., which may raise, and
-        // `foreign_compare::emit_compare` owns the `NULL` check; an
-        // identity test is a pointer compare and cannot raise.
-        MirExpr::ObjCompare { op, .. } => !matches!(
-            op,
-            pycc_mir::CmpOpKind::Is | pycc_mir::CmpOpKind::IsNot
-        ),
+        | MirExpr::Comprehension(_) => true,
         // #1346: the node itself raises nothing. `sequence::emit_sequence`
         // emits both children through the guarded `emit_expr`, so each
         // child's own guard has already handled a raise by the time the

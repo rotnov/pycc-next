@@ -475,8 +475,8 @@ fn a_function_without_object_operations_emits_no_release() {
 /// the fallthrough and every failure edge taken while an operand is held.
 ///
 /// The counts are pinned exactly because over-release is the dangerous
-/// direction. `subscript`'s 8, read off the IR: `copy` unbound, `b`'s load
-/// failing and the effect guard after it each release `a` (3); the
+/// direction. `subscript`'s 7, read off the IR: `copy` unbound and `b`'s
+/// load failing each release `a` (2); the
 /// subscript's own failure edge and its fallthrough each release `b` then
 /// `a` (4); the discarded result is released last (1). Each path from entry
 /// to a return releases each produced value at most once; the hosted
@@ -512,7 +512,7 @@ fn every_consumer_releases_its_produced_operands() {
                 base: boxed(attr("a")),
                 index: boxed(attr("b")),
             }),
-            8,
+            7,
         ),
         (
             "compare",
@@ -521,7 +521,7 @@ fn every_consumer_releases_its_produced_operands() {
                 left: boxed(attr("a")),
                 right: boxed(attr("b")),
             }),
-            8,
+            7,
         ),
         (
             "identity",
@@ -539,7 +539,7 @@ fn every_consumer_releases_its_produced_operands() {
                 item: boxed(attr("a")),
                 container: boxed(attr("b")),
             }),
-            7,
+            6,
         ),
         (
             "slice",
@@ -549,14 +549,14 @@ fn every_consumer_releases_its_produced_operands() {
                 stop: None,
                 step: Some(boxed(MirExpr::IntLiteral(2))),
             }),
-            8,
+            7,
         ),
         (
             "list",
             MirStmt::ExprStmt(MirExpr::ObjList {
                 elements: vec![attr("a"), MirExpr::IntLiteral(1), attr("b")],
             }),
-            8,
+            7,
         ),
         (
             "isinstance_object",
@@ -564,7 +564,7 @@ fn every_consumer_releases_its_produced_operands() {
                 value: boxed(attr("a")),
                 class: ObjIsInstanceClass::Object(boxed(attr("b"))),
             }),
-            7,
+            6,
         ),
         (
             "isinstance_builtin",
@@ -588,7 +588,7 @@ fn every_consumer_releases_its_produced_operands() {
                 callee: boxed(attr("a")),
                 args: vec![attr("b")],
             }),
-            6,
+            5,
         ),
         (
             "keyword_method_call",
@@ -601,7 +601,7 @@ fn every_consumer_releases_its_produced_operands() {
                 names: vec!["k".to_string()],
                 values: vec![attr("c")],
             }))),
-            22,
+            17,
         ),
         (
             "keyword_direct_call",
@@ -613,7 +613,7 @@ fn every_consumer_releases_its_produced_operands() {
                 names: vec!["k".to_string()],
                 values: vec![attr("c")],
             }))),
-            6,
+            5,
         ),
         ("not", MirStmt::ExprStmt(MirExpr::Not(boxed(attr("a")))), 2),
         ("float", MirStmt::ExprStmt(call("float", Ty::Float)), 2),
@@ -653,7 +653,7 @@ fn every_consumer_releases_its_produced_operands() {
                 stop: None,
                 step: None,
             },
-            7,
+            6,
         ),
         (
             "set_attr",
@@ -662,7 +662,7 @@ fn every_consumer_releases_its_produced_operands() {
                 attr: "x".to_string(),
                 value: attr("b"),
             },
-            5,
+            4,
         ),
     ];
     let mut wrong = Vec::new();
@@ -780,7 +780,7 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
         (
             "release_native_later_arg",
             method_call(vec![attr("a"), native_raise(z())]),
-            2,
+            1,
             3,
             1,
         ),
@@ -788,7 +788,7 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
         (
             "release_native_keyword_after_arg",
             keyword_call(vec![attr("a")]),
-            2,
+            1,
             3,
             1,
         ),
@@ -805,9 +805,10 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
             &["pyfn_f"],
         )
         .remove(0);
-        // A produced earlier argument has a guard of its own; every guard
-        // taken while the bound method is held releases it, and the
-        // native raise's guard is the last one before the call.
+        // Only the native raise has a guard: a produced earlier argument
+        // routes its own failure, with no guard after it. The guard
+        // releases the held bound method, and is the last block before
+        // the call.
         let unwind = blocks(&ir, "effect_exc_unwind");
         assert_eq!(unwind.len(), guards, "{label}\n{ir}");
         for block in &unwind {
