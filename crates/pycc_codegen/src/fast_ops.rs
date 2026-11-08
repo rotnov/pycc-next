@@ -61,8 +61,11 @@ const CHAR_COUNT: u64 = 128;
 /// [`BYTEARRAY`]).
 const CLASSES: u64 = CHARS + CHAR_COUNT * 8;
 const CLASS_COUNT: u64 = 12;
-/// The selectors of `str`, `set` and `frozenset` in the classes.
+/// The selectors of `str`, `list`, `tuple`, `set` and `frozenset` in the
+/// classes.
 pub(crate) const STR: u64 = 1;
+pub(crate) const LIST: u64 = 4;
+pub(crate) const TUPLE: u64 = 6;
 pub(crate) const SET: u64 = 7;
 pub(crate) const FROZENSET: u64 = 8;
 pub(crate) const BYTES: u64 = 9;

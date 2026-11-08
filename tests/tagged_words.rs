@@ -33,7 +33,7 @@ fn tagged_words_match_cpython_with_the_fast_paths_on_and_off() {
         .expect("pycc should spawn");
     let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
-    for name in ["skip", "word", "quoted", "tokens", "slices", "starts", "char_leaves", "counter", "compares", "pinned", "leaked", "main"] {
+    for name in ["skip", "word", "quoted", "tokens", "slices", "starts", "char_leaves", "counter", "compares", "pinned", "keyed", "unbound", "leaked", "main"] {
         assert!(report.contains(&format!("compiled: {module}:{name}\n")), "{name}\n{report}");
     }
     std::fs::remove_file(dir.join(format!("{module}.py"))).expect("remove the source");

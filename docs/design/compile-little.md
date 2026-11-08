@@ -520,9 +520,11 @@ parameter of a non-generator body whose every mention is a read, an assignment o
 release, that some statement rebinds as `x = x ± y` or `c = s[i]`, and that some
 expression reads as a word, holds a word: a small `int` `v` as `v << 1 | 1`, an ASCII
 character as `c << 3 | 2`, or a reference. The producers make words with no object made
-or changed; an index, a comparison with a one-character literal, a comparison with an
-`int` literal in a condition, `c in frozenset` and the `str` operations below read them
-as words; every other read boxes the word (CPython's cached object for a small `int` or
+or changed; an index into an exact `list`, `tuple`, `str`, `bytes` or `bytearray` (any
+other `__getitem__` may keep or return its key, so it gets the local's object), a
+comparison with a one-character literal, a comparison with an `int` literal in a
+condition, `c in frozenset` and the `str` operations below read them as words, each
+after the same unbound-local check an object read makes; every other read boxes the word (CPython's cached object for a small `int` or
 a character) and stores the box back into the slot, so later reads of the same value see
 the same object, as a CPython local would. A local no expression reads as a word is left
 an object: pypng's `undo_filter_paeth` rebinds `a = result[ai]` from a `bytearray`, and
@@ -567,7 +569,8 @@ unchanged.
 Local callgrind on CPython 3.15.0b4, `--select all`, `PYTHONHASHSEED=0`, per `loads()`
 of the 38.6 KB `Cargo.lock`: main 22.92M → tagged locals 21.82M → recursion check per
 invocation 21.45M → `str` word operands, and only word-read locals tagged, 19.91M (no
-`slice` object or `startswith` call left in `loads()`).
+`slice` object or `startswith` call left in `loads()`) → the indexed object's class checked
+before a word index, and the unbound-local check before each word read, 20.16M.
 
 `specialize_untyped` still skips `__` names and keeps explicit annotations, for its own
 reasons:

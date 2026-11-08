@@ -221,7 +221,8 @@ pub(crate) fn emit_obj_subscript_expr<'ctx>(
     let held_base = object_release::hold(context, module, rt, base, &base_scalar);
     if let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, index) {
         // A tagged index (`tagged_locals`): a small `int`'s word is the key
-        // itself, with no `int` object read.
+        // of a sequence that cannot keep it, with no `int` object read.
+        crate::tagged_locals::require_bound(context, builder, module, rt, index, &slot);
         let result = crate::tagged_locals::emit_subscript(context, builder, module, rt, base_scalar, &slot);
         held_base.release(builder, rt);
         return result;
@@ -316,6 +317,7 @@ pub(crate) fn emit_obj_compare_condition<'ctx>(
         // A tagged local against a one-character literal
         // (`tagged_locals`): a character's word is compared with the
         // literal's, with no `str` read.
+        crate::tagged_locals::require_bound(context, builder, module, rt, other, &slot);
         let text_first = matches!(left.as_ref(), MirExpr::StringLiteral(_));
         return Some(crate::tagged_locals::emit_eq_char(context, builder, module, rt, &slot, *op, *byte, |object| {
             foreign_compare::emit_eq_text_truth(
@@ -335,6 +337,7 @@ pub(crate) fn emit_obj_compare_condition<'ctx>(
     {
         // A tagged local against an `int` literal (`tagged_locals`): a
         // small `int`'s word is compared as a machine integer, with no box.
+        crate::tagged_locals::require_bound(context, builder, module, rt, other, &slot);
         return Some(crate::tagged_locals::emit_compare_int(
             context,
             builder,
@@ -502,6 +505,7 @@ pub(crate) fn emit_obj_contains_expr<'ctx>(
         // A tagged item (`tagged_locals`): a name read has no effect to
         // order before the container's evaluation, and the item's word is
         // tested only once both are known.
+        crate::tagged_locals::require_bound(context, builder, module, rt, item, &slot);
         let container_scalar = emit_expr(context, builder, module, rt, user_functions, locals, container);
         let held_container = object_release::hold(context, module, rt, container, &container_scalar);
         let result = crate::tagged_locals::emit_contains(context, builder, module, rt, &slot, *negate, container_scalar);

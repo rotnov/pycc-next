@@ -162,6 +162,42 @@ def pinned(text, pos):
     return out
 
 
+class Echo:
+    def __getitem__(self, key):
+        return key
+
+
+def keyed(obj, n):
+    # A tagged index into an object whose `__getitem__` sees the key: the
+    # key it gets is the local's own object, as in CPython.
+    n += 1
+    saved = obj[n]
+    return saved is n, saved
+
+
+def unbound(src, flag, kind):
+    # Every word read of a tagged local that may be unbound raises
+    # `UnboundLocalError`, as an object read does.
+    if flag:
+        c = src[0]
+        i = kind - kind
+        i += 1
+    if kind == 0:
+        return c == "x"
+    if kind == 1:
+        return src[i]
+    if kind == 2:
+        return i < 3
+    if kind == 3:
+        return c in frozenset("xy")
+    if kind == 4:
+        return src[i : i + 1]
+    if kind == 5:
+        i += 1
+        return i
+    return src.startswith("a", i)
+
+
 def leaked(n):
     pos = n
     pos += 1
@@ -201,6 +237,13 @@ def main():
     print(counter(10), counter(2**62 - 3))
     print(leaked(300))
     print(pinned("".join(["glo", "bal"]), 0), pinned("".join(["glo", "bal"]), -3))
+    print(keyed(Echo(), 99999), keyed(Echo(), 5), keyed([0] * 400, 299), keyed("abcdefgh", 5), keyed({100000: "v"}, 99999))
+    for kind in range(7):
+        print(unbound("abc", True, kind))
+        try:
+            unbound("abc", False, kind)
+        except NameError as error:
+            print("NameError", error)
     for args in [(-1, 1), (2**62 - 2, 1), (0.5, 1), (True, 1), (5, -2), (2**63, -2**62)]:
         print(compares(*args))
 

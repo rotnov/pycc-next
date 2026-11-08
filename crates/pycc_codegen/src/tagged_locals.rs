@@ -15,12 +15,13 @@
 //! A tagged word is made only where a value is produced: `x = x + y` or
 //! `x = x - y` ([`emit_rebinding`]) and `c = s[i]` of an exact ASCII `str`
 //! ([`emit_char_load`]). It is consumed as a word only where its value is
-//! read: an index ([`emit_subscript`]), a comparison with a one-character
+//! read: an index into an exact sequence ([`emit_subscript`]), a comparison with a one-character
 //! literal ([`emit_eq_char`]) or, in a condition, with an `int` literal
 //! ([`emit_compare_int`]), `c in frozenset` ([`emit_contains`]), and the
-//! two producers' operands. Every other read is an object read
-//! ([`read_object`]): the word is boxed -- `int(v)` (a cached object for
-//! `-5..=256`, as CPython's own result), or CPython's cached
+//! two producers' operands, each after the unbound-local check an object
+//! read makes ([`require_bound`]). Every other read is an object read
+//! ([`read_object`]): the word is boxed -- `int(v)` (`PyLong_FromLongLong`,
+//! so a cached object where CPython caches one), or CPython's cached
 //! one-character `str` -- and the box is written back into the slot, which
 //! owns it, so every later read of the same value sees the same object, as
 //! a CPython local would. A release of a tagged slot (a store, the
@@ -224,6 +225,23 @@ pub(crate) fn tagged_read<'ctx>(
         return None;
     };
     tagged_slot(rt, locals, name)
+}
+
+/// Raises `UnboundLocalError` when `expr`, a read of a tagged local, may
+/// find its slot unbound: every word read runs this before it loads the
+/// word, as `emit_name_expr` does for an object read.
+pub(crate) fn require_bound<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    expr: &MirExpr,
+    slot: &StorageSlot<'ctx>,
+) {
+    let MirExpr::Name { name, .. } = expr else {
+        unreachable!("a tagged read is a name")
+    };
+    crate::expr::name_read::emit_bound_check(context, builder, module, rt, name, slot);
 }
 
 /// The slot of `name` when it is a tagged local.
@@ -440,7 +458,10 @@ pub(crate) fn int_operand<'ctx>(
     match operand {
         MirExpr::IntLiteral(literal) => context.i64_type().const_int(*literal as u64, true),
         _ => match tagged_read(rt, locals, operand) {
-            Some(slot) => fast.tagged_int(load_word(context, builder, &slot), name),
+            Some(slot) => {
+                require_bound(context, builder, module, rt, operand, &slot);
+                fast.tagged_int(load_word(context, builder, &slot), name)
+            }
             None => {
                 let object = expect_object(emit_expr(context, builder, module, rt, user_functions, locals, operand));
                 // A pinned read (`operand_pin`) took a reference; its
@@ -478,6 +499,7 @@ pub(crate) fn emit_rebinding<'ctx>(
     let MirExpr::ObjBinOp { left, in_place, .. } = value else {
         unreachable!("rebinding admitted it")
     };
+    require_bound(context, builder, module, rt, left, &slot);
     let in_range = |v: IntValue<'ctx>, label: &str| {
         let biased = builder
             .build_int_add(v, i64_const(context, INT_BOUND), label)
@@ -636,8 +658,11 @@ pub(crate) fn expect_object(scalar: Scalar<'_>) -> PointerValue<'_> {
     object
 }
 
-/// `base[index]` for a tagged `index`, `base` evaluated: a small `int`'s
-/// word is a native `int` key, anything else the key's object.
+/// `base[index]` for a tagged `index`, `base` evaluated. A small `int`'s
+/// word is the native `int` key of an exact `list`, `tuple`, `str`,
+/// `bytes` or `bytearray`, which index with it and keep no reference to
+/// it. Any other base (a `__getitem__` that may keep or return its key)
+/// gets the local's own object ([`read_object`]), as CPython passes it.
 pub(crate) fn emit_subscript<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -646,9 +671,11 @@ pub(crate) fn emit_subscript<'ctx>(
     base: Scalar<'ctx>,
     slot: &StorageSlot<'ctx>,
 ) -> Scalar<'ctx> {
+    use crate::fast_ops::{BYTEARRAY, BYTES, LIST, STR, TUPLE};
     let subscript = |key: Scalar<'ctx>| -> BasicValueEnum<'ctx> {
         expect_object(crate::foreign_call::emit_subscript(context, builder, module, rt, base, key, false)).into()
     };
+    let by_object = || subscript(Scalar::Object(read_object(context, builder, module, rt, slot)));
     let value = split(
         context,
         builder,
@@ -656,7 +683,20 @@ pub(crate) fn emit_subscript<'ctx>(
         rt,
         slot,
         1,
-        |word| subscript(Scalar::Int(word)),
+        |word| match base {
+            Scalar::Object(sequence) => crate::fast_ops::guarded(
+                context,
+                builder,
+                module,
+                "tagged_subscript",
+                |fast| {
+                    fast.require_class_in(sequence, &[LIST, TUPLE, STR, BYTES, BYTEARRAY], "tagged_subscript_base");
+                    subscript(Scalar::Int(word))
+                },
+                by_object,
+            ),
+            _ => by_object(),
+        },
         |object| subscript(Scalar::Object(object)),
     );
     Scalar::Object(value.into_pointer_value())
