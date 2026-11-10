@@ -278,15 +278,20 @@ pub(super) fn release_if_produced<'ctx>(
 /// The exception being raised is set aside while they run
 /// ([`releasing_aside`]).
 pub(super) fn release_pending<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>) {
-    let snapshot: Vec<PendingObject<'ctx>> = rt.exceptions.pending_object_releases.borrow().clone();
-    if snapshot.is_empty() {
+    if rt.exceptions.pending_object_releases.borrow().is_empty() {
         return;
     }
-    releasing_aside(builder, rt, || {
-        for object in snapshot.into_iter().rev() {
-            emit_release(builder, object);
-        }
-    });
+    releasing_aside(builder, rt, || release_held(builder, rt));
+}
+
+/// Emits a release of every currently held operand, innermost first, where
+/// no exception is pending: a lazy miss (`exception::lazy_miss`) leaves
+/// its statement as an exception edge does, with nothing to set aside.
+pub(super) fn release_held<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>) {
+    let snapshot: Vec<PendingObject<'ctx>> = rt.exceptions.pending_object_releases.borrow().clone();
+    for object in snapshot.into_iter().rev() {
+        emit_release(builder, object);
+    }
 }
 
 /// Emits `releases` with the pending exception set aside: taken before and
@@ -295,6 +300,11 @@ pub(super) fn release_pending<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>) {
 /// generator's `finally`) a release runs neither sees it nor loses it. A
 /// compiled finalizer would otherwise read the pending state as its own
 /// failure. Only on an exception edge, where an exception is pending.
+///
+/// Every other release made while an exception is pending -- a frame's
+/// locals, a `try` clause's slots, an operand released before its
+/// operation's failure is tested -- frees its object through the shim's
+/// `pycc_ext_obj_dealloc`, which sets the exception aside itself.
 fn releasing_aside<'ctx>(builder: &Builder<'ctx>, rt: &RtFns<'ctx>, releases: impl FnOnce()) {
     let raised = builder
         .build_call(rt.exception_take, &[], "unwind_exc")

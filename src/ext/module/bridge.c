@@ -52,6 +52,38 @@
  * same two forms (`pycc_codegen::object_rc`). A closing brace here carries a
  * comment: `shim_split` reads a bare column-0 `}` as a shim function's end.
  */
+/*
+ * Freeing an object can run compiled code: its `__del__`, a suspended
+ * generator's `finally`, a weak reference's callback. Compiled code reads
+ * pycc's pending exception as its own failure, so an object freed while
+ * one is pending -- a temporary or a local an exception edge releases, the
+ * exception a handler drops when another leaves it and the key that one
+ * holds, the argument of a call that failed -- is freed with that
+ * exception set aside and made pending again after, as CPython's unwinding
+ * holds the exception outside the thread's state while it drops a frame's
+ * values.
+ *
+ * Every release the shim and the generated code make frees its object
+ * through `pycc_ext_obj_dealloc` (`pycc_decref` below,
+ * `pycc_codegen::object_rc`): `_Py_Dealloc` itself, which `pycc_rt` swaps
+ * for `pycc_ext_obj_dealloc_aside` while any thread has an exception
+ * pending (`pycc_rt_exception_dealloc_install`, called when the module is
+ * executed). So no release, wherever it is, tests for a pending exception.
+ */
+extern void *pycc_rt_exception_take(void);
+extern void pycc_rt_exception_restore(void *obj);
+typedef void (*PyccExtDealloc)(PyObject *);
+static PyccExtDealloc pycc_ext_obj_dealloc = _Py_Dealloc;
+
+static void pycc_ext_obj_dealloc_aside(PyObject *op)
+{
+    /* NULL when the pending exception is another thread's. */
+    void *aside = pycc_rt_exception_take();
+
+    _Py_Dealloc(op);
+    pycc_rt_exception_restore(aside);
+}
+
 #if !defined(Py_GIL_DISABLED) && !defined(Py_REF_DEBUG) && SIZEOF_VOID_P == 8 && !PY_BIG_ENDIAN
 #define PYCC_INLINE_RC 1
 Py_LOCAL_INLINE(void) pycc_incref(PyObject *op) {
@@ -66,7 +98,7 @@ Py_LOCAL_INLINE(void) pycc_decref(PyObject *op) {
         return;
     }
     if (--*count == 0) {
-        _Py_Dealloc(op);
+        pycc_ext_obj_dealloc(op);
     }
 } /* pycc_decref */
 Py_LOCAL_INLINE(void) pycc_xincref(PyObject *op) {
@@ -93,6 +125,24 @@ Py_LOCAL_INLINE(PyObject *) pycc_newref(PyObject *op) {
 #define Py_XINCREF(op) pycc_xincref(_PyObject_CAST(op))
 #define Py_XDECREF(op) pycc_xdecref(_PyObject_CAST(op))
 #define Py_NewRef(op) pycc_newref(_PyObject_CAST(op))
+#else
+/* The builds that keep libpython's own counting free an object the same
+ * way while an exception is pending. `Py_DecRef` accepts NULL. */
+Py_LOCAL_INLINE(void) pycc_decref_aside(PyObject *op) {
+    void *aside;
+
+    if (pycc_ext_obj_dealloc == _Py_Dealloc) {
+        Py_DecRef(op);
+        return;
+    }
+    aside = pycc_rt_exception_take();
+    Py_DecRef(op);
+    pycc_rt_exception_restore(aside);
+} /* pycc_decref_aside */
+#undef Py_DECREF
+#undef Py_XDECREF
+#define Py_DECREF(op) pycc_decref_aside(_PyObject_CAST(op))
+#define Py_XDECREF(op) pycc_decref_aside(_PyObject_CAST(op))
 #endif
 
 /*

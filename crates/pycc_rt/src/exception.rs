@@ -178,16 +178,67 @@ pub static pycc_rt_exc_pending_threads: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 use pycc_rt_exc_pending_threads as PENDING_THREADS;
 
+/// The `ext` shim's dealloc pointer and the two functions it holds
+/// ([`pycc_rt_exception_dealloc_install`]): null in a native program.
+static DEALLOC_SLOT: std::sync::atomic::AtomicPtr<*mut std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static DEALLOC_PLAIN: std::sync::atomic::AtomicPtr<std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static DEALLOC_ASIDE: std::sync::atomic::AtomicPtr<std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+/// Installs the `ext` shim's dealloc pointer `slot`, through which it and
+/// the generated code free a CPython object: `slot` holds `plain`
+/// (`_Py_Dealloc`) while no thread has an exception pending and `aside`
+/// while one has. `aside` frees the object with the calling thread's
+/// pending exception set aside, since the object's finalizer may be
+/// compiled code, which would read it as its own failure
+/// (`src/ext/module/bridge.c`). The swap is made where the pending state
+/// changes, on the exception path only, so no release tests for a pending
+/// exception. Called by the shim when its module is executed.
+///
+/// # Safety
+///
+/// `slot` must point to a pointer that outlives the process's use of this
+/// runtime.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_dealloc_install(
+    slot: *mut *mut std::ffi::c_void,
+    plain: *mut std::ffi::c_void,
+    aside: *mut std::ffi::c_void,
+) {
+    use std::sync::atomic::Ordering::Relaxed;
+    DEALLOC_PLAIN.store(plain, Relaxed);
+    DEALLOC_ASIDE.store(aside, Relaxed);
+    DEALLOC_SLOT.store(slot, Relaxed);
+    pending_changed(PENDING_THREADS.load(Relaxed) != 0);
+}
+
+/// Points the shim's dealloc pointer at the function for the new state.
+fn pending_changed(any: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let slot = DEALLOC_SLOT.load(Relaxed);
+    if !slot.is_null() {
+        let dealloc = if any { &DEALLOC_ASIDE } else { &DEALLOC_PLAIN };
+        // SAFETY: `pycc_rt_exception_dealloc_install`'s contract.
+        unsafe { *slot = dealloc.load(Relaxed) };
+    }
+}
+
 fn set_state(state: ExceptionState) {
-    let was = EXCEPTION_STATE.with(|cell| cell.replace(state)).active;
-    match (was != 0, state.active != 0) {
-        (false, true) => {
-            PENDING_THREADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    use std::sync::atomic::Ordering::Relaxed;
+    let was = EXCEPTION_STATE.with(|cell| cell.replace(state)).active != 0;
+    let is = state.active != 0;
+    if was != is {
+        let before = if is {
+            PENDING_THREADS.fetch_add(1, Relaxed)
+        } else {
+            PENDING_THREADS.fetch_sub(1, Relaxed)
+        };
+        // The first thread to have one pending, or the last to have none.
+        if before == usize::from(!is) {
+            pending_changed(is);
         }
-        (true, false) => {
-            PENDING_THREADS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        }
-        _ => {}
     }
     pycc_rt_exc_pending.store(state.active, std::sync::atomic::Ordering::Relaxed);
 }
@@ -376,9 +427,9 @@ pub extern "C" fn pycc_rt_exception_raise(obj: *mut PyExceptionObj) {
 
 /// Makes `obj`, taken by [`pycc_rt_exception_take`], pending again, taking
 /// over the caller's reference; nothing when `obj` is null (nothing was
-/// pending when it was taken). Generated code sets a pending exception
-/// aside with the pair while an exception edge releases the values it
-/// unwinds, whose finalizers must not see it.
+/// pending when it was taken). The `ext` shim sets a pending exception
+/// aside with the pair while it frees an object (`pycc_ext_obj_dealloc`),
+/// whose finalizer may be compiled code and must not see it.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_restore(obj: *mut PyExceptionObj) {
     if !obj.is_null() {

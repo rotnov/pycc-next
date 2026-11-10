@@ -156,8 +156,9 @@ fn active_entry<'ctx>(rt: &RtFns<'ctx>) -> Option<(BasicBlock<'ctx>, PointerValu
 /// consumes) through `pycc_ext_obj_getitem_lazy` when a lazy-miss entry is
 /// active, and answers `None`, emitting nothing, otherwise. On a lazy miss
 /// the helper has moved the key into the entry's key slot, the pending
-/// temporaries are released as an exception edge releases them, and the
-/// code branches to the entry. The result is otherwise the value or
+/// temporaries are released as an exception edge releases them (with no
+/// exception to set aside: none is pending), and the code branches to the
+/// entry. The result is otherwise the value or
 /// `NULL` with CPython's exception set, which the caller routes.
 pub(crate) fn emit_subscript<'ctx>(
     context: &'ctx Context,
@@ -202,7 +203,7 @@ pub(crate) fn emit_subscript<'ctx>(
     for word in snapshot {
         emit_bigint_refcount_call(context, builder, rt, word, BigIntRefcount::Release);
     }
-    crate::object_release::release_pending(builder, rt);
+    crate::object_release::release_held(builder, rt);
     crate::heap_rc::release_pending(context, builder, rt);
     builder
         .build_unconditional_branch(entry)
