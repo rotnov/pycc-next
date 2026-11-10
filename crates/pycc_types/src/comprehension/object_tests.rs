@@ -115,6 +115,7 @@ fn an_ill_typed_iterable_reports_its_own_error() {
 fn object_comprehension(iterable: pycc_hir::HirExpr) -> pycc_hir::HirExpr {
     pycc_hir::HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
         var: "_v0".to_string(),
+        unpacks: false,
         iter: pycc_hir::CompIter::Iterable(Box::new(iterable)),
         cond: None,
         elt: pycc_hir::CompElt::List(pycc_hir::HirExpr::Name("_v0".to_string())),

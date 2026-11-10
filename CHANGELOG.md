@@ -28,6 +28,20 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- Non-strict generic bodies (`docs/design/compile-little.md`, sections 2.6 and 2.7;
+  `PYCC_NO_FAST_OPS=1` turns each off):
+  - `try: d[k]` with a first handler that catches `KeyError` and neither binds the
+    exception nor re-raises it: a key missing from an exact `dict` goes straight to the
+    handler, with no exception made; the handler keeps the key until it is left. Other
+    mappings and other failures raise as before.
+  - `tuple(a)`, `list(a)` and `sorted(a)` of an object no longer go through a call of the
+    builtin when it is CPython's own.
+  - A comprehension that unpacks its item (`for k, v in d.items()`) over a dict's own
+    `items()` releases each item before it advances, so the iterator reuses its pair
+    tuple.
+  With pydantic's three hottest schema functions compiled, the schema phase measures
+  about 1.12x CPython locally (1.07x before); `ConfigWrapper.__getattr__` replays at
+  14.2M instructions against 46.3M before.
 - Generic bodies keep a scanner's `int` position and current one-character `str` as
   machine words (`docs/design/compile-little.md`, "Tagged locals"): an `object` local
   rebound as `x = x ± y` or `c = s[i]` and read as a word (an index into an exact

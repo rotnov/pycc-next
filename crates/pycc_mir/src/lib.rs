@@ -144,6 +144,9 @@ pub struct RtCallExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirComprehension {
     pub var: String,
+    /// [`pycc_hir::HirComprehension::unpacks`]: the source unpacked each
+    /// item, so the comprehension reads it only by item.
+    pub unpacks: bool,
     pub var_ty: Ty,
     pub source: CompSource,
     pub cond: Option<MirExpr>,

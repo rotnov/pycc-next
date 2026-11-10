@@ -13,6 +13,7 @@ mod reserved;
 mod string_annotation;
 mod unused_defs;
 pub use unused_defs::drop_unused_defs;
+pub use desugar::{UNPACK_TARGET_PREFIX, is_unpack_target};
 pub use desugar::{
     start_program, module_lambda_aliases, set_intrinsic_hints, instance_default_classes,
     CLOSURE_MARKER, ExtSignature, INFER_MARKER, body_yields, desugar, desugar_computed_aug_target, desugar_with, expand_dataclasses,

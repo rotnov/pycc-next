@@ -25,6 +25,7 @@ pub(super) fn object_comp_assign(
 ) -> Option<MirStmt> {
     let comp = pycc_hir::HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
         var: var.to_string(),
+        unpacks: false,
         iter: iter.clone(),
         cond: cond.cloned(),
         elt,

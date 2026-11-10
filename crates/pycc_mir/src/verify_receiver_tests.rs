@@ -267,6 +267,7 @@ fn set_comp_stmt(ops: Box<SetElementOps>) -> MirStmt {
 fn set_comp_expr(ops: Box<SetElementOps>) -> MirStmt {
     MirStmt::ExprStmt(MirExpr::Comprehension(Box::new(crate::MirComprehension {
         var: "v".to_string(),
+        unpacks: false,
         var_ty: Ty::Int,
         source: CompSource::Set("s".to_string()),
         cond: None,

@@ -18,6 +18,8 @@
  * `None` that the program never sees. Arguments are borrowed.
  */
 
+int pycc_ext_fast_ops_enabled(void);
+
 /* `None`, after bridging the pending CPython exception. */
 static PyObject *pycc_ext_stdlib_failed(void)
 {
@@ -351,10 +353,71 @@ PyObject *pycc_ext_obj_insort_right(PyObject *a, PyObject *x)
     return pycc_ext_stdlib_call("bisect", "insort_right", a, x);
 }
 
-/* `tuple(a)`, `list(a)`, `sorted(a)` and `sum(a)` of a CPython iterable. */
+/* How many `tuple(a)`, `list(a)` and `sorted(a)` calls ran without the
+ * call through the builtin, which the tests read with `ctypes`
+ * (`RUNTIME_COUNTERS` in `src/ext_build/link.rs`). */
+static long long pycc_ext_direct_builtin_count = 0;
+
+long long pycc_ext_direct_builtins(void)
+{
+    return pycc_ext_direct_builtin_count;
+}
+
+/* Whether `builtins.<name>`, read once on the first call as
+ * `pycc_ext_stdlib_call` reads it, is CPython's own: the type `own` when
+ * given, else the builtin function of that name. `*state` keeps the answer
+ * (1 yes, 2 no). Called with no exception pending: the lookup clears what
+ * it raises itself. */
+static int pycc_ext_builtin_is_own(const char *name, PyObject *own, int *state)
+{
+    if (*state == 0) {
+        PyObject *builtins = PyImport_ImportModule("builtins");
+        PyObject *found = builtins == NULL ? NULL : PyObject_GetAttrString(builtins, name);
+        int same = 0;
+
+        if (found != NULL && own != NULL) {
+            same = found == own;
+        } else if (found != NULL && PyCFunction_Check(found)
+                   && PyCFunction_GetSelf(found) == builtins) {
+            PyObject *found_name = PyObject_GetAttrString(found, "__name__");
+
+            same = found_name != NULL && PyUnicode_Check(found_name)
+                   && PyUnicode_CompareWithASCIIString(found_name, name) == 0;
+            Py_XDECREF(found_name);
+        }
+        PyErr_Clear();
+        Py_XDECREF(found);
+        Py_XDECREF(builtins);
+        *state = same ? 1 : 2;
+    }
+    return *state == 1 && pycc_ext_fast_ops_enabled();
+}
+
+/* `tuple(a)`, `list(a)` and `sorted(a)` do what the builtins do
+ * (`PySequence_Tuple`, `PySequence_List`, then `list.sort()` for `sorted`)
+ * without the call through them, when the builtin read on the first call
+ * is CPython's own; otherwise, and with the fast paths off, they call it.
+ * Each makes the copy the builtin makes, even of a list only the caller
+ * holds: while `sorted` sorts its copy the argument stays whole, which code
+ * a comparison runs can see (`gc.get_referrers`) and which a failed sort
+ * leaves in its own order for its elements' finalizers
+ * (docs/design/compile-little.md, section 2.6). */
 PyObject *pycc_ext_obj_tuple(PyObject *a)
 {
-    return pycc_ext_stdlib_call("builtins", "tuple", a, NULL);
+    static int own;
+    PyObject *result;
+
+    if (a == NULL) {
+        /* The argument's producer failed: its exception is pending, and
+         * the builtin must not be looked up over it. */
+        return pycc_ext_stdlib_failed();
+    }
+    if (!pycc_ext_builtin_is_own("tuple", (PyObject *)&PyTuple_Type, &own)) {
+        return pycc_ext_stdlib_call("builtins", "tuple", a, NULL);
+    }
+    pycc_ext_direct_builtin_count++;
+    result = PySequence_Tuple(a);
+    return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
 PyObject *pycc_ext_obj_iter(PyObject *a)
@@ -377,7 +440,41 @@ PyObject *pycc_ext_obj_bytes(PyObject *latin1)
 
 PyObject *pycc_ext_obj_list(PyObject *a)
 {
-    return pycc_ext_stdlib_call("builtins", "list", a, NULL);
+    static int own;
+    PyObject *result;
+
+    if (a == NULL) {
+        /* The argument's producer failed: its exception is pending, and
+         * the builtin must not be looked up over it. */
+        return pycc_ext_stdlib_failed();
+    }
+    if (!pycc_ext_builtin_is_own("list", (PyObject *)&PyList_Type, &own)) {
+        return pycc_ext_stdlib_call("builtins", "list", a, NULL);
+    }
+    pycc_ext_direct_builtin_count++;
+    result = PySequence_List(a);
+    return result == NULL ? pycc_ext_stdlib_failed() : result;
+}
+
+PyObject *pycc_ext_obj_sorted(PyObject *a)
+{
+    static int own;
+    PyObject *result;
+
+    if (a == NULL) {
+        /* The argument's producer failed: its exception is pending, and
+         * the builtin must not be looked up over it. */
+        return pycc_ext_stdlib_failed();
+    }
+    if (!pycc_ext_builtin_is_own("sorted", NULL, &own)) {
+        return pycc_ext_stdlib_call("builtins", "sorted", a, NULL);
+    }
+    pycc_ext_direct_builtin_count++;
+    result = PySequence_List(a);
+    if (result != NULL && PyList_Sort(result) < 0) {
+        Py_CLEAR(result);
+    }
+    return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
 PyObject *pycc_ext_obj_dict(PyObject *a)
@@ -388,11 +485,6 @@ PyObject *pycc_ext_obj_dict(PyObject *a)
 PyObject *pycc_ext_obj_set(PyObject *a)
 {
     return pycc_ext_stdlib_call("builtins", "set", a, NULL);
-}
-
-PyObject *pycc_ext_obj_sorted(PyObject *a)
-{
-    return pycc_ext_stdlib_call("builtins", "sorted", a, NULL);
 }
 
 PyObject *pycc_ext_obj_sum(PyObject *a)

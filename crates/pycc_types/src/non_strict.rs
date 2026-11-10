@@ -816,6 +816,7 @@ fn widen_block(
                 let value =
                     pycc_hir::HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
                         var: var.clone(),
+                        unpacks: false,
                         iter: iter.clone(),
                         cond: cond.as_deref().cloned(),
                         elt,

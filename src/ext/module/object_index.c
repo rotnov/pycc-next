@@ -74,6 +74,57 @@ PyObject *pycc_ext_obj_getitem(PyObject *o, PyObject *k)
 }
 
 /*
+ * `o[k]` directly inside a `try` whose first handler catches a plain
+ * `KeyError` and cannot see the exception (docs/design/compile-little.md, section 2.7;
+ * `crates/pycc_codegen/src/exception/lazy_miss.rs`): as
+ * `pycc_ext_obj_getitem`, but a key missing from an exact `dict` returns
+ * `PYCC_EXT_LAZY_MISS` with no exception made, and the compiled code goes
+ * straight to that handler. An exact dict raises nothing else on a miss
+ * (no `__missing__`), so the `KeyError` it would have raised is the only
+ * thing skipped. Any other mapping, and any failure of the lookup itself
+ * (an unhashable key), raises as `pycc_ext_obj_getitem` does. Consumes `k`,
+ * except on a lazy miss: `k` then moves to `*missed`, which the handler
+ * releases when it is left, where the `KeyError` holding it would have gone.
+ */
+#define PYCC_EXT_LAZY_MISS ((PyObject *)1)
+
+int pycc_ext_fast_ops_enabled(void);
+
+/* How many lookups answered `PYCC_EXT_LAZY_MISS`, which the tests read with
+ * `ctypes` (`RUNTIME_COUNTERS` in `src/ext_build/link.rs`). */
+static long long pycc_ext_lazy_miss_count = 0;
+
+long long pycc_ext_lazy_misses(void)
+{
+    return pycc_ext_lazy_miss_count;
+}
+
+PyObject *pycc_ext_obj_getitem_lazy(PyObject *o, PyObject *k, PyObject **missed)
+{
+    PyObject *result;
+
+    /* With the fast paths off (`PYCC_NO_FAST_OPS=1`, `fast_ops.c`) every
+     * miss raises, which is how the tests compare the two paths. */
+    if (o == NULL || k == NULL || !PyDict_CheckExact(o) || !pycc_ext_fast_ops_enabled()) {
+        return pycc_ext_obj_getitem(o, k);
+    }
+    switch (PyDict_GetItemRef(o, k, &result)) {
+    case 1:
+        break;
+    case 0:
+        /* The handler keeps the key, as the `KeyError` would have. */
+        pycc_ext_lazy_miss_count++;
+        *missed = k;
+        return PYCC_EXT_LAZY_MISS;
+    default:
+        result = NULL;
+        break;
+    }
+    Py_DECREF(k);
+    return result;
+}
+
+/*
  * `__pycc_fallback_ns["name"]`: a module global that non-strict fallback
  * code binds, read by compiled code from the module's namespace dict. As
  * `pycc_ext_obj_getitem` (consuming the packed key), but a name the module

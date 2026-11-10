@@ -299,6 +299,7 @@ fn module_of(items: Vec<HirStmt>) -> HirModule {
 fn comp(var: &str, iter: CompIter, cond: Option<HirExpr>, elt: pycc_hir::CompElt) -> HirExpr {
     HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
         var: var.to_string(),
+        unpacks: false,
         iter,
         cond,
         elt,
@@ -333,6 +334,7 @@ fn an_expression_list_comprehension_lowers_its_filter_and_element_against_the_lo
     };
     let expected = MirExpr::Comprehension(Box::new(MirComprehension {
         var: "0comp_i".to_string(),
+        unpacks: false,
         var_ty: Ty::Int,
         source: CompSource::Range {
             start: MirExpr::IntLiteral(0),

@@ -77,6 +77,11 @@ pub(crate) fn emit_try<'ctx>(
     // Emit the try body. After it completes, check for an active
     // exception and branch to handler dispatch or else.
     rt.exceptions.targets.borrow_mut().push(handler_dispatch_bb);
+    // A `KeyError` this handler cannot see is never made (`lazy_miss`).
+    let lazy_handler = super::lazy_miss::eligible_handler(handlers);
+    if lazy_handler.is_some() {
+        super::lazy_miss::open(context, builder, rt, function, handler_dispatch_bb);
+    }
     emit_body(
         context,
         builder,
@@ -88,6 +93,7 @@ pub(crate) fn emit_try<'ctx>(
         expected_return_ty.clone(),
         finally_stack,
     )?;
+    let lazy_entry = lazy_handler.and_then(|_| super::lazy_miss::close(rt));
     rt.exceptions.targets.borrow_mut().pop();
     // #382: A `raise` inside the body terminates the block with
     // `unreachable`. Erase it so the exception check can run here.
@@ -215,6 +221,7 @@ pub(crate) fn emit_try<'ctx>(
                 expected_return_ty.clone(),
                 finally_stack,
                 finally_bb,
+                lazy_entry.filter(|_| lazy_handler == Some(i)),
             )?;
         }
     }
@@ -302,16 +309,42 @@ fn emit_handler<'ctx>(
     expected_return_ty: pycc_mir::Ty,
     finally_stack: &mut Vec<FinallyTarget<'ctx>>,
     finally_bb: inkwell::basic_block::BasicBlock<'ctx>,
+    lazy_entry: Option<super::lazy_miss::LazyMiss<'ctx>>,
 ) -> Result<(), String> {
     let depth = owned_slots::depth(rt);
-    let exc_val = builder
+    let mut exc_val = builder
         .build_call(rt.exception_take, &[], "handler_exc_val")
         .expect("build_call should not fail for exception_take")
         .try_as_basic_value()
         .expect_basic("pycc_rt_exception_take returns a pointer")
         .into_pointer_value();
+    if let Some(lazy) = &lazy_entry {
+        let entry = lazy.entry;
+        // A lazy miss (`lazy_miss`) joins here with no exception: the
+        // handler holds a null one, which no statement of it reads.
+        let taken = builder.get_insert_block().expect("the builder is positioned");
+        let function = taken.get_parent().expect("a block belongs to a function");
+        let join = context.append_basic_block(function, "handler_join");
+        builder
+            .build_unconditional_branch(join)
+            .expect("build_unconditional_branch should not fail");
+        builder.position_at_end(entry);
+        builder
+            .build_unconditional_branch(join)
+            .expect("build_unconditional_branch should not fail");
+        builder.position_at_end(join);
+        let ptr = context.ptr_type(inkwell::AddressSpace::default());
+        let phi = builder.build_phi(ptr, "handler_exc").expect("build_phi should not fail");
+        phi.add_incoming(&[(&exc_val, taken), (&ptr.const_null(), entry)]);
+        exc_val = phi.as_basic_value().into_pointer_value();
+    }
     let saved_exc = owned_slots::new_slot(context, builder, "handler_saved_exc");
     owned_slots::hold(builder, rt, saved_exc, exc_val);
+    if let Some(lazy) = &lazy_entry {
+        // The key a lazy miss kept, released wherever the handler is left,
+        // as the `KeyError` would have released it.
+        owned_slots::hold_object(rt, lazy.key_slot, crate::object_release::release_fn(context, module));
+    }
     if let Some(binding_name) = &handler.binding_name {
         let exc_slot = owned_slots::new_slot(context, builder, binding_name);
         builder

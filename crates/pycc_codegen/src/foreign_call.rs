@@ -800,6 +800,19 @@ pub(super) fn emit_subscript<'ctx>(
                 .try_as_basic_value()
                 .expect_basic("pycc_ext_obj_getitem_int returns PyObject *");
         }
+        // A miss caught where nothing sees its `KeyError` (`lazy_miss`).
+        if !namespace
+            && let Some(result) = crate::exception::lazy_miss::emit_subscript(
+                context,
+                builder,
+                module,
+                rt,
+                base_ptr,
+                || emit_pack(context, builder, module, index, "foreign_subscript_key"),
+            )
+        {
+            return result.into();
+        }
         let key = emit_pack(context, builder, module, index, "foreign_subscript_key");
         let getitem = shim_fn(
             module,

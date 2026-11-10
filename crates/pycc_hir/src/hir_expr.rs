@@ -559,6 +559,11 @@ pub enum HirExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirComprehension {
     pub var: String,
+    /// Whether the source unpacked each item (`for k, v in pairs`), which
+    /// desugaring rewrote to this one name read by item
+    /// (`pycc_ast::UNPACK_TARGET_PREFIX`): the comprehension never uses the
+    /// item whole.
+    pub unpacks: bool,
     pub iter: CompIter,
     pub cond: Option<HirExpr>,
     pub elt: CompElt,

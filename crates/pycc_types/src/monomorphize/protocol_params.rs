@@ -876,6 +876,7 @@ pub(crate) fn rewrite_protocol_calls_in_expr(
         HirExpr::Comprehension(comp) => {
             let HirComprehension {
                 var,
+                unpacks: _,
                 iter,
                 cond,
                 elt,

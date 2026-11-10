@@ -32,6 +32,10 @@
 //! Each item is a new reference the loop variable's slot owns, exactly as
 //! `MirStmt::ForObject`'s target: the next trip releases it, and the loop's
 //! exit releases the last one.
+//! An item the source unpacked (`for k, v in d.items()`) is released at the
+//! end of its own trip instead when the iterator is a dict's own
+//! `items()` (`pycc_ext_obj_iter_recycles`), so the iterator reuses its
+//! pair tuple, as it does in CPython, where the pair is gone once unpacked.
 //! A pycc `int` temporary built by the condition or the element is released
 //! once it has been tested or packed, since the packers borrow their operand,
 //! and so is a produced CPython object condition or element (`if x.ok()`,
@@ -49,13 +53,19 @@ use super::{
 };
 use super::{Scalar, emit_expr, truthy};
 use inkwell::values::PointerValue;
+
+/// `int pycc_ext_obj_iter_recycles(PyObject *it)`: whether `it` is an exact
+/// dict's `items()` iterator.
+const EXT_OBJ_ITER_RECYCLES_SYMBOL: &str = "pycc_ext_obj_iter_recycles";
 use pycc_mir::MirExpr;
 
 /// Emits the comprehension and returns its result, a `Scalar::Object`.
-/// `var_ptr` is the loop variable's pointer slot, already allocated and
-/// visible in `cx.locals`; `iterable` is the source expression.
+/// `unpacks` is [`pycc_mir::MirComprehension::unpacks`]; `var_ptr` is the
+/// loop variable's pointer slot, already allocated and visible in
+/// `cx.locals`; `iterable` is the source expression.
 pub(super) fn emit_object_comprehension<'ctx>(
     cx: &CompCx<'_, 'ctx>,
+    unpacks: bool,
     var_ptr: PointerValue<'ctx>,
     iterable: &MirExpr,
     cond: Option<&MirExpr>,
@@ -128,7 +138,13 @@ pub(super) fn emit_object_comprehension<'ctx>(
     let held_collection =
         crate::object_release::hold_new_reference(context, module, rt, collection);
 
+    // Whether the item is released before the loop advances: only an item
+    // the source unpacked (`for k, v in d.items()`), over a dict's own
+    // `items()` iterator.
+    let recycles = unpacks.then(|| emit_iter_recycles(context, builder, module, iterator));
     let lp = foreign_call::emit_iter_header(context, builder, module, rt, iterator);
+    // Where a trip ends, kept or filtered out, before the loop advances.
+    let latch_bb = context.append_basic_block(edge.function(), "objcomp_latch");
     // The loop variable's slot owns the item and releases the previous one
     // (`heap_rc`).
     let old = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
@@ -146,7 +162,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
         let function = edge.function();
         let keep_bb = context.append_basic_block(function, "objcomp_keep");
         builder
-            .build_conditional_branch(test, keep_bb, lp.header_bb)
+            .build_conditional_branch(test, keep_bb, latch_bb)
             .expect("build_conditional_branch should not fail for an i1 condition");
         builder.position_at_end(keep_bb);
     }
@@ -156,8 +172,27 @@ pub(super) fn emit_object_comprehension<'ctx>(
         Err((key, value)) => collect_object_pair(cx, collection, key, value),
     }
     builder
-        .build_unconditional_branch(lp.header_bb)
+        .build_unconditional_branch(latch_bb)
         .expect("build_unconditional_branch should not fail closing the loop body");
+    builder.position_at_end(latch_bb);
+    // The source unpacked the item (`for k, v in d.items()`), so CPython
+    // has dropped the pair by now: releasing it before the next advance
+    // lets a dict's own `items()` iterator hand its pair tuple out again
+    // instead of making a new one, as it does there. Only that iterator:
+    // any other may run code as it advances, which would see the item go
+    // early. An item the source binds whole lives until the next is bound,
+    // as in CPython.
+    if let Some(recycles) = recycles {
+        let release_bb = context.append_basic_block(edge.function(), "objcomp_release_item");
+        builder
+            .build_conditional_branch(recycles, release_bb, lp.header_bb)
+            .expect("build_conditional_branch should not fail for an i1 condition");
+        builder.position_at_end(release_bb);
+        release_loop_item(context, builder, rt, var_ptr);
+    }
+    builder
+        .build_unconditional_branch(lp.header_bb)
+        .expect("build_unconditional_branch should not fail closing the loop latch");
 
     builder.position_at_end(lp.after_bb);
     // The last item is released and the slot cleared, so the next run of
@@ -394,4 +429,44 @@ pub(super) fn collect_object_pair<'ctx>(
         status,
         "objcomp_collect_pair",
     );
+}
+
+/// Releases the comprehension variable's item and clears its slot.
+fn release_loop_item<'ctx>(
+    context: &'ctx inkwell::context::Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &crate::RtFns<'ctx>,
+    var_ptr: PointerValue<'ctx>,
+) {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let item = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
+    builder
+        .build_store(var_ptr, ptr.const_null())
+        .expect("build_store should not fail for the loop variable's own slot");
+    crate::heap_rc::release_old(context, builder, rt, item);
+}
+
+/// `pycc_ext_obj_iter_recycles(iterator) != 0`: whether the comprehension
+/// releases each item before it advances.
+fn emit_iter_recycles<'ctx>(
+    context: &'ctx inkwell::context::Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    iterator: PointerValue<'ctx>,
+) -> inkwell::values::IntValue<'ctx> {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let recycles = shim_fn(
+        module,
+        EXT_OBJ_ITER_RECYCLES_SYMBOL,
+        context.i32_type().fn_type(&[ptr.into()], false),
+    );
+    let answer = builder
+        .build_call(recycles, &[iterator.into()], "objcomp_recycles")
+        .expect("build_call should not fail for pycc_ext_obj_iter_recycles")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_iter_recycles returns int")
+        .into_int_value();
+    builder
+        .build_int_compare(inkwell::IntPredicate::NE, answer, context.i32_type().const_zero(), "objcomp_recycles_set")
+        .expect("build_int_compare should not fail for two i32 values")
 }

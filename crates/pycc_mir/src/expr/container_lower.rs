@@ -457,6 +457,7 @@ pub(crate) fn lower_comprehension_expr(
     };
     MirExpr::Comprehension(Box::new(MirComprehension {
         var: comp.var.clone(),
+        unpacks: comp.unpacks,
         var_ty,
         source,
         cond,

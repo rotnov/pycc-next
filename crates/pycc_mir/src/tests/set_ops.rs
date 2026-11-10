@@ -271,6 +271,7 @@ fn a_set_comprehension_of_instances_carries_the_element_ops() {
     body.push(HirStmt::ExprStmt(HirExpr::Comprehension(Box::new(
         pycc_hir::HirComprehension {
             var: s("v"),
+            unpacks: false,
             iter: pycc_hir::CompIter::Name(s("s")),
             cond: None,
             elt: pycc_hir::CompElt::Set(v()),
