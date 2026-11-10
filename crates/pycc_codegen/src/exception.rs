@@ -5,6 +5,7 @@ use super::*;
 use std::cell::{Cell, RefCell};
 
 mod finally;
+pub(crate) mod lazy_miss;
 pub(crate) mod owned_slots;
 mod try_star;
 mod try_stmt;
@@ -57,6 +58,9 @@ pub(super) struct ExceptionCodegenState<'ctx> {
     /// The exception slots live while a `try` clause runs, outermost first
     /// (`owned_slots`). Empty at every function boundary.
     pub(super) owned_slots: RefCell<Vec<PointerValue<'ctx>>>,
+    /// The `try`s whose `KeyError` handler takes lazy misses, innermost
+    /// last (`lazy_miss`).
+    pub(super) lazy_misses: RefCell<Vec<lazy_miss::LazyMiss<'ctx>>>,
 }
 
 impl ExceptionCodegenState<'_> {
@@ -70,6 +74,7 @@ impl ExceptionCodegenState<'_> {
             loop_iterators: RefCell::new(Vec::new()),
             module_exec_exit: Cell::new(None),
             owned_slots: RefCell::new(Vec::new()),
+            lazy_misses: RefCell::new(Vec::new()),
         }
     }
 }

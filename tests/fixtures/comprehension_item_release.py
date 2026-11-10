@@ -1,0 +1,197 @@
+# A comprehension over an exact dict's `items()` releases each item before
+# it advances, so the iterator hands the same pair tuple out again
+# (docs/design/compile-little.md, section 2.6). Every other iterable keeps
+# its item until the next one is bound, as CPython does: these cases print
+# when each item is finalized.
+import collections
+
+LOG = []
+
+
+class Noisy:
+    def __init__(self, name):
+        self.name = name
+
+    def __del__(self):
+        LOG.append("del " + self.name)
+
+    def __repr__(self):
+        return "Noisy(" + self.name + ")"
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return self.name == other.name
+
+    def __lt__(self, other):
+        return self.name < other.name
+
+
+def produce(n):
+    for i in range(n):
+        LOG.append("yield " + str(i))
+        yield Noisy(str(i))
+
+
+class Countdown:
+    def __init__(self, n):
+        self.n = n
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        LOG.append("next " + str(self.n))
+        if self.n == 0:
+            raise StopIteration
+        self.n -= 1
+        return Noisy("c" + str(self.n))
+
+
+class ItemsLike:
+    # Not a dict: `items()` is a generator of fresh pairs.
+    def __init__(self, n):
+        self.n = n
+
+    def items(self):
+        for i in range(self.n):
+            LOG.append("pair " + str(i))
+            yield Noisy("k" + str(i)), i
+
+
+class DictSub(dict):
+    def items(self):
+        LOG.append("items()")
+        return [(k, self[k]) for k in sorted(self)]
+
+
+def note(x):
+    LOG.append("use " + x.name)
+    return x.name
+
+
+def over_generator(n):
+    return [note(x) for x in produce(n)]
+
+
+def over_iterator(n):
+    return [note(x) for x in Countdown(n)]
+
+
+def over_list(n):
+    return [note(x) for x in [Noisy("l" + str(i)) for i in range(n)]]
+
+
+def filtered(n):
+    return [note(x) for x in produce(n) if x.name != "1"]
+
+
+def set_and_dict(n):
+    return sorted({note(x) for x in produce(n)}), {note(x): 1 for x in produce(n)}
+
+
+def items_like(n):
+    return [(note(k), v) for k, v in ItemsLike(n).items()]
+
+
+def items_subclass(d):
+    return [(k, v) for k, v in DictSub(d).items()]
+
+
+def items_pairs(d):
+    return [(k, v) for k, v in d.items()]
+
+
+def items_kept(d):
+    # Each pair is kept: the iterator cannot reuse it.
+    pairs = [item for item in d.items()]
+    return pairs, len({id(p) for p in pairs}) == len(pairs)
+
+
+def items_filtered(d):
+    return [k for k, v in d.items() if v % 2]
+
+
+def items_nested(d):
+    return [(k, [(a, b) for a, b in v.items()]) for k, v in d.items()]
+
+
+def items_sorted(d):
+    return tuple(sorted((k, v) for k, v in d.items()))
+
+
+def items_dict(d):
+    return {v: k for k, v in d.items()}, sorted({repr(k) for k, v in d.items()})
+
+
+def items_values_replaced(d):
+    # The value a pair held is replaced while the loop runs.
+    out = []
+    for name in [k for k, v in d.items()]:
+        out.append(name)
+    seen = [d.__setitem__(k, None) or note(v) for k, v in d.items()]
+    return out, seen
+
+
+def items_grown(d):
+    return [d.__setitem__(k + "!", v) for k, v in d.items()]
+
+
+def items_fails(d):
+    return [10 // v for k, v in d.items()]
+
+
+def items_views(d):
+    return [k for k in d.keys()], [v for v in d.values()], [k for k in d], [p for p in d.items()]
+
+
+def items_ordered(d):
+    return [(k, v) for k, v in collections.OrderedDict(d).items()]
+
+
+def generator_fails(n):
+    return [x if x != 2 else 1 // 0 for x in range(n)]
+
+
+def shown(f, *args):
+    LOG.clear()
+    try:
+        result = f(*args)
+    except BaseException as e:
+        LOG.append("raised")
+        print(f.__name__, "raised", type(e).__name__, e.args)
+        del e
+    else:
+        print(f.__name__, repr(result))
+        del result
+    LOG.append("returned")
+    print(" ", LOG)
+
+
+def main():
+    for n in (0, 1, 3):
+        for f in (over_generator, over_iterator, over_list, filtered, set_and_dict, items_like):
+            shown(f, n)
+    shown(generator_fails, 4)
+    for d in ({}, {"a": 1}, {"a": 1, "b": 2, "c": 3}, {(1, 2): 3, None: 4, "x": 5}):
+        for f in (items_subclass, items_pairs, items_kept, items_filtered, items_sorted, items_dict,
+                  items_views, items_ordered):
+            shown(f, dict(d))
+    shown(items_nested, {"x": {"a": 1, "b": 2}, "y": {}, "z": {"c": 3}})
+    shown(items_grown, {"a": 1, "b": 2})
+    shown(items_fails, {"a": 1, "b": 0, "c": 2})
+    shown(items_pairs, {Noisy("ka"): Noisy("va"), Noisy("kb"): Noisy("vb")})
+    shown(items_pairs, [1, 2])
+    shown(items_pairs, None)
+
+
+def replaced():
+    # With the items released early, a value the loop itself drops from the
+    # dict is finalized where CPython finalizes it: before the next pair is
+    # used. (With the fast paths off it outlives the next pair's use, which
+    # is why `main` leaves this case out.)
+    shown(items_values_replaced, {"a": Noisy("va"), "b": Noisy("vb"), "c": Noisy("vc")})
+
+
+main()

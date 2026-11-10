@@ -495,3 +495,50 @@ long long pycc_ext_obj_iter_next(PyObject *it, PyObject **out)
     return PyErr_Occurred() == NULL ? 0 : -1;
 }
 
+/* Whether `it` is the iterator of an exact dict's `items()` view, which
+ * hands the same pair tuple out again once nothing else holds it. A
+ * comprehension over one releases its item before it advances
+ * (`object_comprehension.rs`), so that tuple is reused. Advancing this
+ * iterator runs no Python code, so nothing can tell when between two
+ * trips the item went. Every other iterator answers 0: its `__next__` may
+ * run code that would see an item's `__del__` happen early. */
+static long long pycc_ext_item_recycle_count = 0;
+
+/* How many iterators `pycc_ext_obj_iter_recycles` answered 1 for, which the
+ * tests read with `ctypes` (`RUNTIME_COUNTERS` in `src/ext_build/link.rs`). */
+long long pycc_ext_item_recycles(void)
+{
+    return pycc_ext_item_recycle_count;
+}
+
+int pycc_ext_fast_ops_enabled(void);
+
+int pycc_ext_obj_iter_recycles(PyObject *it)
+{
+    static PyTypeObject *items_iterator;
+
+    if (it == NULL || !pycc_ext_fast_ops_enabled()) {
+        return 0;
+    }
+    if (items_iterator == NULL) {
+        PyObject *dict = PyDict_New();
+        PyObject *items = dict == NULL ? NULL : PyObject_CallMethod(dict, "items", NULL);
+        PyObject *iterator = items == NULL ? NULL : PyObject_GetIter(items);
+
+        Py_XDECREF(items);
+        Py_XDECREF(dict);
+        if (iterator == NULL) {
+            PyErr_Clear();
+            return 0;
+        }
+        items_iterator = Py_TYPE(iterator);
+        Py_INCREF(items_iterator);
+        Py_DECREF(iterator);
+    }
+    if (Py_TYPE(it) != items_iterator) {
+        return 0;
+    }
+    pycc_ext_item_recycle_count++;
+    return 1;
+}
+

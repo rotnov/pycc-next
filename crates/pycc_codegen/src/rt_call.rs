@@ -32,6 +32,27 @@ fn abi_value<'ctx>(scalar: Scalar<'ctx>) -> BasicMetadataValueEnum<'ctx> {
     }
 }
 
+/// `list(a)` and `sorted(a)` of a produced CPython object (a comprehension's
+/// list, say), which this call's caller releases right after it: the shim's
+/// `_fresh` variant reuses an exact `list` that no one else holds instead of
+/// copying it (`pycc_ext_obj_list_fresh`, docs/design/compile-little.md
+/// section 2.6). Any other call keeps its symbol.
+fn fresh_symbol(symbol: &'static str, ret: &Ty, args: &[pycc_mir::MirExpr]) -> &'static str {
+    let fresh = match symbol {
+        "pycc_ext_obj_list" => "pycc_ext_obj_list_fresh",
+        "pycc_ext_obj_sorted" => "pycc_ext_obj_sorted_fresh",
+        _ => return symbol,
+    };
+    match args {
+        [arg] if *ret == Ty::Object
+            && crate::object_release::is_produced(crate::object_release::operand_source(arg)) =>
+        {
+            fresh
+        }
+        _ => symbol,
+    }
+}
+
 pub(super) fn emit_rt_call<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -179,9 +200,10 @@ pub(super) fn emit_rt_call<'ctx>(
     } else {
         ty_to_basic_type(context, sig.ret.clone()).fn_type(&param_types, false)
     };
-    let function = module.get_function(sig.symbol).unwrap_or_else(|| {
+    let symbol = fresh_symbol(sig.symbol, &sig.ret, &call.args);
+    let function = module.get_function(symbol).unwrap_or_else(|| {
         module.add_function(
-            sig.symbol,
+            symbol,
             fn_type,
             Some(inkwell::module::Linkage::External),
         )
