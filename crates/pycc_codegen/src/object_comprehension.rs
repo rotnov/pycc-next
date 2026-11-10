@@ -33,7 +33,7 @@
 //! `MirStmt::ForObject`'s target: the next trip releases it, and the loop's
 //! exit releases the last one.
 //! An item the source unpacked (`for k, v in d.items()`) is released at the
-//! end of its own trip instead when the iterator is an exact dict's
+//! end of its own trip instead when the iterator is a dict's own
 //! `items()` (`pycc_ext_obj_iter_recycles`), so the iterator reuses its
 //! pair tuple, as it does in CPython, where the pair is gone once unpacked.
 //! A pycc `int` temporary built by the condition or the element is released
@@ -139,7 +139,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
         crate::object_release::hold_new_reference(context, module, rt, collection);
 
     // Whether the item is released before the loop advances: only an item
-    // the source unpacked (`for k, v in d.items()`), over an exact dict's
+    // the source unpacked (`for k, v in d.items()`), over a dict's own
     // `items()` iterator.
     let unpacked = unpacks_item(var, cond, &item);
     let recycles = unpacked.then(|| emit_iter_recycles(context, builder, module, iterator));
@@ -178,7 +178,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
     builder.position_at_end(latch_bb);
     // The source unpacked the item (`for k, v in d.items()`), so CPython
     // has dropped the pair by now: releasing it before the next advance
-    // lets an exact dict's `items()` iterator hand its pair tuple out again
+    // lets a dict's own `items()` iterator hand its pair tuple out again
     // instead of making a new one, as it does there. Only that iterator:
     // any other may run code as it advances, which would see the item go
     // early. An item the source binds whole lives until the next is bound,

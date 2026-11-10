@@ -1,5 +1,5 @@
 # A comprehension that unpacks its item (`for k, v in d.items()`) over an
-# exact dict's `items()` releases each item before it advances, so the
+# dict's own `items()` releases each item before it advances, so the
 # iterator hands the same pair tuple out again
 # (docs/design/compile-little.md, section 2.6). An item bound whole, and
 # every other iterable's item, lives until the next one is bound, as in
@@ -149,6 +149,29 @@ def items_filtered_replaced(d):
     return [d.__setitem__(k, None) or note(v) for k, v in d.items() if k != "b"]
 
 
+class PlainSub(dict):
+    # A dict subclass that keeps `dict.items`: the same iterator.
+    pass
+
+
+def items_plain_subclass_replaced(d):
+    d = PlainSub(d)
+    return [d.__setitem__(k, None) or note(v) for k, v in d.items()]
+
+
+def items_dict_replaced(d):
+    return {k: d.__setitem__(k, None) or note(v) for k, v in d.items()}
+
+
+def items_set_replaced(d):
+    return sorted({d.__setitem__(k, None) or note(v) for k, v in d.items()})
+
+
+def items_resized_replaced(d):
+    # The loop replaces a value, then grows the dict: the next advance fails.
+    return [d.__setitem__(k, None) or d.__setitem__(k + "!", 0) or note(v) for k, v in d.items()]
+
+
 def items_grown(d):
     return [d.__setitem__(k + "!", v) for k, v in d.items()]
 
@@ -217,6 +240,8 @@ def replaced():
     # is why `main` leaves this case out.)
     shown(items_values_replaced, {"a": Noisy("va"), "b": Noisy("vb"), "c": Noisy("vc")})
     shown(items_filtered_replaced, {"a": Noisy("va"), "b": Noisy("vb"), "c": Noisy("vc"), "d": Noisy("vd")})
+    for f in (items_plain_subclass_replaced, items_dict_replaced, items_set_replaced, items_resized_replaced):
+        shown(f, {"a": Noisy("va"), "b": Noisy("vb"), "c": Noisy("vc")})
 
 
 main()

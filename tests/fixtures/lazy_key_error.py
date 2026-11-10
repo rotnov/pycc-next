@@ -63,6 +63,41 @@ class MyKeyError(KeyError):
     pass
 
 
+class Meddler:
+    # A key whose hash and equality run code that changes the dict while it
+    # is being searched.
+    def __init__(self, name, d, action, log):
+        self.name = name
+        self.d = d
+        self.action = action
+        self.log = log
+
+    def __hash__(self):
+        self.log.append("hash")
+        return 7
+
+    def __eq__(self, other):
+        self.log.append("eq")
+        action, self.action = self.action, None
+        if action == "clear":
+            self.d.clear()
+        elif action == "grow":
+            for i in range(40):
+                self.d[i] = i
+        elif action == "add":
+            self.d[self] = "added"
+        return False
+
+
+class Seven:
+    # Shares `Meddler`'s hash, so a lookup compares the two.
+    def __hash__(self):
+        return 7
+
+    def __eq__(self, other):
+        return other is self
+
+
 class NoisyKey:
     # A key that reports when it is finalized.
     def __init__(self, name, log):
@@ -462,6 +497,56 @@ def temporary_key_nested(first, second, name, log):
     return "none"
 
 
+def temporary_key_return_in_loop(d, names, log):
+    for name in names:
+        try:
+            log.append(d[NoisyKey(name, log)])
+        except KeyError:
+            log.append("handler " + name)
+            if name == "out":
+                return name
+    return None
+
+
+def temporary_key_recursive(d, depth, log):
+    try:
+        return d[NoisyKey("level" + str(depth), log)]
+    except KeyError:
+        log.append("handler " + str(depth))
+        if depth:
+            temporary_key_recursive(d, depth - 1, log)
+        log.append("leaving " + str(depth))
+    return depth
+
+
+def yields_in_handler(d, names, log):
+    for name in names:
+        try:
+            yield d[NoisyKey(name, log)]
+        except KeyError:
+            log.append("handler " + name)
+            yield "missing " + name
+            log.append("resumed " + name)
+
+
+def drive(d, names, log):
+    out = []
+    for value in yields_in_handler(d, names, log):
+        log.append("got " + str(value))
+        out.append(value)
+    return out
+
+
+def meddling_key(action, log):
+    d = {Seven(): "seven"}
+    try:
+        value = d[Meddler("m", d, action, log)]
+    except KeyError:
+        log.append("handler")
+        value = "default"
+    return value, len(d)
+
+
 def shown(f, *args):
     try:
         result = f(*args)
@@ -603,6 +688,22 @@ def main():
     log = []
     shown(temporary_key_nested, Sub(), {}, "n", log)
     print(log)
+
+    log = []
+    shown(temporary_key_return_in_loop, {NoisyKey("in", log): 1}, ["in", "a", "out", "never"], log)
+    print(log)
+    log = []
+    shown(temporary_key_recursive, {}, 3, log)
+    print(log)
+    log = []
+    shown(drive, {NoisyKey("in", log): 1}, ["a", "in", "b"], log)
+    print(log)
+
+    # A key whose hash or equality changes the dict during the lookup.
+    for action in (None, "clear", "grow", "add"):
+        log = []
+        shown(meddling_key, action, log)
+        print(log)
 
     # Tracebacks of what a handler entered by a missing key raises.
     frames(handler_raises, d, "x")

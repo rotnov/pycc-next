@@ -353,6 +353,16 @@ PyObject *pycc_ext_obj_insort_right(PyObject *a, PyObject *x)
     return pycc_ext_stdlib_call("bisect", "insort_right", a, x);
 }
 
+/* How many `tuple(a)`, `list(a)` and `sorted(a)` calls ran without the
+ * call through the builtin, which the tests read with `ctypes`
+ * (`RUNTIME_COUNTERS` in `src/ext_build/link.rs`). */
+static long long pycc_ext_direct_builtin_count = 0;
+
+long long pycc_ext_direct_builtins(void)
+{
+    return pycc_ext_direct_builtin_count;
+}
+
 /* Whether `builtins.<name>`, read once on the first call as
  * `pycc_ext_stdlib_call` reads it, is CPython's own: the type `own` when
  * given, else the builtin function of that name. `*state` keeps the answer
@@ -385,7 +395,12 @@ static int pycc_ext_builtin_is_own(const char *name, PyObject *own, int *state)
 /* `tuple(a)`, `list(a)` and `sorted(a)` do what the builtins do
  * (`PySequence_Tuple`, `PySequence_List`, then `list.sort()` for `sorted`)
  * without the call through them, when the builtin read on the first call
- * is CPython's own; otherwise, and with the fast paths off, they call it. */
+ * is CPython's own; otherwise, and with the fast paths off, they call it.
+ * Each makes the copy the builtin makes, even of a list only the caller
+ * holds: while `sorted` sorts its copy the argument stays whole, which code
+ * a comparison runs can see (`gc.get_referrers`) and which a failed sort
+ * leaves in its own order for its elements' finalizers
+ * (docs/design/compile-little.md, section 2.6). */
 PyObject *pycc_ext_obj_tuple(PyObject *a)
 {
     static int own;
@@ -394,6 +409,7 @@ PyObject *pycc_ext_obj_tuple(PyObject *a)
     if (!pycc_ext_builtin_is_own("tuple", (PyObject *)&PyTuple_Type, &own)) {
         return pycc_ext_stdlib_call("builtins", "tuple", a, NULL);
     }
+    pycc_ext_direct_builtin_count++;
     result = a == NULL ? NULL : PySequence_Tuple(a);
     return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
@@ -424,67 +440,25 @@ PyObject *pycc_ext_obj_list(PyObject *a)
     if (!pycc_ext_builtin_is_own("list", (PyObject *)&PyList_Type, &own)) {
         return pycc_ext_stdlib_call("builtins", "list", a, NULL);
     }
+    pycc_ext_direct_builtin_count++;
     result = a == NULL ? NULL : PySequence_List(a);
     return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
-static int pycc_ext_sorted_own;
-
 PyObject *pycc_ext_obj_sorted(PyObject *a)
 {
+    static int own;
     PyObject *result;
 
-    if (!pycc_ext_builtin_is_own("sorted", NULL, &pycc_ext_sorted_own)) {
+    if (!pycc_ext_builtin_is_own("sorted", NULL, &own)) {
         return pycc_ext_stdlib_call("builtins", "sorted", a, NULL);
     }
+    pycc_ext_direct_builtin_count++;
     result = a == NULL ? NULL : PySequence_List(a);
     if (result != NULL && PyList_Sort(result) < 0) {
         Py_CLEAR(result);
     }
     return result == NULL ? pycc_ext_stdlib_failed() : result;
-}
-
-/* How many `list(a)` and `sorted(a)` calls used their argument as the
- * result, which the tests read with `ctypes` (`RUNTIME_COUNTERS` in
- * `src/ext_build/link.rs`). */
-static long long pycc_ext_fresh_list_count = 0;
-
-long long pycc_ext_fresh_lists(void)
-{
-    return pycc_ext_fresh_list_count;
-}
-
-/*
- * `list(a)` and `sorted(a)` of an argument the compiled caller produced and
- * releases right after the call (`crates/pycc_codegen/src/rt_call.rs`,
- * docs/design/compile-little.md section 2.6). When it is an exact `list`
- * whose only reference is the caller's, no one else can ever see it, so
- * the copy the builtin makes is the list itself: `list(a)` answers it, and
- * `sorted(a)` sorts it in place. Anything else takes the builtin's path.
- */
-PyObject *pycc_ext_obj_list_fresh(PyObject *a)
-{
-    static int own;
-
-    if (a != NULL && PyList_CheckExact(a) && Py_REFCNT(a) == 1
-        && pycc_ext_builtin_is_own("list", (PyObject *)&PyList_Type, &own)) {
-        pycc_ext_fresh_list_count++;
-        return Py_NewRef(a);
-    }
-    return pycc_ext_obj_list(a);
-}
-
-PyObject *pycc_ext_obj_sorted_fresh(PyObject *a)
-{
-    if (a != NULL && PyList_CheckExact(a) && Py_REFCNT(a) == 1
-        && pycc_ext_builtin_is_own("sorted", NULL, &pycc_ext_sorted_own)) {
-        pycc_ext_fresh_list_count++;
-        if (PyList_Sort(a) < 0) {
-            return pycc_ext_stdlib_failed();
-        }
-        return Py_NewRef(a);
-    }
-    return pycc_ext_obj_sorted(a);
 }
 
 PyObject *pycc_ext_obj_dict(PyObject *a)

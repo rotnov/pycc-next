@@ -1,6 +1,10 @@
-# `sorted(a)` and `list(a)` of a list the call itself produced use that
-# list as the result (docs/design/compile-little.md, section 2.6). A list
-# anything else holds is copied, as the builtins copy it.
+# `tuple(a)`, `list(a)` and `sorted(a)` of an object run what the builtins
+# run without the call through them (docs/design/compile-little.md, section
+# 2.6). Each still copies its argument, also when that is a list only the
+# call itself holds: these cases print what would show a list reused
+# (identity, aliasing, what a comparison sees through `gc`, the order a
+# failed sort leaves the elements' finalizers in).
+import gc
 class Tracked(list):
     pass
 
@@ -30,6 +34,59 @@ class Loud:
 
     def __repr__(self):
         return "Loud(" + str(self.n) + ")"
+
+
+class Fin:
+    # An element that reports when it is finalized; 3 has no order.
+    def __init__(self, n, log):
+        self.n = n
+        self.log = log
+
+    def __lt__(self, other):
+        if not isinstance(other, Fin):
+            return NotImplemented
+        if self.n == 3 or other.n == 3:
+            raise ValueError("no order for 3")
+        return self.n < other.n
+
+    def __del__(self):
+        # The lambda keeps this method in CPython: a compiled finalizer run
+        # while an exception unwinds is not what these cases are about.
+        (lambda log, n: log.append("del " + str(n)))(self.log, self.n)
+
+    def __repr__(self):
+        return "Fin(" + str(self.n) + ")"
+
+
+class Spy:
+    # An element that looks, while it is compared, for the lists holding it.
+    def __init__(self, n, log):
+        self.n = n
+        self.log = log
+
+    def __lt__(self, other):
+        holders = [r for r in gc.get_referrers(self) if type(r) is list]
+        self.log.append(sorted(len(r) for r in holders))
+        return self.n < other.n
+
+    def __repr__(self):
+        return "Spy(" + str(self.n) + ")"
+
+
+class Grabber:
+    # An element that keeps the list holding it, found while it is compared.
+    taken = []
+
+    def __init__(self, n):
+        self.n = n
+
+    def __lt__(self, other):
+        if not Grabber.taken:
+            Grabber.taken.extend(r for r in gc.get_referrers(self) if type(r) is list)
+        return self.n < other.n
+
+    def __repr__(self):
+        return "Grabber(" + str(self.n) + ")"
 
 
 KEPT = []
@@ -155,6 +212,45 @@ def sorted_compare_fails(ns):
     return sorted([Bad(n) for n in ns])
 
 
+def sorted_fails_finalized(ns, log):
+    # The list the call was given is destroyed as it was built, whatever
+    # order the failed sort left its copy in.
+    try:
+        return sorted([Fin(n, log) for n in ns])
+    except ValueError:
+        log.append("caught ValueError")
+    except TypeError:
+        log.append("caught TypeError")
+    return None
+
+
+def sorted_mixed_finalized(ns, log):
+    try:
+        return sorted([Fin(n, log) if n % 2 else n for n in ns])
+    except TypeError:
+        log.append("caught TypeError")
+    return None
+
+
+def sorted_spied(ns, log):
+    out = sorted([Spy(n, log) for n in ns])
+    return out
+
+
+def sorted_grabbed(ns):
+    Grabber.taken.clear()
+    out = sorted([Grabber(n) for n in ns])
+    taken = list(Grabber.taken)
+    Grabber.taken.clear()
+    return out, taken, [t is out for t in taken]
+
+
+def list_finalized(ns, log):
+    made = list([Fin(n, log) for n in ns])
+    log.append("made " + str(len(made)))
+    return len(made)
+
+
 def sorted_loud(ns):
     Loud.log.clear()
     out = sorted([Loud(n) for n in ns])
@@ -189,6 +285,51 @@ def stable(pairs):
 
 def patched(xs):
     return sorted([x for x in xs]), list([x for x in xs]), tuple([x for x in xs])
+
+
+class TupleSub(tuple):
+    pass
+
+
+class BadIter:
+    def __init__(self, n):
+        self.n = n
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.n -= 1
+        if self.n < 0:
+            raise RuntimeError("iteration failed")
+        return self.n
+
+
+def identities(xs):
+    t = tuple(xs)
+    l = list(xs)
+    sub = TupleSub(xs)
+    return (
+        tuple(t) is t,
+        list(l) is l,
+        sorted(l) is l,
+        type(tuple(sub)).__name__,
+        tuple(sub) is sub,
+        tuple(sub) == t,
+        tuple(l) == t,
+    )
+
+
+def failing_tuple(n):
+    return tuple(BadIter(n))
+
+
+def failing_list(n):
+    return list(BadIter(n))
+
+
+def failing_sorted(n):
+    return sorted(BadIter(n))
 
 
 class Holder:
@@ -229,6 +370,26 @@ def main():
     shown(sorted_compare_fails, [5, 1, 4])
     shown(sorted_compare_fails, [5, 3, 4])
     shown(sorted_compare_fails, [3])
+    for ns in ([5, 1, 4, 2], [5, 1, 4, 2, 3], [5, 1, 3, 4, 2, 6], [3], [6, 9, 2, 8, 1, 7, 0, 5, 4, 3, 11, 10]):
+        log = []
+        shown(sorted_fails_finalized, ns, log)
+        print(log)
+    for ns in ([5, 1, 7], [5, 2, 1], [7, 1, 5, 3, 2], [9, 1, 7, 3, 5, 11, 4]):
+        log = []
+        shown(sorted_mixed_finalized, ns, log)
+        print(log)
+    log = []
+    shown(sorted_spied, [4, 2, 5, 1, 3], log)
+    print(log)
+    shown(sorted_grabbed, [4, 2, 5, 1, 3])
+    log = []
+    shown(list_finalized, [1, 2, 5], log)
+    print(log)
+    shown(identities, [3, 1, 2])
+    shown(identities, [])
+    for f in (failing_tuple, failing_list, failing_sorted):
+        shown(f, 3)
+        shown(f, None)
     shown(sorted_loud, [3, 1, 2, 0])
     shown(sorted_mixed, [1, "a"])
     shown(sorted_mixed, [None, None])

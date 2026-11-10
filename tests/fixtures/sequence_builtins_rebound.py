@@ -1,7 +1,6 @@
 # `sorted`, `list` and `tuple` rebound in `builtins` before the module's
-# functions first run: the compiled calls reach the replacements, and no
-# list is reused (`tests/fixtures/fresh_list_calls.py` has the builtins'
-# own behavior).
+# functions first run: the compiled calls reach the replacements
+# (`tests/fixtures/sequence_builtins.py` has the builtins' own behavior).
 import builtins
 
 REAL_SORTED = builtins.sorted

@@ -3,17 +3,17 @@
 //!
 //! - a dict miss caught by a handler that cannot see the exception goes
 //!   straight to the handler (`tests/fixtures/lazy_key_error.py`);
-//! - `sorted(a)` and `list(a)` of a list the call produced use that list
-//!   (`tests/fixtures/fresh_list_calls.py`), unless the builtin was rebound
-//!   (`tests/fixtures/fresh_list_rebound.py`);
-//! - a comprehension that unpacks its item over an exact dict's `items()`
+//! - `tuple(a)`, `list(a)` and `sorted(a)` skip the call through the builtin
+//!   (`tests/fixtures/sequence_builtins.py`), unless it was rebound
+//!   (`tests/fixtures/sequence_builtins_rebound.py`);
+//! - a comprehension that unpacks its item over a dict's own `items()`
 //!   releases each item before it advances
 //!   (`tests/fixtures/comprehension_item_release.py`).
 //!
 //! Each module prints what CPython prints for its source, with the
 //! lowerings on (their counters move) and off (`PYCC_NO_FAST_OPS=1`: every
-//! miss raises, every call copies, every item is kept until the next, and
-//! the counters stay at zero).
+//! miss raises, every call goes through the builtin, every item is kept
+//! until the next, and the counters stay at zero).
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -152,6 +152,9 @@ fn a_dict_miss_caught_unseen_matches_cpython_with_the_lowering_on_and_off() {
             "temporary_key",
             "dropped_key",
             "temporary_keys_in_loop",
+            "temporary_key_return_in_loop",
+            "temporary_key_recursive",
+            "meddling_key",
             "main",
         ],
         "pycc_ext_lazy_misses",
@@ -162,9 +165,9 @@ fn a_dict_miss_caught_unseen_matches_cpython_with_the_lowering_on_and_off() {
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn sorted_and_list_of_a_fresh_list_match_cpython_with_the_lowering_on_and_off() {
+fn tuple_list_and_sorted_match_cpython_with_the_lowering_on_and_off() {
     check(
-        "fresh_list_calls",
+        "sequence_builtins",
         &[
             "sorted_comprehension",
             "tuple_sorted_generator",
@@ -176,8 +179,15 @@ fn sorted_and_list_of_a_fresh_list_match_cpython_with_the_lowering_on_and_off() 
             "sorted_compare_fails",
             "identity",
             "stable",
+            "sorted_fails_finalized",
+            "sorted_mixed_finalized",
+            "sorted_spied",
+            "sorted_grabbed",
+            "identities",
+            "failing_sorted",
+            "list_finalized",
         ],
-        "pycc_ext_fresh_lists",
+        "pycc_ext_direct_builtins",
         true,
         None,
     );
@@ -185,11 +195,11 @@ fn sorted_and_list_of_a_fresh_list_match_cpython_with_the_lowering_on_and_off() 
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn rebound_sorted_list_and_tuple_are_called_and_no_list_is_reused() {
+fn rebound_sorted_list_and_tuple_are_called() {
     check(
-        "fresh_list_rebound",
+        "sequence_builtins_rebound",
         &["calls", "main"],
-        "pycc_ext_fresh_lists",
+        "pycc_ext_direct_builtins",
         false,
         None,
     );

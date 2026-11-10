@@ -413,7 +413,7 @@ pub(crate) fn host_glibc_version() -> Option<String> {
 /// and whether the inline fast paths are on and how many `frozenset` ASCII
 /// masks they computed (`src/ext/module/fast_ops.c`), and how many dict
 /// misses went straight to a handler (`src/ext/module/object_index.c`), how
-/// many `list()`/`sorted()` calls used their fresh argument as the result
+/// many `tuple()`/`list()`/`sorted()` calls skipped the call through the builtin
 /// (`src/ext/module/object_stdlib.c`) and how many comprehensions released
 /// their items early (`src/ext/module/object_protocols.c`).
 pub(crate) const RUNTIME_COUNTERS: [&str; 19] = [
@@ -434,6 +434,6 @@ pub(crate) const RUNTIME_COUNTERS: [&str; 19] = [
     "pycc_ext_direct_calls",
     "pycc_ext_ascii_mask_fill_count",
     "pycc_ext_lazy_misses",
-    "pycc_ext_fresh_lists",
+    "pycc_ext_direct_builtins",
     "pycc_ext_item_recycles",
 ];

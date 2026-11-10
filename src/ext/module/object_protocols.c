@@ -495,13 +495,14 @@ long long pycc_ext_obj_iter_next(PyObject *it, PyObject **out)
     return PyErr_Occurred() == NULL ? 0 : -1;
 }
 
-/* Whether `it` is the iterator of an exact dict's `items()` view, which
- * hands the same pair tuple out again once nothing else holds it. A
- * comprehension over one releases its item before it advances
- * (`object_comprehension.rs`), so that tuple is reused. Advancing this
- * iterator runs no Python code, so nothing can tell when between two
- * trips the item went. Every other iterator answers 0: its `__next__` may
- * run code that would see an item's `__del__` happen early. */
+/* Whether `it` is `dict.items()`'s own iterator (of a dict, or of a
+ * subclass that keeps `dict.items`), which hands the same pair tuple out
+ * again once nothing else holds it. A comprehension that unpacks its item
+ * releases it before it advances over one (`object_comprehension.rs`), so
+ * that tuple is reused, as in CPython, where an unpacked pair is gone at
+ * once. Advancing this iterator runs no Python code of its own. Every
+ * other iterator answers 0: its `__next__` may run code that would see an
+ * item's `__del__` happen early. */
 static long long pycc_ext_item_recycle_count = 0;
 
 /* How many iterators `pycc_ext_obj_iter_recycles` answered 1 for, which the
