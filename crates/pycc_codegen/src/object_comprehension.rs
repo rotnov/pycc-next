@@ -31,7 +31,9 @@
 //! lists as a producer, so an unbound result is released by its consumer.
 //! Each item is a new reference the loop variable's slot owns, exactly as
 //! `MirStmt::ForObject`'s target: the next trip releases it, and the loop's
-//! exit releases the last one.
+//! exit releases the last one, after the iterator. The slot is held too
+//! (`object_release::hold_slot`), below the iterator and the result, so a
+//! failure edge releases the item it holds last.
 //! An item the source unpacked (`for k, v in d.items()`) is released at the
 //! end of its own trip instead when the iterator is a dict's own
 //! `items()` (`pycc_ext_obj_iter_recycles`), so the iterator reuses its
@@ -103,6 +105,10 @@ pub(super) fn emit_object_comprehension<'ctx>(
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i64_ty = context.i64_type();
 
+    // The loop variable's slot is held below the iterator and the result:
+    // a failure edge releases the result, the iterator, then the item, the
+    // order CPython's unwinding drops them in.
+    let held_item = crate::object_release::hold_slot(context, module, rt, var_ptr);
     let source = emit(iterable);
     let held_source = crate::object_release::hold(context, module, rt, iterable, &source);
     let iterator = foreign_call::emit_get_iter(context, builder, module, rt, source);
@@ -195,20 +201,17 @@ pub(super) fn emit_object_comprehension<'ctx>(
         .expect("build_unconditional_branch should not fail closing the loop latch");
 
     builder.position_at_end(lp.after_bb);
-    // The last item is released and the slot cleared, so the next run of
-    // this comprehension starts from a null slot. An exception out of the
-    // loop leaves the item in the slot, which the next run's first store
-    // releases.
-    let last = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
-    builder
-        .build_store(var_ptr, ptr.const_null())
-        .expect("build_store should not fail for the loop variable's own slot");
-    crate::heap_rc::release_old(context, builder, rt, last);
+    // The exhausted iterator goes first, then the last item, as in CPython
+    // (`END_FOR` pops the iterator before the loop variable is restored).
+    // The slot is cleared, so the next run of this comprehension starts
+    // from a null slot.
     held_iterator.release(builder, rt);
+    release_loop_item(context, builder, rt, var_ptr);
     // The result is the comprehension's value: a producer
     // (`object_release::is_produced`), which its consumer releases or
     // binds.
     held_collection.consumed(rt);
+    held_item.consumed(rt);
     Scalar::Object(collection)
 }
 
@@ -236,8 +239,7 @@ fn emit_native_list_comprehension<'ctx>(
             expr,
         )
     };
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-
+    let held_item = crate::object_release::hold_slot(context, module, rt, var_ptr);
     let source = emit(iterable);
     let held_source = crate::object_release::hold(context, module, rt, iterable, &source);
     let iterator = foreign_call::emit_get_iter(context, builder, module, rt, source);
@@ -274,12 +276,9 @@ fn emit_native_list_comprehension<'ctx>(
         .expect("build_unconditional_branch should not fail closing the loop body");
 
     builder.position_at_end(lp.after_bb);
-    let last = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
-    builder
-        .build_store(var_ptr, ptr.const_null())
-        .expect("build_store should not fail for the loop variable's own slot");
-    crate::heap_rc::release_old(context, builder, rt, last);
     held_iterator.release(builder, rt);
+    release_loop_item(context, builder, rt, var_ptr);
+    held_item.consumed(rt);
     Scalar::List(list)
 }
 

@@ -11,9 +11,19 @@ const ITERATOR: &str = "foreign_iter_get";
 /// A comprehension's result collection, as the IR names it.
 const RESULT: &str = "objcomp_result";
 
+/// What a held slot holds when a failure edge releases it
+/// (`object_release::hold_slot`): a comprehension's current item.
+const ITEM: &str = "obj_slot_held";
+
 /// The releases of exactly the value the IR names `%{name}`.
 fn releases_of(text: &str, name: &str) -> usize {
     text.matches(&format!("{RELEASE}ptr %{name})")).count()
+}
+
+/// The releases of a held slot's value (LLVM numbers the name after its
+/// first use).
+fn item_releases(text: &str) -> usize {
+    text.matches(&format!("{RELEASE}ptr %{ITEM}")).count()
 }
 
 /// A comprehension over a CPython object holds a produced filter across its
@@ -23,7 +33,9 @@ fn releases_of(text: &str, name: &str) -> usize {
 /// every failure edge after `iter()` releases the iterator, every one
 /// after the result exists releases the result too, the normal exit
 /// releases the iterator, and the discarded result is released by its
-/// statement. The loop variable's slot owns each item.
+/// statement. The loop variable's slot owns each item, and is held from
+/// before the source is evaluated: every failure edge releases what it
+/// holds too, after the result and the iterator.
 #[test]
 fn a_comprehension_releases_its_produced_filter_and_element() {
     let var = || MirExpr::Name {
@@ -41,17 +53,19 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     let ir = discard_ir("release_comprehension", comprehension);
     let get_iter_fail = blocks(&ir, "foreign_iter_get_fail");
     assert_eq!(get_iter_fail.len(), 1, "{ir}");
-    assert_eq!(releases(get_iter_fail[0]), 1, "{ir}");
+    assert_eq!(releases(get_iter_fail[0]), 2, "{ir}");
     assert_eq!(releases_of(get_iter_fail[0], ITERATOR), 0, "{ir}");
+    assert_eq!(item_releases(get_iter_fail[0]), 1, "{ir}");
     let result_fail = blocks(&ir, "objcomp_result_fail");
     assert_eq!(result_fail.len(), 1, "{ir}");
-    assert_eq!(releases(result_fail[0]), 1, "{ir}");
+    assert_eq!(releases(result_fail[0]), 2, "{ir}");
     assert_eq!(releases_of(result_fail[0], ITERATOR), 1, "{ir}");
+    assert_eq!(item_releases(result_fail[0]), 1, "{ir}");
     // The source's own attribute load precedes `iter()` and holds only the
-    // module global `copy` it pins (`operand_pin`).
+    // module global `copy` it pins (`operand_pin`) and the item slot.
     let mut later = blocks(&ir, "foreign_attr_fail");
     assert_eq!(later.len(), 3, "{ir}");
-    assert_eq!(releases(later.remove(0)), 1, "{ir}");
+    assert_eq!(releases(later.remove(0)), 2, "{ir}");
     // The filter's and the element's attribute loads, the filter's truth
     // test, `next()` and the insertion: each releases both. The loads
     // route their own failure, so no effect check follows them.
@@ -68,9 +82,16 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     for fail in &later {
         assert_eq!(releases_of(fail, ITERATOR), 1, "{fail}\n{ir}");
         assert_eq!(releases_of(fail, RESULT), 1, "{fail}\n{ir}");
+        // The result, the iterator, then the item, as CPython unwinds.
+        let result = fail.find(&format!("%{RESULT})")).expect("the result is released");
+        let iterator = fail.find(&format!("%{ITERATOR})")).expect("the iterator is released");
+        let item = fail
+            .find(&format!("{RELEASE}ptr %{ITEM}"))
+            .expect("the item is released");
+        assert!(result < iterator && iterator < item, "{fail}\n{ir}");
     }
     // The truth test's failure releases the filter as well.
-    assert_eq!(releases(blocks(&ir, "foreign_truthy_fail")[0]), 3, "{ir}");
+    assert_eq!(releases(blocks(&ir, "foreign_truthy_fail")[0]), 4, "{ir}");
     let packed = ir
         .find("@pycc_ext_obj_pack_object(")
         .expect("the element is packed");
@@ -83,9 +104,14 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     assert_eq!(
         releases(after[0]),
         2,
-        "the last item and the iterator: {ir}"
+        "the iterator and the last item: {ir}"
     );
     assert_eq!(releases_of(after[0], ITERATOR), 1, "{ir}");
+    let iterator = after[0].find(&format!("%{ITERATOR})")).expect("the iterator is released");
+    assert!(
+        after[0][iterator..].contains(RELEASE),
+        "the exhausted iterator goes before the last item: {ir}"
+    );
     // The comprehension hands its result to the statement, which releases
     // it once more on the normal path: nothing else is released.
     assert_eq!(releases_of(&ir, ITERATOR), 7, "{ir}");
@@ -279,23 +305,23 @@ fn a_comprehension_failure_releases_an_outer_held_operand() {
         },
     );
     for (label, held) in [
-        ("objcomp_result_fail", 3),
-        ("foreign_iter_next_fail", 4),
-        ("objcomp_collect_fail", 4),
+        ("objcomp_result_fail", 4),
+        ("foreign_iter_next_fail", 5),
+        ("objcomp_collect_fail", 5),
     ] {
         let found = blocks(&ir, label);
         assert_eq!(found.len(), 1, "{label}\n{ir}");
         assert_eq!(
             releases(found[0]),
             held,
-            "{label} releases the loaded method, its receiver and what the comprehension holds\n{ir}"
+            "{label} releases the loaded method, its receiver and what the comprehension holds, its item included\n{ir}"
         );
     }
-    // `iter()`'s failure releases the produced source, the loaded method and
-    // its receiver.
+    // `iter()`'s failure releases the produced source, the loaded method,
+    // its receiver and the item slot.
     let get_iter_fail = blocks(&ir, "foreign_iter_get_fail");
     assert_eq!(get_iter_fail.len(), 1, "{ir}");
-    assert_eq!(releases(get_iter_fail[0]), 3, "{ir}");
+    assert_eq!(releases(get_iter_fail[0]), 4, "{ir}");
 }
 
 /// A native comprehension (`[i for i in range(2) if copy.a]`) holds a
