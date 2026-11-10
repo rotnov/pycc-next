@@ -32,6 +32,7 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     };
     let comprehension = MirExpr::Comprehension(Box::new(pycc_mir::MirComprehension {
         var: "x".to_string(),
+        unpacks: false,
         var_ty: Ty::Object,
         source: pycc_mir::CompSource::Object(attr("a")),
         cond: Some(attr_of(var(), "ok")),
@@ -98,6 +99,7 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
 fn a_bound_comprehension_result_is_not_released() {
     let comprehension = MirExpr::Comprehension(Box::new(pycc_mir::MirComprehension {
         var: "x".to_string(),
+        unpacks: false,
         var_ty: Ty::Object,
         source: pycc_mir::CompSource::Object(copy_name()),
         cond: None,
@@ -259,6 +261,7 @@ fn a_for_loop_body_failure_unwinds_through_its_cleanup_blocks() {
 fn a_comprehension_failure_releases_an_outer_held_operand() {
     let comprehension = MirExpr::Comprehension(Box::new(pycc_mir::MirComprehension {
         var: "x".to_string(),
+        unpacks: false,
         var_ty: Ty::Object,
         source: pycc_mir::CompSource::Object(attr("a")),
         cond: None,
@@ -303,6 +306,7 @@ fn a_native_comprehension_releases_its_produced_object_filter() {
     let int = |value: i64| MirExpr::IntLiteral(value);
     let comprehension = MirExpr::Comprehension(Box::new(pycc_mir::MirComprehension {
         var: "i".to_string(),
+        unpacks: false,
         var_ty: Ty::Int,
         source: pycc_mir::CompSource::Range {
             start: int(0),

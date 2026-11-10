@@ -52,6 +52,7 @@ pub(super) fn rewrite_comprehension_expr(
 ) -> Result<Ty, Diagnostic> {
     let HirComprehension {
         var,
+        unpacks: _,
         iter,
         cond,
         elt,

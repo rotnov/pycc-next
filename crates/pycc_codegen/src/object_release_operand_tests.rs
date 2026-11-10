@@ -197,6 +197,7 @@ fn the_part_3_producers_are_classified() {
     let comprehension = |source| {
         MirExpr::Comprehension(Box::new(pycc_mir::MirComprehension {
             var: "x".to_string(),
+            unpacks: false,
             var_ty: Ty::Object,
             source,
             cond: None,

@@ -2,9 +2,9 @@
 //!
 //! * A comprehension whose `for` target is a flat tuple of names
 //!   (`[f(i, x) for i, x in pairs]`) iterates a fresh name instead, and
-//!   every read of a target name becomes an item of it (`_pycc_0[1]`). The
-//!   unpacking CPython does is then the tuple read the rest of the compiler
-//!   supports. A rewrite is skipped when a nested scope or a walrus in the
+//!   every read of a target name becomes an item of it
+//!   (`_pycc_unpack_0[1]`; [`is_unpack_target`]). The unpacking CPython does
+//!   is then the tuple read the rest of the compiler supports. A rewrite is skipped when a nested scope or a walrus in the
 //!   comprehension rebinds one of the names, or a later `for` clause binds
 //!   one again.
 //! * A generator expression passed as the only argument of a consumer that
@@ -109,7 +109,7 @@ fn flatten_generators(generators: &mut [Comprehension], results: &mut [&mut Expr
             continue;
         }
         let range = generators[index].range;
-        let var = fresh.name();
+        let var = unpack_target_name(fresh);
         let map: HashMap<String, Expr> = names
             .iter()
             .enumerate()
@@ -140,6 +140,24 @@ fn flatten_generators(generators: &mut [Comprehension], results: &mut [&mut Expr
             substitute.visit_expr(result);
         }
     }
+}
+
+/// The prefix of the name a tuple target is rewritten to. It marks the
+/// comprehension as one that unpacks its item: every read of the name is an
+/// item of it, so the comprehension never uses the item whole
+/// ([`is_unpack_target`]). Reserved, like every `_pycc_` name
+/// (`crate::reserved`), so no program can write it.
+pub const UNPACK_TARGET_PREFIX: &str = "_pycc_unpack_";
+
+/// A fresh name for a rewritten tuple target.
+fn unpack_target_name(fresh: &Fresh) -> String {
+    format!("{UNPACK_TARGET_PREFIX}{}", fresh.name().trim_start_matches("_pycc_"))
+}
+
+/// Whether `name` is the loop variable a tuple target was rewritten to.
+#[must_use]
+pub fn is_unpack_target(name: &str) -> bool {
+    name.starts_with(UNPACK_TARGET_PREFIX)
 }
 
 /// Rewrites `expr`'s own tuple targets when it is a comprehension.

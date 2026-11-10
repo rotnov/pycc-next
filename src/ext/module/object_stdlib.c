@@ -366,7 +366,8 @@ long long pycc_ext_direct_builtins(void)
 /* Whether `builtins.<name>`, read once on the first call as
  * `pycc_ext_stdlib_call` reads it, is CPython's own: the type `own` when
  * given, else the builtin function of that name. `*state` keeps the answer
- * (1 yes, 2 no). */
+ * (1 yes, 2 no). Called with no exception pending: the lookup clears what
+ * it raises itself. */
 static int pycc_ext_builtin_is_own(const char *name, PyObject *own, int *state)
 {
     if (*state == 0) {
@@ -406,11 +407,16 @@ PyObject *pycc_ext_obj_tuple(PyObject *a)
     static int own;
     PyObject *result;
 
+    if (a == NULL) {
+        /* The argument's producer failed: its exception is pending, and
+         * the builtin must not be looked up over it. */
+        return pycc_ext_stdlib_failed();
+    }
     if (!pycc_ext_builtin_is_own("tuple", (PyObject *)&PyTuple_Type, &own)) {
         return pycc_ext_stdlib_call("builtins", "tuple", a, NULL);
     }
     pycc_ext_direct_builtin_count++;
-    result = a == NULL ? NULL : PySequence_Tuple(a);
+    result = PySequence_Tuple(a);
     return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
@@ -437,11 +443,16 @@ PyObject *pycc_ext_obj_list(PyObject *a)
     static int own;
     PyObject *result;
 
+    if (a == NULL) {
+        /* The argument's producer failed: its exception is pending, and
+         * the builtin must not be looked up over it. */
+        return pycc_ext_stdlib_failed();
+    }
     if (!pycc_ext_builtin_is_own("list", (PyObject *)&PyList_Type, &own)) {
         return pycc_ext_stdlib_call("builtins", "list", a, NULL);
     }
     pycc_ext_direct_builtin_count++;
-    result = a == NULL ? NULL : PySequence_List(a);
+    result = PySequence_List(a);
     return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
@@ -450,11 +461,16 @@ PyObject *pycc_ext_obj_sorted(PyObject *a)
     static int own;
     PyObject *result;
 
+    if (a == NULL) {
+        /* The argument's producer failed: its exception is pending, and
+         * the builtin must not be looked up over it. */
+        return pycc_ext_stdlib_failed();
+    }
     if (!pycc_ext_builtin_is_own("sorted", NULL, &own)) {
         return pycc_ext_stdlib_call("builtins", "sorted", a, NULL);
     }
     pycc_ext_direct_builtin_count++;
-    result = a == NULL ? NULL : PySequence_List(a);
+    result = PySequence_List(a);
     if (result != NULL && PyList_Sort(result) < 0) {
         Py_CLEAR(result);
     }

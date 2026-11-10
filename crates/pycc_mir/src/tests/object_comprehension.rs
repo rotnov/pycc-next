@@ -55,6 +55,7 @@ fn mir_numpy_pi() -> MirExpr {
 fn a_comprehension_over_an_object_lowers_to_an_object_source() {
     let lowered = lower_discarded(HirExpr::Comprehension(Box::new(HirComprehension {
         var: "s".to_string(),
+        unpacks: false,
         iter: CompIter::Iterable(Box::new(numpy_pi())),
         cond: Some(HirExpr::Name("s".to_string())),
         elt: CompElt::Set(HirExpr::Name("s".to_string())),
@@ -65,6 +66,7 @@ fn a_comprehension_over_an_object_lowers_to_an_object_source() {
     };
     let expected = MirComprehension {
         var: "s".to_string(),
+        unpacks: false,
         var_ty: Ty::Object,
         source: CompSource::Object(mir_numpy_pi()),
         cond: Some(var.clone()),
@@ -81,6 +83,7 @@ fn a_comprehension_over_an_object_lowers_to_an_object_source() {
 fn a_list_comprehension_over_an_object_is_an_object_whatever_its_element() {
     let lowered = lower_discarded(HirExpr::Comprehension(Box::new(HirComprehension {
         var: "s".to_string(),
+        unpacks: false,
         iter: CompIter::Iterable(Box::new(numpy_pi())),
         cond: None,
         elt: CompElt::List(HirExpr::IntLiteral(1)),

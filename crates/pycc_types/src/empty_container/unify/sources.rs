@@ -156,6 +156,7 @@ impl Engine {
     ) {
         let comp = HirComprehension {
             var: var.to_string(),
+            unpacks: false,
             iter: iter.clone(),
             cond: cond.as_deref().cloned(),
             elt,

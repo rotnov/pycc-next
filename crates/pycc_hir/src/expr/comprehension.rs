@@ -475,6 +475,7 @@ fn rename_in_comprehension(comp: HirComprehension, from: &str, to: &str) -> HirC
         CompIter::Iterable(iterable) => CompIter::Iterable(Box::new(recurse(*iterable))),
     };
     HirComprehension {
+        unpacks: comp.unpacks,
         var: comp.var,
         iter,
         cond: comp.cond.map(recurse),
@@ -535,6 +536,7 @@ pub(crate) fn lower_list_comp(
     let cond = cond.map(|c| rename_name_in_expr(c, &source_name, &synth_var));
     refuse_walrus(
         HirComprehension {
+            unpacks: pycc_ast::is_unpack_target(&source_name),
             var: synth_var,
             iter,
             cond,
@@ -561,6 +563,7 @@ pub(crate) fn lower_set_comp(
     let cond = cond.map(|c| rename_name_in_expr(c, &source_name, &synth_var));
     refuse_walrus(
         HirComprehension {
+            unpacks: pycc_ast::is_unpack_target(&source_name),
             var: synth_var,
             iter,
             cond,
@@ -618,6 +621,7 @@ pub(crate) fn lower_dict_comp(
     let cond = cond.map(|c| rename_name_in_expr(c, &source_name, &synth_var));
     refuse_walrus(
         HirComprehension {
+            unpacks: pycc_ast::is_unpack_target(&source_name),
             var: synth_var,
             iter,
             cond,
@@ -643,8 +647,11 @@ pub(crate) fn comp_assign_stmt(target: &str, comp: HirComprehension) -> HirStmt 
             value: HirExpr::Comprehension(Box::new(comp)),
         };
     }
+    // The statement forms carry no `unpacks`: their comprehension keeps
+    // each item until the next is bound.
     let HirComprehension {
         var,
+        unpacks: _,
         iter,
         cond,
         elt,

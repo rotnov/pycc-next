@@ -131,6 +131,7 @@ fn rendered_list(
     let text = repr_text(&item, classes, scopes)?;
     Some(MirExpr::Comprehension(Box::new(crate::MirComprehension {
         var,
+        unpacks: false,
         var_ty: elem.clone(),
         source: crate::CompSource::ListExpr(source),
         cond: None,

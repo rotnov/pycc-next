@@ -257,6 +257,7 @@ fn bind_comprehension(
     }
     let expr = HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
         var: var.to_string(),
+        unpacks: false,
         iter: iter.clone(),
         cond: cond.as_deref().cloned(),
         elt,

@@ -60,12 +60,12 @@ const EXT_OBJ_ITER_RECYCLES_SYMBOL: &str = "pycc_ext_obj_iter_recycles";
 use pycc_mir::MirExpr;
 
 /// Emits the comprehension and returns its result, a `Scalar::Object`.
-/// `var` is the loop variable, `var_ptr` its pointer slot, already
-/// allocated and visible in `cx.locals`; `iterable` is the source
-/// expression.
+/// `unpacks` is [`pycc_mir::MirComprehension::unpacks`]; `var_ptr` is the
+/// loop variable's pointer slot, already allocated and visible in
+/// `cx.locals`; `iterable` is the source expression.
 pub(super) fn emit_object_comprehension<'ctx>(
     cx: &CompCx<'_, 'ctx>,
-    var: &str,
+    unpacks: bool,
     var_ptr: PointerValue<'ctx>,
     iterable: &MirExpr,
     cond: Option<&MirExpr>,
@@ -141,8 +141,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
     // Whether the item is released before the loop advances: only an item
     // the source unpacked (`for k, v in d.items()`), over a dict's own
     // `items()` iterator.
-    let unpacked = unpacks_item(var, cond, &item);
-    let recycles = unpacked.then(|| emit_iter_recycles(context, builder, module, iterator));
+    let recycles = unpacks.then(|| emit_iter_recycles(context, builder, module, iterator));
     let lp = foreign_call::emit_iter_header(context, builder, module, rt, iterator);
     // Where a trip ends, kept or filtered out, before the loop advances.
     let latch_bb = context.append_basic_block(edge.function(), "objcomp_latch");
@@ -470,37 +469,4 @@ fn emit_iter_recycles<'ctx>(
     builder
         .build_int_compare(inkwell::IntPredicate::NE, answer, context.i32_type().const_zero(), "objcomp_recycles_set")
         .expect("build_int_compare should not fail for two i32 values")
-}
-
-/// Whether `var` is the name a tuple target was rewritten to
-/// (`pycc_ast::desugar::comps`: `for k, v in s` iterates a fresh `_pycc_N`
-/// and reads `_pycc_N[0]`, `_pycc_N[1]`; the comprehension's scope prefixes
-/// the name), and the comprehension reads it in no other way, so it never
-/// uses the item whole.
-fn unpacks_item(var: &str, cond: Option<&MirExpr>, item: &Result<&MirExpr, (&MirExpr, &MirExpr)>) -> bool {
-    // `pycc_hir` prefixes a comprehension variable with its scope, which
-    // ends in the target's offset and `_` (`synthesize_comp_var_name`); the
-    // desugar's fresh names (`_pycc_N`) are reserved.
-    let fresh = var.rsplit_once("_pycc_").is_some_and(|(scope, n)| {
-        let scoped = scope.is_empty()
-            || scope
-                .strip_suffix('_')
-                .is_some_and(|rest| rest.ends_with(|c: char| c.is_ascii_digit()));
-        scoped && !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())
-    });
-    let parts: Vec<&MirExpr> = match item {
-        Ok(elt) => vec![elt],
-        Err((key, value)) => vec![key, value],
-    };
-    fresh && cond.into_iter().chain(parts).all(|expr| only_indexes(expr, var))
-}
-
-/// Whether every read of `var` in `expr` is `var[<int literal>]`.
-fn only_indexes(expr: &MirExpr, var: &str) -> bool {
-    let is_var = |e: &MirExpr| matches!(e, MirExpr::Name { name, .. } if name == var);
-    match expr {
-        MirExpr::ObjSubscript { base, index } if is_var(base) => matches!(**index, MirExpr::IntLiteral(_)),
-        other if is_var(other) => false,
-        other => other.children().into_iter().all(|child| only_indexes(child, var)),
-    }
 }

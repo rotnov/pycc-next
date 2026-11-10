@@ -28,6 +28,7 @@ fn a_list_comprehension_argument_lowers_to_a_comprehension_node() {
         comp,
         HirComprehension {
             var: "0comp_17_i".to_string(),
+            unpacks: false,
             iter: CompIter::Range {
                 start: HirExpr::IntLiteral(0),
                 stop: HirExpr::IntLiteral(3),
@@ -145,6 +146,7 @@ fn the_sub_expression_views_list_every_operand_in_evaluation_order() {
     let name = |n: &str| HirExpr::Name(n.to_string());
     let mut dict = HirComprehension {
         var: "v".to_string(),
+        unpacks: false,
         iter: CompIter::Range {
             start: name("a"),
             stop: name("b"),
@@ -170,6 +172,7 @@ fn the_sub_expression_views_list_every_operand_in_evaluation_order() {
     assert_eq!(dict.body_exprs_mut().len(), 3);
     let mut set = HirComprehension {
         var: "v".to_string(),
+        unpacks: false,
         iter: CompIter::Name("s".to_string()),
         cond: None,
         elt: CompElt::Set(name("e")),

@@ -141,6 +141,13 @@ def items_whole_replaced(d):
     return [d.__setitem__(pair[0], None) or note(pair[1]) for pair in d.items()]
 
 
+def items_whole_named_like_a_temporary(d):
+    # The names only look like the compiler's own: each pair is bound whole.
+    first = [d.__setitem__(q0__pycc_1[0], None) or note(q0__pycc_1[1]) for q0__pycc_1 in d.items()]
+    second = [note(x9__pycc_unpack_0[0]) for x9__pycc_unpack_0 in [(Noisy("t" + str(i)),) for i in range(3)]]
+    return first, second
+
+
 def items_whole_kept(d):
     return [note(pair[1]) for pair in d.items() if pair[0] != "b"]
 
@@ -224,7 +231,7 @@ def main():
                   items_views, items_ordered):
             shown(f, dict(d))
     shown(items_nested, {"x": {"a": 1, "b": 2}, "y": {}, "z": {"c": 3}})
-    for f in (items_whole_replaced, items_whole_kept):
+    for f in (items_whole_replaced, items_whole_named_like_a_temporary, items_whole_kept):
         whole_case(f)
     shown(items_grown, {"a": 1, "b": 2})
     shown(items_fails, {"a": 1, "b": 0, "c": 2})

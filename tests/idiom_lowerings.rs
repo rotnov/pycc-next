@@ -218,6 +218,7 @@ fn a_comprehension_over_dict_items_matches_cpython_with_the_lowering_on_and_off(
             "items_nested",
             "items_values_replaced",
             "items_whole_replaced",
+            "items_whole_named_like_a_temporary",
             "items_filtered_replaced",
             "items_fails",
             "main",

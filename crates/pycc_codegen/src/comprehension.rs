@@ -356,7 +356,7 @@ pub(super) fn emit_comprehension_expr<'ctx>(
     if let CompSource::Object(iterable) = &comp.source {
         return super::object_comprehension::emit_object_comprehension(
             &inner,
-            &comp.var,
+            comp.unpacks,
             ptr,
             iterable,
             comp.cond.as_ref(),

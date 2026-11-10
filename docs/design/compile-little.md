@@ -721,7 +721,10 @@ Other idioms join this table only with a measured win on a profiled function.
   hands the same pair tuple out again, as it does in CPython, where the pair is gone once
   unpacked. Only that iterator: advancing it runs no Python code of its own. An item bound
   whole (`for pair in d.items()`), and every other iterable's item, lives until the next
-  one is bound.
+  one is bound. The desugaring that rewrites the tuple target marks it
+  (`pycc_ast::is_unpack_target`) and the comprehension carries the mark (`unpacks`); a
+  comprehension assigned by a statement of its own (`xs = [... for k, v in ...]`) does
+  not carry it yet and keeps each item.
 
 The `PyDict_Next` loop, the items moved into the tuple, the indexed list loop and the
 inlined generator consumers are not implemented.

@@ -23,6 +23,7 @@ fn sum() -> MirExpr {
 fn comprehension(cond: Option<MirExpr>, elt: MirCompElt) -> MirExpr {
     MirExpr::Comprehension(Box::new(MirComprehension {
         var: "x".to_string(),
+        unpacks: false,
         var_ty: Ty::Object,
         source: CompSource::Object(numpy_pi()),
         cond,
