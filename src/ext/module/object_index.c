@@ -82,7 +82,9 @@ PyObject *pycc_ext_obj_getitem(PyObject *o, PyObject *k)
  * straight to that handler. An exact dict raises nothing else on a miss
  * (no `__missing__`), so the `KeyError` it would have raised is the only
  * thing skipped. Any other mapping, and any failure of the lookup itself
- * (an unhashable key), raises as `pycc_ext_obj_getitem` does. Consumes `k`.
+ * (an unhashable key), raises as `pycc_ext_obj_getitem` does. Consumes `k`,
+ * except on a lazy miss: `k` then moves to `*missed`, which the handler
+ * releases when it is left, where the `KeyError` holding it would have gone.
  */
 #define PYCC_EXT_LAZY_MISS ((PyObject *)1)
 
@@ -97,7 +99,7 @@ long long pycc_ext_lazy_misses(void)
     return pycc_ext_lazy_miss_count;
 }
 
-PyObject *pycc_ext_obj_getitem_lazy(PyObject *o, PyObject *k)
+PyObject *pycc_ext_obj_getitem_lazy(PyObject *o, PyObject *k, PyObject **missed)
 {
     PyObject *result;
 
@@ -110,9 +112,10 @@ PyObject *pycc_ext_obj_getitem_lazy(PyObject *o, PyObject *k)
     case 1:
         break;
     case 0:
+        /* The handler keeps the key, as the `KeyError` would have. */
         pycc_ext_lazy_miss_count++;
-        result = PYCC_EXT_LAZY_MISS;
-        break;
+        *missed = k;
+        return PYCC_EXT_LAZY_MISS;
     default:
         result = NULL;
         break;

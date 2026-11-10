@@ -1,8 +1,9 @@
-# A comprehension over an exact dict's `items()` releases each item before
-# it advances, so the iterator hands the same pair tuple out again
-# (docs/design/compile-little.md, section 2.6). Every other iterable keeps
-# its item until the next one is bound, as CPython does: these cases print
-# when each item is finalized.
+# A comprehension that unpacks its item (`for k, v in d.items()`) over an
+# exact dict's `items()` releases each item before it advances, so the
+# iterator hands the same pair tuple out again
+# (docs/design/compile-little.md, section 2.6). An item bound whole, and
+# every other iterable's item, lives until the next one is bound, as in
+# CPython: these cases print when each item is finalized.
 import collections
 
 LOG = []
@@ -134,6 +135,20 @@ def items_values_replaced(d):
     return out, seen
 
 
+def items_whole_replaced(d):
+    # The pair is bound whole, so it lives until the next one is bound and
+    # the iterator cannot reuse it: a replaced value outlives the next use.
+    return [d.__setitem__(pair[0], None) or note(pair[1]) for pair in d.items()]
+
+
+def items_whole_kept(d):
+    return [note(pair[1]) for pair in d.items() if pair[0] != "b"]
+
+
+def items_filtered_replaced(d):
+    return [d.__setitem__(k, None) or note(v) for k, v in d.items() if k != "b"]
+
+
 def items_grown(d):
     return [d.__setitem__(k + "!", v) for k, v in d.items()]
 
@@ -169,6 +184,13 @@ def shown(f, *args):
     print(" ", LOG)
 
 
+def whole_case(f):
+    # The last two values are one object: which of the iterator and the
+    # last pair goes first at the end of the loop is not compared.
+    last = Noisy("vz")
+    shown(f, {"a": Noisy("va"), "b": Noisy("vb"), "c": last, "d": last})
+
+
 def main():
     for n in (0, 1, 3):
         for f in (over_generator, over_iterator, over_list, filtered, set_and_dict, items_like):
@@ -179,6 +201,8 @@ def main():
                   items_views, items_ordered):
             shown(f, dict(d))
     shown(items_nested, {"x": {"a": 1, "b": 2}, "y": {}, "z": {"c": 3}})
+    for f in (items_whole_replaced, items_whole_kept):
+        whole_case(f)
     shown(items_grown, {"a": 1, "b": 2})
     shown(items_fails, {"a": 1, "b": 0, "c": 2})
     shown(items_pairs, {Noisy("ka"): Noisy("va"), Noisy("kb"): Noisy("vb")})
@@ -192,6 +216,7 @@ def replaced():
     # used. (With the fast paths off it outlives the next pair's use, which
     # is why `main` leaves this case out.)
     shown(items_values_replaced, {"a": Noisy("va"), "b": Noisy("vb"), "c": Noisy("vc")})
+    shown(items_filtered_replaced, {"a": Noisy("va"), "b": Noisy("vb"), "c": Noisy("vc"), "d": Noisy("vd")})
 
 
 main()

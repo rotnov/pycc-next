@@ -63,6 +63,22 @@ class MyKeyError(KeyError):
     pass
 
 
+class NoisyKey:
+    # A key that reports when it is finalized.
+    def __init__(self, name, log):
+        self.name = name
+        self.log = log
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return isinstance(other, NoisyKey) and self.name == other.name
+
+    def __del__(self):
+        self.log.append("del " + self.name)
+
+
 def plain(d, k):
     try:
         return d[k]
@@ -386,6 +402,66 @@ def many_handlers(d, k):
     return "gave up"
 
 
+def temporary_key(d, name, log):
+    # The `KeyError` holds the key until the handler is left.
+    try:
+        return d[NoisyKey(name, log)]
+    except KeyError:
+        log.append("handler")
+        return "default"
+
+
+def dropped_key(d, name, log):
+    # The handler drops the only other reference to the key.
+    box = [NoisyKey(name, log)]
+    try:
+        return d[box[0]]
+    except KeyError:
+        box.clear()
+        log.append("handler")
+    log.append("after")
+    return len(box)
+
+
+def temporary_keys_in_loop(d, names, log):
+    out = []
+    for name in names:
+        try:
+            out.append(d[NoisyKey(name, log)])
+        except KeyError:
+            log.append("handler " + name)
+            if name == "skip":
+                continue
+            if name == "stop":
+                break
+            out.append(None)
+        log.append("next")
+    return out
+
+
+def temporary_key_finally(d, name, log):
+    try:
+        return d[NoisyKey(name, log)]
+    except KeyError:
+        log.append("handler")
+        return "default"
+    finally:
+        log.append("finally")
+
+
+def temporary_key_nested(first, second, name, log):
+    try:
+        return first[NoisyKey(name, log)]
+    except KeyError:
+        log.append("outer handler")
+        try:
+            return second[NoisyKey(name + "2", log)]
+        except KeyError:
+            log.append("inner handler")
+        log.append("between")
+    return "none"
+
+
 def shown(f, *args):
     try:
         result = f(*args)
@@ -508,6 +584,25 @@ def main():
     print(grown)
     shown(many_handlers, {"c": 1}, "abc")
     shown(many_handlers, {"c": 1}, "abcd")
+
+    # The missing key lives as long as its `KeyError` would have.
+    for f in (temporary_key, dropped_key, temporary_key_finally):
+        log = []
+        shown(f, d, "gone", log)
+        print(log)
+        log = []
+        held = {NoisyKey("here", log): 1}
+        shown(f, held, "here", log)
+        print(log)
+    log = []
+    shown(temporary_keys_in_loop, d, ["x", "skip", "y", "stop", "z"], log)
+    print(log)
+    log = []
+    shown(temporary_key_nested, {}, {}, "n", log)
+    print(log)
+    log = []
+    shown(temporary_key_nested, Sub(), {}, "n", log)
+    print(log)
 
     # Tracebacks of what a handler entered by a missing key raises.
     frames(handler_raises, d, "x")

@@ -58,6 +58,9 @@ pub(super) struct ExceptionCodegenState<'ctx> {
     /// The exception slots live while a `try` clause runs, outermost first
     /// (`owned_slots`). Empty at every function boundary.
     pub(super) owned_slots: RefCell<Vec<PointerValue<'ctx>>>,
+    /// The live slots of `owned_slots` that hold a CPython object rather
+    /// than an exception, each with the shim function that releases it.
+    pub(super) owned_object_slots: RefCell<Vec<(PointerValue<'ctx>, FunctionValue<'ctx>)>>,
     /// The `try`s whose `KeyError` handler takes lazy misses, innermost
     /// last (`lazy_miss`).
     pub(super) lazy_misses: RefCell<Vec<lazy_miss::LazyMiss<'ctx>>>,
@@ -74,6 +77,7 @@ impl ExceptionCodegenState<'_> {
             loop_iterators: RefCell::new(Vec::new()),
             module_exec_exit: Cell::new(None),
             owned_slots: RefCell::new(Vec::new()),
+            owned_object_slots: RefCell::new(Vec::new()),
             lazy_misses: RefCell::new(Vec::new()),
         }
     }

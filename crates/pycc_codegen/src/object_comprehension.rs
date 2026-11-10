@@ -32,9 +32,10 @@
 //! Each item is a new reference the loop variable's slot owns, exactly as
 //! `MirStmt::ForObject`'s target: the next trip releases it, and the loop's
 //! exit releases the last one.
-//! Over an exact dict's `items()` iterator the item is released at the end
-//! of its own trip instead (`pycc_ext_obj_iter_recycles`), so the iterator
-//! reuses its pair tuple.
+//! An item the source unpacked (`for k, v in d.items()`) is released at the
+//! end of its own trip instead when the iterator is an exact dict's
+//! `items()` (`pycc_ext_obj_iter_recycles`), so the iterator reuses its
+//! pair tuple, as it does in CPython, where the pair is gone once unpacked.
 //! A pycc `int` temporary built by the condition or the element is released
 //! once it has been tested or packed, since the packers borrow their operand,
 //! and so is a produced CPython object condition or element (`if x.ok()`,
@@ -59,10 +60,12 @@ const EXT_OBJ_ITER_RECYCLES_SYMBOL: &str = "pycc_ext_obj_iter_recycles";
 use pycc_mir::MirExpr;
 
 /// Emits the comprehension and returns its result, a `Scalar::Object`.
-/// `var_ptr` is the loop variable's pointer slot, already allocated and
-/// visible in `cx.locals`; `iterable` is the source expression.
+/// `var` is the loop variable, `var_ptr` its pointer slot, already
+/// allocated and visible in `cx.locals`; `iterable` is the source
+/// expression.
 pub(super) fn emit_object_comprehension<'ctx>(
     cx: &CompCx<'_, 'ctx>,
+    var: &str,
     var_ptr: PointerValue<'ctx>,
     iterable: &MirExpr,
     cond: Option<&MirExpr>,
@@ -135,8 +138,14 @@ pub(super) fn emit_object_comprehension<'ctx>(
     let held_collection =
         crate::object_release::hold_new_reference(context, module, rt, collection);
 
-    let recycles = emit_iter_recycles(context, builder, module, iterator);
+    // Whether the item is released before the loop advances: only an item
+    // the source unpacked (`for k, v in d.items()`), over an exact dict's
+    // `items()` iterator.
+    let unpacked = unpacks_item(var, cond, &item);
+    let recycles = unpacked.then(|| emit_iter_recycles(context, builder, module, iterator));
     let lp = foreign_call::emit_iter_header(context, builder, module, rt, iterator);
+    // Where a trip ends, kept or filtered out, before the loop advances.
+    let latch_bb = context.append_basic_block(edge.function(), "objcomp_latch");
     // The loop variable's slot owns the item and releases the previous one
     // (`heap_rc`).
     let old = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
@@ -154,7 +163,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
         let function = edge.function();
         let keep_bb = context.append_basic_block(function, "objcomp_keep");
         builder
-            .build_conditional_branch(test, keep_bb, lp.header_bb)
+            .build_conditional_branch(test, keep_bb, latch_bb)
             .expect("build_conditional_branch should not fail for an i1 condition");
         builder.position_at_end(keep_bb);
     }
@@ -163,20 +172,28 @@ pub(super) fn emit_object_comprehension<'ctx>(
         Ok(elt) => collect_object(cx, collection, kind, elt),
         Err((key, value)) => collect_object_pair(cx, collection, key, value),
     }
-    // The item is dead once collected: releasing it before the next
-    // advance lets an exact dict's `items()` iterator hand its pair tuple
-    // out again instead of making a new one. Only that iterator: any
-    // other may run code as it advances, which would see the item go
-    // early.
-    let release_bb = context.append_basic_block(edge.function(), "objcomp_release_item");
     builder
-        .build_conditional_branch(recycles, release_bb, lp.header_bb)
-        .expect("build_conditional_branch should not fail for an i1 condition");
-    builder.position_at_end(release_bb);
-    release_loop_item(context, builder, rt, var_ptr);
+        .build_unconditional_branch(latch_bb)
+        .expect("build_unconditional_branch should not fail closing the loop body");
+    builder.position_at_end(latch_bb);
+    // The source unpacked the item (`for k, v in d.items()`), so CPython
+    // has dropped the pair by now: releasing it before the next advance
+    // lets an exact dict's `items()` iterator hand its pair tuple out again
+    // instead of making a new one, as it does there. Only that iterator:
+    // any other may run code as it advances, which would see the item go
+    // early. An item the source binds whole lives until the next is bound,
+    // as in CPython.
+    if let Some(recycles) = recycles {
+        let release_bb = context.append_basic_block(edge.function(), "objcomp_release_item");
+        builder
+            .build_conditional_branch(recycles, release_bb, lp.header_bb)
+            .expect("build_conditional_branch should not fail for an i1 condition");
+        builder.position_at_end(release_bb);
+        release_loop_item(context, builder, rt, var_ptr);
+    }
     builder
         .build_unconditional_branch(lp.header_bb)
-        .expect("build_unconditional_branch should not fail closing the loop body");
+        .expect("build_unconditional_branch should not fail closing the loop latch");
 
     builder.position_at_end(lp.after_bb);
     // The last item is released and the slot cleared, so the next run of
@@ -453,4 +470,37 @@ fn emit_iter_recycles<'ctx>(
     builder
         .build_int_compare(inkwell::IntPredicate::NE, answer, context.i32_type().const_zero(), "objcomp_recycles_set")
         .expect("build_int_compare should not fail for two i32 values")
+}
+
+/// Whether `var` is the name a tuple target was rewritten to
+/// (`pycc_ast::desugar::comps`: `for k, v in s` iterates a fresh `_pycc_N`
+/// and reads `_pycc_N[0]`, `_pycc_N[1]`; the comprehension's scope prefixes
+/// the name), and the comprehension reads it in no other way, so it never
+/// uses the item whole.
+fn unpacks_item(var: &str, cond: Option<&MirExpr>, item: &Result<&MirExpr, (&MirExpr, &MirExpr)>) -> bool {
+    // `pycc_hir` prefixes a comprehension variable with its scope, which
+    // ends in the target's offset and `_` (`synthesize_comp_var_name`); the
+    // desugar's fresh names (`_pycc_N`) are reserved.
+    let fresh = var.rsplit_once("_pycc_").is_some_and(|(scope, n)| {
+        let scoped = scope.is_empty()
+            || scope
+                .strip_suffix('_')
+                .is_some_and(|rest| rest.ends_with(|c: char| c.is_ascii_digit()));
+        scoped && !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())
+    });
+    let parts: Vec<&MirExpr> = match item {
+        Ok(elt) => vec![elt],
+        Err((key, value)) => vec![key, value],
+    };
+    fresh && cond.into_iter().chain(parts).all(|expr| only_indexes(expr, var))
+}
+
+/// Whether every read of `var` in `expr` is `var[<int literal>]`.
+fn only_indexes(expr: &MirExpr, var: &str) -> bool {
+    let is_var = |e: &MirExpr| matches!(e, MirExpr::Name { name, .. } if name == var);
+    match expr {
+        MirExpr::ObjSubscript { base, index } if is_var(base) => matches!(**index, MirExpr::IntLiteral(_)),
+        other if is_var(other) => false,
+        other => other.children().into_iter().all(|child| only_indexes(child, var)),
+    }
 }

@@ -21,6 +21,9 @@
 //! So a loop that catches an exception every iteration holds at most one
 //! caught exception at a time, and a function returning from a handler
 //! releases what it caught.
+//!
+//! A handler entered by a lazy miss (`lazy_miss`) holds, the same way, the
+//! key the `KeyError` it never made would have held ([`hold_object`]).
 
 use super::*;
 
@@ -56,9 +59,21 @@ pub(crate) fn hold<'ctx>(
     rt.exceptions.owned_slots.borrow_mut().push(slot);
 }
 
+/// Registers `slot`, which already holds an owned CPython object or null,
+/// as live; `release_fn` (`pycc_ext_obj_release`, null-tolerant) releases it.
+pub(crate) fn hold_object<'ctx>(rt: &RtFns<'ctx>, slot: PointerValue<'ctx>, release_fn: FunctionValue<'ctx>) {
+    rt.exceptions.owned_slots.borrow_mut().push(slot);
+    rt.exceptions.owned_object_slots.borrow_mut().push((slot, release_fn));
+}
+
 /// Unregisters the slots above `depth` once their clause is emitted.
 pub(crate) fn pop_to(rt: &RtFns<'_>, depth: usize) {
-    rt.exceptions.owned_slots.borrow_mut().truncate(depth);
+    let mut slots = rt.exceptions.owned_slots.borrow_mut();
+    let gone = slots.split_off(depth);
+    rt.exceptions
+        .owned_object_slots
+        .borrow_mut()
+        .retain(|(slot, _)| !gone.contains(slot));
 }
 
 /// Releases the reference `slot` holds and nulls it.
@@ -76,9 +91,21 @@ pub(crate) fn release<'ctx>(
     builder
         .build_store(slot, ptr_type.const_null())
         .expect("build_store should not fail for an exception slot");
-    builder
-        .build_call(rt.exc_decref, &[held.into()], "")
-        .expect("build_call should not fail for pycc_rt_exception_decref");
+    let object_release = rt
+        .exceptions
+        .owned_object_slots
+        .borrow()
+        .iter()
+        .find(|(object_slot, _)| *object_slot == slot)
+        .map(|(_, release_fn)| *release_fn);
+    match object_release {
+        Some(release_fn) => builder
+            .build_call(release_fn, &[held.into()], "")
+            .expect("build_call should not fail for pycc_ext_obj_release"),
+        None => builder
+            .build_call(rt.exc_decref, &[held.into()], "")
+            .expect("build_call should not fail for pycc_rt_exception_decref"),
+    };
 }
 
 /// Releases every live slot above `depth`, innermost first.

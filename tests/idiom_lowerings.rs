@@ -6,8 +6,9 @@
 //! - `sorted(a)` and `list(a)` of a list the call produced use that list
 //!   (`tests/fixtures/fresh_list_calls.py`), unless the builtin was rebound
 //!   (`tests/fixtures/fresh_list_rebound.py`);
-//! - a comprehension over an exact dict's `items()` releases each item
-//!   before it advances (`tests/fixtures/comprehension_item_release.py`).
+//! - a comprehension that unpacks its item over an exact dict's `items()`
+//!   releases each item before it advances
+//!   (`tests/fixtures/comprehension_item_release.py`).
 //!
 //! Each module prints what CPython prints for its source, with the
 //! lowerings on (their counters move) and off (`PYCC_NO_FAST_OPS=1`: every
@@ -148,6 +149,9 @@ fn a_dict_miss_caught_unseen_matches_cpython_with_the_lowering_on_and_off() {
             "nested_both",
             "temporaries",
             "handler_raises",
+            "temporary_key",
+            "dropped_key",
+            "temporary_keys_in_loop",
             "main",
         ],
         "pycc_ext_lazy_misses",
@@ -203,6 +207,8 @@ fn a_comprehension_over_dict_items_matches_cpython_with_the_lowering_on_and_off(
             "items_kept",
             "items_nested",
             "items_values_replaced",
+            "items_whole_replaced",
+            "items_filtered_replaced",
             "items_fails",
             "main",
         ],

@@ -715,10 +715,12 @@ Other idioms join this table only with a measured win on a profiled function.
   copied as before. `tuple`, `list` and `sorted` run `PySequence_Tuple`, `PySequence_List`
   and `PyList_Sort` directly when the builtin read on their first call is CPython's own,
   and call the builtin otherwise.
-- A comprehension over an exact dict's `items()` releases each item before it advances,
-  so the iterator hands the same pair tuple out again. Only that iterator: advancing it
-  runs no Python code, so nothing can observe when between two trips the item went. Every
-  other iterable keeps its item until the next one is bound.
+- A comprehension that unpacks its item (`for k, v in d.items()`) over an exact dict's
+  `items()` releases each item before it advances, kept or filtered out, so the iterator
+  hands the same pair tuple out again, as it does in CPython, where the pair is gone once
+  unpacked. Only that iterator: advancing it runs no Python code of its own. An item bound
+  whole (`for pair in d.items()`), and every other iterable's item, lives until the next
+  one is bound.
 
 The `PyDict_Next` loop, the items moved into the tuple, the indexed list loop and the
 inlined generator consumers are not implemented.
@@ -729,7 +731,9 @@ A subscript directly in a `try` body, whose first handler catches a plain `KeyEr
 cannot see the exception, takes a missing key of an exact `dict` straight into that
 handler: `PyDict_GetItemRef` answers 0, and no `KeyError`, bridged exception or traceback
 record is made (`crates/pycc_codegen/src/exception/lazy_miss.rs`,
-`pycc_ext_obj_getitem_lazy`). An exact dict raises nothing else on a miss (it has no
+`pycc_ext_obj_getitem_lazy`). The handler keeps the key until it is left, as the
+`KeyError` would have, so a key that is a temporary or that the handler drops is
+finalized where CPython finalizes it. An exact dict raises nothing else on a miss (it has no
 `__missing__`). Every other mapping, and every other failure of the lookup (an unhashable
 key, a `__hash__` or `__eq__` that raises), raises and is dispatched as before.
 
@@ -972,7 +976,7 @@ request that makes it unnecessary.
 | 8 | Call-site specialization (section 2.5): exact-type guards inline, helpers cold, per-site attribute records (item 13), profile-observed types (item 19, then delete `specialize.rs`), `isinstance` exact path. **The concept checkpoint** (moved ahead of PR 7) | profile mode on diff-match-patch's diff_main >= 6x (`--select module`: 7.1x); pydantic schema >= 1.05x; schema I1 misses <= 1.1x CPython's; `ConfigWrapper.__getattr__` replay <= 1.75 ms. If either of the first two is missed, stop and report |
 | 6b | Delete `--select module`; CI's `--instructions` gate and `package_check` move to profile mode | as PR 8; the non-strict test suite converted to `--select all` passes. **Done.** The `--instructions` gate builds with `--select all`, not the profile: pass 3 picks winners by wall time on the runner, so a profile build's set, and its counts, may change from run to run, which a gate on counts cannot allow. The `--ext` branches of the fallback loop (item 7) went with the flag; the runtime and codegen parts of items 6-9 and 20, now reached by no non-strict build, are PR 6. No build makes item 19's guessed specializations any more; their tests check that the functions compile and match CPython, and the code is deleted with item 19. With the whole-module bodies gone, the `--select all` counts measure generic bodies, which execute more instructions than CPython on the sources for tomli (`loads()`), pypng (`read()`) and pystache: every indexing, addition and comparison is a C API call where CPython's specializing interpreter has an inline path. Pass 3 keeps such sets out of a profile build; making generic bodies beat the interpreter is section 2.5's work |
 | 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
-| 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34). **Partly done, target missed**: the dict-miss lowering alone; replay 0.9-1.3 ms and 14.1M instructions (before: 3.8 ms, 46.3M; CPython 2.1 ms, 37.5M; C: 8.5M) |
+| 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34). **Partly done, target missed**: the dict-miss lowering alone; replay 0.9-1.3 ms and 14.4M instructions (before: 3.8 ms, 46.3M; CPython 2.1 ms, 37.5M; C: 8.5M) |
 | 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally. **Partly done, targets missed**: `sorted`/`list` of a fresh list and the early item release alone; `_make_json_hashable` 9.0 ms and 113M instructions (before: 11.0 ms, 133M), `_deduplicate_schemas` 9.4 ms and 124M (before: 11.8 ms, 144M); schema 1.14-1.18x with the three section 1 functions compiled (see below) |
 | 11 | Size and layout (section 2.9); item 10's decision; item 18's re-measure; item 23 dead-helper sweep | pydantic `.so` <= 1.5 MB; import >= 1.0x with no regression of any phase. The I1 measurement in section 2.9 limits what this PR can win: the dead pending-exception tests are gone, and the other layout changes tried moved I1 misses by 8% at most |
 | 12 | CI confirmation: `bench.yml` on both runners, ROADMAP accept | every section 4 target on both runners, cited by run id |
@@ -983,7 +987,7 @@ acceptance numbers stay.
 
 **After the first lowerings of PRs 9 and 10** (measured locally on 3.15.0b4, 31 interleaved
 rounds of 20 repetitions). With only the three section 1 functions compiled
-(`--compile`), schema runs 1.14-1.18x CPython (452.6M instructions against 557.9M, 1.23x;
+(`--compile`), schema runs 1.14-1.18x CPython (451.9M instructions against 557.9M, 1.23x;
 4.08M I1 misses against 5.22M), define 1.00-1.03x, process 1.02-1.04x, import within noise
 of 1.0x. The 1.2x schema target is not met. Two measurements bound what is left:
 
