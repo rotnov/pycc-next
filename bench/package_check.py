@@ -39,7 +39,7 @@ Packages:
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
-                                      [--max-build-seconds S] [--jobs N]
+                                      [--build-ratio] [--jobs N]
                                       [--instructions] [--separate] [--json PATH]
                                       [--competitors] [--select profile|all]
   PACKAGE  names from PACKAGES (default: all of them).
@@ -92,13 +92,19 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            differ by up to about 12% (CPython 3.15.2 from uv runs fewer
            instructions than CI's 3.15), so a local count does not calibrate
            a bound.
-  --max-build-seconds S
-           fail a package whose modules take more than S seconds to build in
-           all (v0.5 accept 4: 10 on the CI Linux runner). The modules build
-           in parallel, as the `pycc.build` backend builds them (--jobs, by
-           default one per CPU); each module's build time, the package's
-           elapsed time (what the bound applies to) and the sum of the
-           modules' times are always printed.
+  --build-ratio
+           with --select all: fail a package whose build's CPU time is more
+           than its bound (`max_build_ratio`) times that of a fixed reference
+           compile, `clang -O2` of `bench/build_clock.py`'s C text, measured at
+           the start of the run (v0.5 accept 4's compile speed). Unlike wall
+           time against seconds, the ratio does not move with the runner's CPU
+           model: on CI's ubuntu-24.04 runners the same build took 0.72-1.46x
+           its median CPU time, and 0.93-1.06x its median ratio. The bounds
+           are 15% above CI's median, so a build 25% slower fails. POSIX only;
+           needs `clang`.
+  Each module's build time, the package's elapsed time and the sum of the
+  modules' times are always printed; the modules build in parallel, as the
+  `pycc.build` backend builds them (--jobs, by default one per CPU).
   --jobs N  build N modules at a time.
   --separate
            build each module of a package as its own extension, as before
@@ -124,6 +130,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
+import build_clock  # noqa: E402
 import competitors  # noqa: E402
 import stats  # noqa: E402
 from package_check_workloads import (  # noqa: E402
@@ -355,7 +362,7 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
         return b, time.perf_counter() - started
 
     env = dict(os.environ, PYCC_JOBS=str(a.jobs))
-    started = time.perf_counter()
+    started, cpu_started = time.perf_counter(), build_clock.child_cpu_seconds()
     if single or a.separate:
         # In parallel, as the `pycc.build` backend builds separate modules.
         with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
@@ -374,6 +381,8 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
                                .parts]).removesuffix(".__init__")
             results.append((b, float(times.get(dotted, "nan"))))
     build_seconds = time.perf_counter() - started
+    # Every build process has been waited for: their CPU time is counted.
+    build_cpu = None if cpu_started is None else build_clock.child_cpu_seconds() - cpu_started
     for mod, (b, seconds) in zip(pkg.modules, results):
         if seconds == seconds:  # a module without selected functions is not built (nan)
             print(f"  {mod}: built in {seconds:.2f}s")
@@ -399,13 +408,16 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
                 module, _, qualname = line[len("compiled: "):].partition(":")
                 if qualname not in selected.setdefault(module, []):
                     selected[module].append(qualname)
-    cpu = sum(seconds for _, seconds in results if seconds == seconds)
+    summed = sum(seconds for _, seconds in results if seconds == seconds)
     # The modules' bytecode runs: their sources stay.
     n = sum(len(q) for q in selected.values())
     for module, qualnames in sorted(selected.items()):
         print(f"  compiled: {module}: {', '.join(qualnames)}")
     print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s "
-          f"({cpu:.2f}s of builds, {a.jobs} at a time); {n} selected functions compiled")
+          f"({summed:.2f}s of builds, {a.jobs} at a time); {n} selected functions compiled")
+    if build_cpu is not None and a.reference_seconds:
+        print(f"  build CPU time {build_cpu:.2f}s, {build_cpu / a.reference_seconds:.2f}x the "
+              f"reference compile's {a.reference_seconds:.2f}s")
     if a.select == "profile":
         # The build compiles exactly the set pass 3 measured as the winner.
         r = subprocess.run([a.pycc, "profile", str(plain / pkg.layout[0][0]), "-o", str(profile),
@@ -419,9 +431,9 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             print(f"FAIL: the build compiled {sorted(compiled_set)}, but pass 3 measured "
                   f"{sorted(measured)} as the winner")
             return False
-    if a.max_build_seconds is not None and build_seconds > a.max_build_seconds:
-        print(f"FAIL: {pkg.name} took {build_seconds:.2f}s to build, more than "
-              f"{a.max_build_seconds:g}s")
+    if a.build_ratio and build_cpu / a.reference_seconds > pkg.max_build_ratio:
+        print(f"FAIL: {pkg.name}'s build took {build_cpu / a.reference_seconds:.2f}x the "
+              f"reference compile's CPU time, more than {pkg.max_build_ratio:g}x")
         return False
 
     # A module's dotted name: `a/b.py` is `<package>.a.b`, `a/__init__.py` is `<package>.a`.
@@ -531,7 +543,7 @@ def main() -> int:
     ap.add_argument("--keep", help="build in this (new) directory and keep it")
     ap.add_argument("--time", action="store_true")
     ap.add_argument("--runs", type=int, default=5)
-    ap.add_argument("--max-build-seconds", type=float)
+    ap.add_argument("--build-ratio", action="store_true")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--instructions", action="store_true")
     ap.add_argument("--separate", action="store_true")
@@ -542,6 +554,21 @@ def main() -> int:
     for name in a.packages:
         if name not in PACKAGES:
             ap.error(f"unknown package {name!r} (known: {', '.join(PACKAGES)})")
+    a.reference_seconds = None
+    if a.build_ratio:
+        # The bounds are those of `--select all` whole-package builds.
+        if a.select != "all" or a.separate:
+            ap.error("--build-ratio needs --select all (and no --separate)")
+        if build_clock.child_cpu_seconds() is None:
+            ap.error("--build-ratio needs a POSIX system (CPU time of child processes)")
+        if shutil.which(build_clock.REFERENCE_CC) is None:
+            ap.error(f"--build-ratio needs `{build_clock.REFERENCE_CC}` (the reference compile)")
+        # The shim's runtime object cached, as it is for every build after a
+        # machine's first (`build_clock.warm_cache`).
+        build_clock.warm_cache(a.pycc)
+        a.reference_seconds = build_clock.reference_seconds()
+        print(f"reference compile ({build_clock.REFERENCE_CC} -O2, least of 3): "
+              f"{a.reference_seconds:.2f}s of CPU time")
 
     ok = True
     for name in a.packages or list(PACKAGES):
