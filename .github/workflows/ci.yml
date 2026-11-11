@@ -37,8 +37,8 @@ jobs:
           tar -xzf pycc.tar.gz
           curl -sSLo dmp.tar.gz https://files.pythonhosted.org/packages/source/d/diff-match-patch/diff_match_patch-20241021.tar.gz
           echo "beae57a99fa48084532935ee2968b8661db861862ec82c6f21f4acdd6d835073  dmp.tar.gz" | sha256sum -c
-          mkdir src && tar -C src -xzf dmp.tar.gz
+          mkdir dmpsrc; tar -C dmpsrc -xzf dmp.tar.gz; ls dmpsrc/*
           grep -m1 "model name" /proc/cpuinfo; nproc
-          python3 bench/calib_experiment.py "$PWD/pycc/bin/pycc" src/diff_match_patch-20241021 4 out.json
+          python3 bench/calib_experiment.py "$PWD/pycc/bin/pycc" dmpsrc/diff_match_patch-20241021 4 out.json
       - uses: actions/upload-artifact@v4
         with: { name: "calib-${{ matrix.leg }}", path: out.json }
