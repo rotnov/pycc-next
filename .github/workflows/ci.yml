@@ -155,7 +155,13 @@ jobs:
       - name: Real packages' hot-path instruction counts
         if: matrix.os == 'ubuntu-24.04'
         run: |
-          sudo apt-get install -y -q valgrind
+          # The runner's apt mirror sometimes fails DNS for a minute: retry the
+          # fetches instead of failing the job on an infrastructure hiccup.
+          for i in 1 2 3; do
+            sudo apt-get install -y -q -o Acquire::Retries=5 valgrind && break
+            [ $i = 3 ] && exit 1
+            sleep 20; sudo apt-get update -q || true
+          done
           python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --instructions --select all
       # Compile speed (v0.5 accept 4): `pycc build` of every bench/py program
       # takes 2 s at most.
