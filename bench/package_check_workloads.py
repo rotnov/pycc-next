@@ -37,6 +37,11 @@ class Package:
     instructions_label: str
     max_instructions: int
     instruction_calls: int
+    # `--build-ratio`'s bound: the `--select all` build's CPU time over the
+    # reference compile's (`bench/build_clock.py`), 15% above the median on
+    # CI's ubuntu-24.04 runners (8 runners of 4 CPU models, 2 builds each,
+    # 2026-11-11: every build within 0.93-1.06x the median).
+    max_build_ratio: float
     # More hot paths `--time` times, as (label, code) pairs like `speed`.
     more_speed: tuple[tuple[str, str], ...] = ()
     # Modules and subpackages of the package that stay Python (`--exclude`).
@@ -272,6 +277,8 @@ for _ in range(int(sys.argv[2])):
             # running the sources: 873.8M locally); the bound is 5% above.
             max_instructions=369_100_000,
             instruction_calls=2,
+            # The `--select all` build: 7.41x the reference compile on CI.
+            max_build_ratio=8.52,
         ),
         Package(
             name="tomli",
@@ -338,6 +345,8 @@ for _ in range(int(sys.argv[2])):
             # is an object operation.
             max_instructions=6_670_000,
             instruction_calls=20,
+            # The `--select all` build: 5.89x the reference compile on CI.
+            max_build_ratio=6.78,
         ),
         Package(
             name="pypng",
@@ -384,6 +393,8 @@ for _ in range(int(sys.argv[2])):
             # build's native `bytearray` specializations ran 21.2M.)
             max_instructions=373_700_000,
             instruction_calls=2,
+            # The `--select all` build: 4.48x the reference compile on CI.
+            max_build_ratio=5.15,
             more_speed=(("read() of every PngSuite image its tests use (28) x5", PYPNG_SUITE),),
         ),
         Package(
@@ -425,6 +436,8 @@ for _ in range(int(sys.argv[2])):
             # 5% above.
             max_instructions=79_900_000,
             instruction_calls=2,
+            # The `--select all` build: 22.21x the reference compile on CI.
+            max_build_ratio=25.54,
             more_speed=(("the benchmark's \"mistune (full)\" parser (every plugin) x20",
                          MISTUNE_CASES + MISTUNE_FULL + MISTUNE_TIMED),
                         ("import mistune (once per fresh process)", import_timed("mistune"))),
@@ -471,6 +484,8 @@ for _ in range(int(sys.argv[2])):
             # 5% above, rounded up.
             max_instructions=590_000,
             instruction_calls=100,
+            # The `--select all` build: 5.42x the reference compile on CI.
+            max_build_ratio=6.24,
             more_speed=(("import pystache (once per fresh process)", import_timed("pystache")),),
         ),
     ]
