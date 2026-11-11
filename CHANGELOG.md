@@ -272,7 +272,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   (`raise X from None` marks it suppressed and drops an earlier cause, `raise X from Y`
   sets `__cause__`, neither of which compiled code did; a cause never raised keeps no
   `__context__`; a handler that catches `e` again sees the cause the last `raise e from`
-  gave it), and it is the previous one again once the clause is left. Raising a
+  gave it, and an edit Python code makes to `__cause__` or `__suppress_context__` stays:
+  once an exception has a CPython object, that object alone holds those links), and it is
+  the previous one again once the clause is left. Raising a
   stored exception (`raise e`) gives it the handled one as its context, cutting a cycle as
   CPython does, and so does a `KeyError` for a non-`str` key, which had none. The
   clause publishes the first time something could see the exception (a call, a `raise`, a

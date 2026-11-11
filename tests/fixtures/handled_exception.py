@@ -191,6 +191,55 @@ def inner_sees_new_cause(d, k):
             return handled_links()
 
 
+def clear_cause():
+    sys.exception().__cause__ = None
+
+
+def set_new_cause():
+    sys.exception().__cause__ = KeyError("set by Python")
+
+
+def unsuppress():
+    sys.exception().__suppress_context__ = False
+
+
+def edited_then_reraised(d, k, edit):
+    # Python code edits the handled exception's links; they stay.
+    try:
+        raise ValueError("v") from IndexError("old")
+    except ValueError:
+        edit()
+        raise
+
+
+def edited_inner_sees(d, k, edit):
+    try:
+        raise ValueError("v") from IndexError("old")
+    except ValueError as e:
+        edit()
+        try:
+            raise e
+        except ValueError:
+            return handled_links()
+
+
+def cpython_raises_with_cause():
+    # Not compiled (it reaches the globals by a string): CPython raises.
+    exec("raise ValueError('from CPython') from IndexError('its cause')")
+
+
+def bridged_cause_kept(d, k):
+    # An exception CPython raised with a cause keeps it when compiled code
+    # catches it and raises it again.
+    try:
+        cpython_raises_with_cause()
+    except ValueError as e:
+        try:
+            raise e
+        except ValueError:
+            return handled_links()
+
+
 def self_reraise_from_self():
     try:
         raise ValueError("v")
@@ -413,7 +462,7 @@ def main():
     for f in (info, bound, restored, nested, returns_from_handler, after_return, raises_new,
               raises_from_none, raises_from_cause, raises_from_bound_cause, raises_again_from_none,
               raises_stored, raises_outer_in_inner, raises_caught_from_cpython, raises_from_handled,
-              inner_sees_from_none, inner_sees_new_cause,
+              inner_sees_from_none, inner_sees_new_cause, bridged_cause_kept,
               reraises, reraises_named,
               callee_raises, operation_raises, caught_inside, three_deep, raises_saved,
               handler_in_callee,
@@ -422,6 +471,9 @@ def main():
             shown(f, d, k)
     shown(raises_object, {}, "k", RuntimeError)
     shown(raises_object, {}, "k", fails)
+    for edit in (clear_cause, set_new_cause, unsuppress):
+        shown(edited_then_reraised, {}, "k", edit)
+        shown(edited_inner_sees, {}, "k", edit)
     shown(in_loop, {"a": 1}, ["a", "b", "stop", "c"])
     shown(in_loop, Mapping(), ["a", "stop"])
     shown(config, {"a": 1}, {}, "a")

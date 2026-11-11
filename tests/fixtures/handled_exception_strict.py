@@ -140,3 +140,22 @@ def self_reraise_from_self() -> None:
         raise ValueError("v")
     except ValueError as e:
         raise e from e
+
+
+def edited_then_reraised(edit: object) -> int:
+    try:
+        raise ValueError("v") from IndexError("old")
+    except ValueError:
+        edit()
+        raise
+
+
+def edited_inner_sees(edit: object) -> str:
+    try:
+        raise ValueError("v") from IndexError("old")
+    except ValueError as e:
+        edit()
+        try:
+            raise e
+        except ValueError:
+            return handled_links()

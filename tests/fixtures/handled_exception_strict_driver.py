@@ -44,6 +44,27 @@ def run(m):
         except KeyError as e:
             print("from a host handler", chain(e))
     print("self-caused left alive:", left_alive(m.self_reraise_from_self))
+    # Python code edits the handled exception's links; they stay.
+    for edit in (clear_cause, set_new_cause, unsuppress):
+        for name in ("edited_then_reraised", "edited_inner_sees"):
+            try:
+                result = getattr(m, name)(edit)
+            except BaseException as e:
+                print(name, edit.__name__, "raised", chain(e))
+            else:
+                print(name, edit.__name__, repr(result))
+
+
+def clear_cause():
+    sys.exception().__cause__ = None
+
+
+def set_new_cause():
+    sys.exception().__cause__ = KeyError("set by Python")
+
+
+def unsuppress():
+    sys.exception().__suppress_context__ = False
 
 
 def left_alive(f):

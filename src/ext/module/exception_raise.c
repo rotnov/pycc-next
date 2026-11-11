@@ -95,74 +95,66 @@ extern void pycc_rt_exception_decref(void *obj);
 static int pycc_ext_exception_was_raised(void *exc);
 
 /*
- * Gives `obj`, the CPython object of the pycc exception `native`, the links
- * compiled code set on `native`: its `__cause__` (`raise X from Y`) or its
- * `from None` mark (`PyException_SetCause` sets `__suppress_context__`
- * either way, as `raise ... from` does). It runs wherever the object is
- * handed to CPython -- raised at the export boundary, published by a
- * handler, bound by `except ... as` -- so a link a later `raise e from ...`
- * set is what an inner handler sees too. An object whose exception compiled
- * code gave neither keeps the links it has (one from CPython keeps its own).
+ * `__cause__` and `__suppress_context__` have one authority at a time. Until
+ * a pycc exception has a CPython object, compiled code records them on the
+ * exception itself (`raise X from Y`, `from None`), and they are given to
+ * the object once, when it is made (`pycc_ext_raised_links`). From then on
+ * the object holds them: a compiled `raise e from ...` writes to it
+ * (`pycc_ext_raise_with_cause`, `pycc_ext_raise_from_none`), and so may
+ * Python code, whose edits stay.
+ *
  * A cause chain deeper than `PYCC_EXT_CAUSE_DEPTH`, which only a cycle of
- * causes reaches, is cut there. CPython's error indicator is kept.
+ * causes not yet made reaches, is cut there.
  */
 #define PYCC_EXT_CAUSE_DEPTH 64
 
-static void pycc_ext_links_sync(void *native, PyObject *obj)
+/*
+ * The CPython object for the pycc exception `cause` given as a `__cause__`
+ * (borrowed from it), or NULL, with no CPython error set, when it cannot be
+ * made. A cause compiled code never raised (`raise X from E(...)`) has no
+ * `__context__` in CPython. It is made here while the handled exception is
+ * published, which `PyErr_SetObject` would chain onto it, so that link is
+ * dropped. One raised and bound by an `except ... as` was made where the
+ * handler published it, with its context; one raised where nothing
+ * publishes (a `finally`, a generator's handler: DEVIATIONS.md) keeps the
+ * link. CPython's error indicator is kept.
+ */
+static PyObject *pycc_ext_cause_object(void *cause)
 {
     static int depth = 0;
-    void *cause = pycc_rt_exception_cause(native);
-    PyObject *cause_object = NULL;
     PyObject *saved;
+    PyObject *object;
+    int fresh;
 
-    if (cause == NULL && !pycc_rt_exception_suppresses_context(native)) {
-        return;
+    if (depth >= PYCC_EXT_CAUSE_DEPTH) {
+        return NULL;
     }
+    fresh = pycc_rt_exception_foreign(cause) == NULL && !pycc_ext_exception_was_raised(cause);
     saved = PyErr_GetRaisedException();
-    if (cause != NULL && depth < PYCC_EXT_CAUSE_DEPTH) {
-        depth++;
-        if (cause == native) {
-            cause_object = obj;
-        } else {
-            /*
-             * A cause compiled code never raised (`raise X from E(...)`) has
-             * no `__context__` in CPython. It is made here while the handled
-             * exception is published, which `PyErr_SetObject` would chain
-             * onto it, so that link is dropped. One raised and bound by an
-             * `except ... as` was made where the handler published it, with
-             * its context; one raised where nothing publishes (a `finally`,
-             * a generator's handler: DEVIATIONS.md) keeps the link.
-             */
-            int fresh = pycc_rt_exception_foreign(cause) == NULL &&
-                        !pycc_ext_exception_was_raised(cause);
-
-            cause_object = pycc_ext_exception_cpython(cause);
-            if (cause_object != NULL && fresh) {
-                PyException_SetContext(cause_object, NULL);
-            }
-        }
-        depth--;
-        if (cause_object == NULL) {
-            PyErr_Clear();
-        }
+    depth++;
+    object = pycc_ext_exception_cpython(cause);
+    depth--;
+    if (object == NULL) {
+        PyErr_Clear();
+    } else if (fresh) {
+        PyException_SetContext(object, NULL);
     }
-    /* Steals the cause's reference; a NULL cause still suppresses. */
-    PyException_SetCause(obj, cause_object == NULL ? NULL : Py_NewRef(cause_object));
     PyErr_SetRaisedException(saved);
+    return object;
 }
 
 /*
- * The CPython exception just built for the pending pycc exception is
- * raised: gives it that one's links (`pycc_ext_links_sync`), then clears
- * the pending state.
+ * The CPython exception just made for the pending pycc exception is raised:
+ * gives it the links compiled code recorded on that one, then clears the
+ * pending state.
  */
 static void pycc_ext_raised_links(void)
 {
     void *native = pycc_rt_exception_value();
+    void *cause = pycc_rt_exception_cause(native);
     PyObject *raised;
 
-    if (pycc_rt_exception_cause(native) == NULL &&
-        !pycc_rt_exception_suppresses_context(native)) {
+    if (cause == NULL && !pycc_rt_exception_suppresses_context(native)) {
         pycc_rt_exception_clear();
         return;
     }
@@ -171,10 +163,54 @@ static void pycc_ext_raised_links(void)
     pycc_rt_exception_clear();
     raised = PyErr_GetRaisedException();
     if (raised != NULL) {
-        pycc_ext_links_sync(native, raised);
+        PyObject *cause_object = cause == native ? raised
+                                 : cause == NULL ? NULL
+                                                 : pycc_ext_cause_object(cause);
+
+        /* Steals the cause's reference; a NULL cause still suppresses. */
+        PyException_SetCause(raised, cause_object == NULL ? NULL : Py_NewRef(cause_object));
     }
     pycc_rt_exception_decref(native);
     PyErr_SetRaisedException(raised);
+}
+
+extern void pycc_rt_exception_raise_with_cause(void *obj, void *cause);
+extern void pycc_rt_exception_suppress_context(void *obj);
+
+/*
+ * A compiled `raise exc from cause`, both references handed over: records
+ * the cause on `exc` while it has no CPython object, else sets it on the
+ * object, and raises `exc`.
+ */
+void pycc_ext_raise_with_cause(void *exc, void *cause)
+{
+    PyObject *object = exc == NULL ? NULL : pycc_rt_exception_foreign(exc);
+    PyObject *cause_object;
+
+    if (object == NULL) {
+        pycc_rt_exception_raise_with_cause(exc, cause);
+        return;
+    }
+    cause_object = cause == exc ? object : cause == NULL ? NULL : pycc_ext_cause_object(cause);
+    PyException_SetCause(object, cause_object == NULL ? NULL : Py_NewRef(cause_object));
+    pycc_rt_exception_decref(cause);
+    pycc_rt_exception_raise(exc);
+}
+
+/*
+ * A compiled `raise exc from None`, before the raise: marks `exc` while it
+ * has no CPython object, else clears the object's cause, which sets its
+ * `__suppress_context__`.
+ */
+void pycc_ext_raise_from_none(void *exc)
+{
+    PyObject *object = exc == NULL ? NULL : pycc_rt_exception_foreign(exc);
+
+    if (object == NULL) {
+        pycc_rt_exception_suppress_context(exc);
+        return;
+    }
+    PyException_SetCause(object, NULL);
 }
 
 /*
@@ -224,7 +260,8 @@ static int pycc_ext_raise_pending(void)
         pycc_ext_tb_sync(pycc_rt_exception_value(), original);
         Py_INCREF(original);
         PyErr_SetRaisedException(original);
-        pycc_ext_raised_links();
+        /* Its links are the object's own (`pycc_ext_raised_links`). */
+        pycc_rt_exception_clear();
         return 1;
     }
     exc_type = pycc_ext_builtin_exception_class(tag);

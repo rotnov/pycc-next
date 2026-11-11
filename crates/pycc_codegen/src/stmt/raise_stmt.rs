@@ -80,6 +80,35 @@ fn emit_raise_context<'ctx>(
         .expect("build_call should not fail for pycc_ext_raise_context");
 }
 
+/// `void pycc_ext_raise_with_cause(void *exc, void *cause)`: an `--ext`
+/// module's `raise exc from cause`.
+const EXT_RAISE_WITH_CAUSE_SYMBOL: &str = "pycc_ext_raise_with_cause";
+/// `void pycc_ext_raise_from_none(void *exc)`: an `--ext` module's mark of
+/// `raise exc from None`.
+const EXT_RAISE_FROM_NONE_SYMBOL: &str = "pycc_ext_raise_from_none";
+
+/// In an `--ext` module, the shim's form of a runtime call that sets an
+/// exception's `__cause__` or `from None` mark (`symbol`, taking `params`
+/// pointers): once the exception has a CPython object, the object holds
+/// those links (`src/ext/module/exception_raise.c`). None elsewhere.
+fn ext_links_fn<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    symbol: &str,
+    params: usize,
+) -> Option<inkwell::values::FunctionValue<'ctx>> {
+    if !rt.publish_handled.get() {
+        return None;
+    }
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    Some(crate::foreign_pack::shim_fn(
+        module,
+        symbol,
+        context.void_type().fn_type(&vec![ptr.into(); params], false),
+    ))
+}
+
 // Part 9 of #1371: `raise o` with a CPython object `o`.
 pub(crate) fn emit_obj_raise_stmt<'ctx>(
     context: &'ctx Context,
@@ -164,8 +193,10 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
         // suppressed.
         emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
         emit_raise_context(context, builder, module, rt, exception, exc_obj);
+        let suppress = ext_links_fn(context, module, rt, EXT_RAISE_FROM_NONE_SYMBOL, 1)
+            .unwrap_or(rt.exception_suppress_context);
         builder
-            .build_call(rt.exception_suppress_context, &[exc_obj.into()], "")
+            .build_call(suppress, &[exc_obj.into()], "")
             .expect("build_call should not fail for exception_suppress_context");
         builder
             .build_call(rt.exception_raise, &[exc_obj.into()], "")
@@ -187,9 +218,11 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
     )?;
     emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
     emit_raise_context(context, builder, module, rt, exception, exc_obj);
+    let raise_with_cause = ext_links_fn(context, module, rt, EXT_RAISE_WITH_CAUSE_SYMBOL, 2)
+        .unwrap_or(rt.exception_raise_with_cause);
     builder
         .build_call(
-            rt.exception_raise_with_cause,
+            raise_with_cause,
             &[exc_obj.into(), cause_obj.into()],
             "",
         )

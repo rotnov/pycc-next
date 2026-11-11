@@ -67,8 +67,9 @@ fn an_escaping_bridged_exception_is_re_raised_as_its_original() {
          if (original != NULL) {\n        \
          pycc_ext_tb_sync(pycc_rt_exception_value(), original);\n        \
          Py_INCREF(original);\n        \
-         PyErr_SetRaisedException(original);\n        pycc_ext_raised_links();\n        \
-         return 1;\n    }\n"
+         PyErr_SetRaisedException(original);\n        \
+         /* Its links are the object's own (`pycc_ext_raised_links`). */\n        \
+         pycc_rt_exception_clear();\n        return 1;\n    }\n"
     ));
     let include = SHIM_C
         .find("#include \"pycc_ext_exports.inc\"")
