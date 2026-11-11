@@ -215,6 +215,15 @@ pub unsafe extern "C" fn pycc_rt_exception_dealloc_install(
 }
 
 /// Points the shim's dealloc pointer at the function for the new state.
+///
+/// The count's update in [`set_state`] and this store are two steps, with
+/// nothing to order them between threads: they rely on the caller holding
+/// CPython's GIL, as every caller in an `ext` module does (the shim refuses
+/// a free-threaded interpreter when the module is imported). No thread
+/// leaves the pointer set by exiting with an exception pending either:
+/// every entry from CPython into compiled code turns a pending exception
+/// into CPython's before it returns (`pycc_ext_raise_pending`), so a thread
+/// ends with none.
 fn pending_changed(any: bool) {
     use std::sync::atomic::Ordering::Relaxed;
     let slot = DEALLOC_SLOT.load(Relaxed);
