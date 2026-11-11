@@ -154,6 +154,50 @@ def raises_from_bound_cause(d, k):
             raise ValueError("caused") from cause
 
 
+def raises_again_from_none(d, k):
+    # `raise e from None` drops the cause an earlier `raise ... from` gave.
+    try:
+        raise ValueError("new") from IndexError("old")
+    except ValueError as e:
+        raise e from None
+
+
+def raises_stored(d, k):
+    # A stored exception raised in another handler gets that one as context.
+    try:
+        return d[k]
+    except KeyError as e:
+        first = e
+    try:
+        raise ValueError("second")
+    except ValueError:
+        raise first
+
+
+def raises_outer_in_inner(d, k):
+    # The outer handled exception raised in an inner handler: the inner one
+    # becomes its context, and the inner one's link back to it is cut.
+    try:
+        return d[k]
+    except KeyError as a:
+        try:
+            raise ValueError("b")
+        except ValueError:
+            raise a
+
+
+def raises_caught_from_cpython(d, k):
+    # Caught from a CPython callee, stored, raised in another handler.
+    try:
+        int("x")
+    except ValueError as e:
+        first = e
+    try:
+        return d[k]
+    except KeyError:
+        raise first
+
+
 def raises_from_handled(d, k):
     try:
         return d[k]
@@ -331,7 +375,8 @@ def shown(f, *args):
 
 def main():
     for f in (info, bound, restored, nested, returns_from_handler, after_return, raises_new,
-              raises_from_none, raises_from_cause, raises_from_bound_cause, raises_from_handled,
+              raises_from_none, raises_from_cause, raises_from_bound_cause, raises_again_from_none,
+              raises_stored, raises_outer_in_inner, raises_caught_from_cpython, raises_from_handled,
               reraises, reraises_named,
               callee_raises, operation_raises, caught_inside, three_deep, raises_saved,
               handler_in_callee,

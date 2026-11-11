@@ -369,6 +369,26 @@ fn explicit_cause_and_default_fields_are_preserved() {
 }
 
 #[test]
+fn raising_again_from_none_drops_the_cause() {
+    // `raise e from None` of an `e` an earlier `raise e from c` gave a
+    // cause: CPython's `__cause__` is `None` again.
+    pycc_rt_exception_clear();
+    let cause = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "cause");
+    let exc = alloc_named(EXCEPTION_TYPE_RUNTIME_ERROR, "RuntimeError", "effect");
+    unsafe { pycc_rt_exception_incref(exc) };
+    unsafe { pycc_rt_exception_raise_with_cause(exc, cause) };
+    pycc_rt_exception_clear();
+    use super::lifetime::{
+        pycc_rt_exception_cause, pycc_rt_exception_suppress_context,
+        pycc_rt_exception_suppresses_context,
+    };
+    unsafe { pycc_rt_exception_suppress_context(exc) };
+    assert!(unsafe { pycc_rt_exception_cause(exc) }.is_null());
+    assert_eq!(unsafe { pycc_rt_exception_suppresses_context(exc) }, 1);
+    pycc_rt_exception_decref(exc);
+}
+
+#[test]
 fn raise_with_cause_accepts_a_null_primary_object() {
     unsafe { pycc_rt_exception_raise_with_cause(std::ptr::null_mut(), std::ptr::null_mut()) };
     assert_eq!(pycc_rt_exception_active(), 1);

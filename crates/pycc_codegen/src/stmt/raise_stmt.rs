@@ -34,6 +34,7 @@ pub(crate) fn emit_raise_stmt<'ctx>(
         "exception",
     )?;
     emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+    emit_raise_context(context, builder, module, rt, exception, exc_obj);
     builder
         .build_call(rt.exception_raise, &[exc_obj.into()], "")
         .expect("build_call should not fail for exception_raise");
@@ -47,6 +48,36 @@ pub(crate) fn emit_raise_stmt<'ctx>(
         .build_unreachable()
         .expect("build_unreachable should not fail after raise");
     Ok(())
+}
+
+/// `void pycc_ext_raise_context(void *exc)`: chains the exception being
+/// handled onto one being raised that already is a CPython object.
+pub(crate) const EXT_RAISE_CONTEXT_SYMBOL: &str = "pycc_ext_raise_context";
+
+/// In an `--ext` module, a `raise` of an existing exception (`raise e`, not
+/// `raise E(...)`) gives it its `__context__` there, as CPython does at
+/// every raise, when it already is a CPython object (the shim decides). A
+/// constructed one has none yet and gets it where its object is made.
+fn emit_raise_context<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    exception: &pycc_mir::MirExceptionValue,
+    exc_obj: inkwell::values::PointerValue<'ctx>,
+) {
+    if !rt.publish_handled.get() || !matches!(exception, pycc_mir::MirExceptionValue::Existing(_)) {
+        return;
+    }
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let chain = crate::foreign_pack::shim_fn(
+        module,
+        EXT_RAISE_CONTEXT_SYMBOL,
+        context.void_type().fn_type(&[ptr.into()], false),
+    );
+    builder
+        .build_call(chain, &[exc_obj.into()], "")
+        .expect("build_call should not fail for pycc_ext_raise_context");
 }
 
 // Part 9 of #1371: `raise o` with a CPython object `o`.
@@ -132,6 +163,7 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
         // being handled, which an `--ext` handler publishes -- is marked
         // suppressed.
         emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+        emit_raise_context(context, builder, module, rt, exception, exc_obj);
         builder
             .build_call(rt.exception_suppress_context, &[exc_obj.into()], "")
             .expect("build_call should not fail for exception_suppress_context");
@@ -154,6 +186,7 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
         "cause",
     )?;
     emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+    emit_raise_context(context, builder, module, rt, exception, exc_obj);
     builder
         .build_call(
             rt.exception_raise_with_cause,

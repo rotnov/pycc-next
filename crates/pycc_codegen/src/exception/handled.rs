@@ -36,7 +36,9 @@
 //! An exception leaving the body goes through the handler's cleanup block,
 //! which calls `pycc_ext_handler_unwind` first: an exception compiled code
 //! raised itself becomes a CPython object there, while the handler's is
-//! still the handled one, and so gets its context.
+//! still the handled one, and so gets its context. One that already is a
+//! CPython object, raised again (`raise e`), gets it at the `raise`
+//! (`pycc_ext_raise_context`, `stmt::raise_stmt`).
 //!
 //! Not published: a handler of a generator function (a `yield` inside it
 //! would have to hand the thread's state back and forth), an `except*`

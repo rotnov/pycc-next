@@ -226,11 +226,29 @@ void pycc_ext_handler_leave(PyObject *prev)
     Py_DECREF(prev);
 }
 
+/*
+ * A compiled `raise e`: CPython gives the exception it raises the one being
+ * handled as its `__context__` at every raise. An `e` that already is a
+ * CPython object (an `except ... as` bound it, or it came from CPython) is
+ * chained here; one that is not gets its context where its object is made
+ * (`pycc_ext_handler_unwind`, `pycc_ext_raise_pending`). A handler around
+ * the `raise` has published its exception first.
+ */
+void pycc_ext_raise_context(void *exc)
+{
+    PyObject *original = exc == NULL ? NULL : pycc_rt_exception_foreign(exc);
+
+    if (original != NULL) {
+        pycc_ext_chain_context(original);
+    }
+}
+
 /* An exception is leaving `h`'s body (it is pending). One compiled code
  * raised itself has no CPython object yet: it is made now, while `h`'s
  * exception is still the handled one, so that becomes its `__context__`
- * as it does where CPython raises. One that came from CPython got its
- * context there; the handler's own exception, raised again, gets none. */
+ * as it does where CPython raises. One that already had an object got its
+ * context where it was raised (in CPython, or `pycc_ext_raise_context`);
+ * the handler's own exception, raised again, gets none. */
 void pycc_ext_handler_unwind(PyccExtHandler *h)
 {
     void *raised = pycc_rt_exception_take();

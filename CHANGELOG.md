@@ -45,7 +45,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   about 1.12x CPython locally (1.07x before); `ConfigWrapper.__getattr__` replays at
   14.2M instructions against 46.3M before.
 - Generic bodies keep a scanner's `int` position and current one-character `str` as
-  machine words (`docs/design/compile-little.md`, "Tagged locals"): an `object` local
+  machine words (`docs/design/call-site-specialization.md`, "Tagged locals"): an `object` local
   rebound as `x = x ± y` or `c = s[i]` and read as a word (an index into an exact
   sequence, a comparison with a one-character or `int` literal, `in`, a `str` slice
   bound) holds a tagged small `int` or ASCII character, boxed only where another read
@@ -266,9 +266,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   does. Inside it `sys.exception()` and `sys.exc_info()` returned `None` and
   `traceback.format_exc()` was empty, and an exception raised there had no `__context__`;
   they now see the handled exception, which becomes the context of what the clause raises
-  (`raise X from None` marks it suppressed, `raise X from Y` sets `__cause__`, neither of
-  which compiled code did; a cause never raised keeps no `__context__`), and it is the
-  previous one again once the clause is left. The
+  (`raise X from None` marks it suppressed and drops an earlier cause, `raise X from Y`
+  sets `__cause__`, neither of which compiled code did; a cause never raised keeps no
+  `__context__`), and it is the previous one again once the clause is left. Raising a
+  stored exception (`raise e`) gives it the handled one as its context, cutting a cycle as
+  CPython does, and so does a `KeyError` for a non-`str` key, which had none. The
   clause publishes the first time something could see the exception (a call, a `raise`, a
   release that frees an object), so entering a handler costs what it did and the path
   without an exception nothing. A `finally` clause, an `except*` clause and a generator's

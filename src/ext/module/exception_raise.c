@@ -39,6 +39,52 @@ static void pycc_ext_tb_sync_raised(void *native)
     PyErr_SetRaisedException(raised);
 }
 
+/*
+ * CPython's implicit chaining (`_PyErr_SetObject`) for `value`, raised now
+ * by a path that does not chain by itself (`PyErr_SetRaisedException`, a
+ * compiled `raise` of an exception that already is a CPython object): the
+ * exception being handled becomes its `__context__`, unless it is `value`
+ * itself. If `value` is already in the handled exception's context chain,
+ * the link that would close a cycle is cut, and a cycle already there ends
+ * the walk (Floyd's test), both as CPython does.
+ */
+static void pycc_ext_chain_context(PyObject *value)
+{
+    PyObject *handled = PyErr_GetHandledException();
+    PyObject *o;
+    PyObject *slow;
+    PyObject *context;
+    int advance_slow = 0;
+
+    if (handled == NULL || handled == value) {
+        Py_XDECREF(handled);
+        return;
+    }
+    o = handled;
+    slow = handled;
+    while ((context = PyException_GetContext(o)) != NULL) {
+        /* Borrowed from here on: `o` keeps it alive. */
+        Py_DECREF(context);
+        if (context == value) {
+            PyException_SetContext(o, NULL);
+            break;
+        }
+        o = context;
+        if (o == slow) {
+            break;
+        }
+        if (advance_slow) {
+            PyObject *next = PyException_GetContext(slow);
+
+            Py_XDECREF(next);
+            slow = next;
+        }
+        advance_slow = !advance_slow;
+    }
+    /* Steals the reference `PyErr_GetHandledException` returned. */
+    PyException_SetContext(value, handled);
+}
+
 /* `object_except.c`: the CPython exception a pycc exception stands for. */
 static PyObject *pycc_ext_exception_cpython(void *exc);
 extern void *pycc_rt_exception_cause(void *obj);
@@ -211,6 +257,8 @@ static int pycc_ext_raise_pending(void)
         PyObject *raised = pycc_ext_key_error_from_repr(message);
         if (raised != NULL) {
             Py_DECREF(message);
+            /* `PyErr_SetObject` would have chained it. */
+            pycc_ext_chain_context(raised);
             PyErr_SetRaisedException(raised);
             pycc_ext_tb_sync_raised(pycc_rt_exception_value());
             pycc_ext_raised_links();
