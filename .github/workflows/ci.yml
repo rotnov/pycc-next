@@ -50,11 +50,6 @@ jobs:
           for cc in ('cc', 'clang'):
               print('REF', cc, round(b.reference_seconds(3, cc), 3))
           "
-          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99 | tee pc.txt
-          python3 bench/run.py --build-only --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99 | tee run.txt
-          python3 bench/run.py --build-only --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99 | tee run2.txt
-          python3 -c "
-          import sys; sys.path.insert(0, 'bench'); import build_clock as b
-          for cc in ('cc', 'clang'):
-              print('REF', cc, round(b.reference_seconds(3, cc), 3))
-          "
+          for i in 1 2; do
+            python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --select all --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99
+          done
