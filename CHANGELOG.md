@@ -249,6 +249,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - The pydantic benchmark builds pydantic 2.14.2 with pydantic-core 2.50.2 (2.13.5's
   pydantic-core has no CPython 3.15 wheels); the pinned numpy, Cython and mypy wheels are
   their cp315 builds.
+- CI's compile-speed gate (v0.5 accept 4) no longer compares seconds of wall time with
+  10 s, which flipped with the runner's CPU model: `bench/package_check.py --select all
+  --build-ratio` fails a package whose build's CPU time is over its bound
+  (`max_build_ratio`, 15% above CI's median) times that of a fixed `clang -O2` compile
+  run first (`bench/build_clock.py`); `--max-build-seconds` is gone. The derivation is in
+  `docs/roadmap/v0.1-v0.7.md`.
 
 ### Fixed
 - Non-strict `--ext`: an object freed while an exception propagates through compiled code

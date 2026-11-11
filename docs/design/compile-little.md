@@ -244,7 +244,7 @@ faster beyond the noise of both, its compiled third quartile under the smaller o
 quartile (sets of one size: the one measured first, more self time, unless beaten the same
 way). A lower median alone does not order two winners: with overlapping interquartile
 ranges the pick flipped from run to run, and on diff-match-patch CI selected a 30-function
-region (a build of about 9 s, near `bench/package_check.py`'s `--max-build-seconds 10`) in
+region (a build of about 9 s, near `bench/package_check.py`'s then `--max-build-seconds 10`) in
 one run and `diff_bisect` alone (1.4 s) in the next. Each function more costs build time,
 size and risk, so a larger set must earn its place by more than noise. The quartiles
 compared are each check's own compiled runs: every check interleaves its rounds with
