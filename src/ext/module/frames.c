@@ -59,17 +59,6 @@ typedef struct PyccTbRecord {
 extern const PyccTbRecord *pycc_rt_exception_tb(void *exc, size_t *len, size_t *synced);
 extern void pycc_rt_exception_tb_synced(void *exc, size_t n);
 
-/* Whether compiled code has raised `exc` (borrowed): each raise records the
- * frame it happened in, and an exception only constructed has no record. */
-static int pycc_ext_exception_was_raised(void *exc)
-{
-    size_t len = 0;
-    size_t synced = 0;
-
-    pycc_rt_exception_tb(exc, &len, &synced);
-    return len != 0;
-}
-
 /*
  * `_PyInterpreterFrame` (Include/internal/pycore_frame.h in CPython 3.13,
  * pycore_interpframe_structs.h in 3.15) for a 64-bit GIL build. Its first

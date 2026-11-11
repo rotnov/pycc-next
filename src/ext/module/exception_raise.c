@@ -92,8 +92,6 @@ extern int pycc_rt_exception_suppresses_context(void *obj);
 extern void pycc_rt_exception_incref(void *obj);
 extern void pycc_rt_exception_decref(void *obj);
 extern void pycc_rt_exception_release_cause(void *obj);
-/* `frames.c`: whether compiled code has raised a pycc exception. */
-static int pycc_ext_exception_was_raised(void *exc);
 
 /*
  * `__cause__` and `__suppress_context__` have one authority at a time. Until
@@ -112,32 +110,31 @@ static int pycc_ext_exception_was_raised(void *exc);
 /*
  * The CPython object for the pycc exception `cause` given as a `__cause__`
  * (borrowed from it), or NULL, with no CPython error set, when it cannot be
- * made. A cause compiled code never raised (`raise X from E(...)`) has no
- * `__context__` in CPython. It is made here while the handled exception is
- * published, which `PyErr_SetObject` would chain onto it, so that link is
- * dropped. One raised and bound by an `except ... as` was made where the
- * handler published it, with its context; one raised where nothing
- * publishes (a `finally`, a generator's handler: DEVIATIONS.md) keeps the
- * link. CPython's error indicator is kept.
+ * made. One that already has its object keeps that object's links. One
+ * made here is made while the handled exception is published, which
+ * `PyErr_SetObject` would chain onto it: that is not its context (CPython
+ * gives a cause compiled code never raised none), so the link is dropped.
+ * One raised earlier in a handler that published nothing therefore has no
+ * `__context__` (DEVIATIONS.md). CPython's error indicator is kept.
  */
 static PyObject *pycc_ext_cause_object(void *cause)
 {
     static int depth = 0;
     PyObject *saved;
     PyObject *object;
-    int fresh;
+    int made_here;
 
     if (depth >= PYCC_EXT_CAUSE_DEPTH) {
         return NULL;
     }
-    fresh = pycc_rt_exception_foreign(cause) == NULL && !pycc_ext_exception_was_raised(cause);
+    made_here = pycc_rt_exception_foreign(cause) == NULL;
     saved = PyErr_GetRaisedException();
     depth++;
     object = pycc_ext_exception_cpython(cause);
     depth--;
     if (object == NULL) {
         PyErr_Clear();
-    } else if (fresh) {
+    } else if (made_here) {
         PyException_SetContext(object, NULL);
     }
     PyErr_SetRaisedException(saved);

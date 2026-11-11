@@ -188,19 +188,29 @@ def local_from_new_cause():
     raise x from KeyError("c")
 
 
-def caught_unpublished():
-    # Handed back from its handler, which runs nothing that could see it:
-    # it has no CPython object yet.
+def raises_from_unpublished():
+    # A cause raised earlier, in a handler that published nothing, given
+    # while another exception is handled: that one is not its context (the
+    # strict fixture's `raises_from_unpublished` hands it back from a
+    # callee).
     try:
-        raise ValueError("v")
+        fails("saved")
     except ValueError as e:
-        return e
+        saved = e
+    try:
+        raise IndexError("handled")
+    except IndexError:
+        raise RuntimeError("new") from saved
 
 
 def self_cause_unpublished():
-    # Its own cause before it has a CPython object.
-    e = caught_unpublished()
-    raise e from e
+    # Its own cause before it has a CPython object: its handler runs
+    # nothing that could see it.
+    try:
+        fails("v")
+    except ValueError as e:
+        saved = e
+    raise saved from saved
 
 
 def raises_again_from_none(d, k):
@@ -519,6 +529,7 @@ def main():
             shown(f, d, k)
     shown(raises_object, {}, "k", RuntimeError)
     shown(raises_object, {}, "k", fails)
+    shown(raises_from_unpublished)
     for f in (raises_object_from, raises_object_from_bound):
         shown(f, {}, "k", ValueError("passed"))
         shown(f, {}, "k", RuntimeError)

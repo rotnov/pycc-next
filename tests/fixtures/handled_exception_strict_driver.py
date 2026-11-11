@@ -27,7 +27,7 @@ def run(m):
         ("raises_stored", ("k",)), ("raises_outer_in_inner", ("k",)),
         ("default_after_miss", ("k",)), ("default_after_miss", ("a",)),
         ("inner_sees_from_none", ()), ("inner_sees_new_cause", ()),
-        ("self_reraise_from_self", ()),
+        ("self_reraise_from_self", ()), ("raises_from_unpublished", ()),
     ]
     for name, args in calls:
         try:

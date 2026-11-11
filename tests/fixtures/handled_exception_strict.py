@@ -159,3 +159,29 @@ def edited_inner_sees(edit: object) -> str:
             raise e
         except ValueError:
             return handled_links()
+
+
+def _fails(message: str) -> None:
+    raise ValueError(message)
+
+
+def _caught() -> ValueError | None:
+    # Raised in a callee and handed back from a handler that runs nothing
+    # that could see it: it has traceback records and no CPython object.
+    try:
+        _fails("saved")
+    except ValueError as e:
+        return e
+    return None
+
+
+def raises_from_unpublished() -> None:
+    # Given as a cause while another exception is handled: that one is not
+    # its context.
+    saved = _caught()
+    if saved is None:
+        return
+    try:
+        raise IndexError("handled")
+    except IndexError:
+        raise RuntimeError("new") from saved
