@@ -2,7 +2,7 @@
 
 Usage: python3 bench/run.py [--pycc target/release/pycc] [--runs 11] [--json PATH]
                             [--no-competitors] [NAME ...]
-       python3 bench/run.py --build-only [--max-build-seconds S] [NAME ...]
+       python3 bench/run.py --build-only [--max-build-ratio R] [NAME ...]
 Prints a markdown table; every program's output is checked against CPython.
 Each program runs `--runs` rounds; a round starts CPython, the pycc-next binary, the
 competitors' builds and the Rust twin once each, as fresh processes, in an order rotated
@@ -11,8 +11,10 @@ alike). The table shows each side's median and, in parentheses, its min-max; the
 are of the medians. `--json PATH` also writes every sample and its summary
 (`bench/stats.py`).
 With --build-only, only builds each program and prints how long `pycc build`
-took; with --max-build-seconds, a build slower than S seconds fails (v0.5
-accept 4: 2 on the CI Linux runner).
+took, in wall time and in CPU time; with --max-build-ratio, a build whose CPU
+time is more than R times that of the reference C compile
+(`bench/build_clock.py`, measured once first) fails (v0.5 accept 4: 0.5 on
+the CI Linux runner, derived in docs/roadmap/v0.1-v0.7.md). POSIX only.
 
 The competitors (`bench/competitors.py`; `--no-competitors` leaves them out) build the
 unmodified program as a module: Cython in its default mode (the annotations honored) and
@@ -47,6 +49,7 @@ import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import build_clock  # noqa: E402
 import competitors  # noqa: E402
 import stats  # noqa: E402
 KERNEL = re.compile(r"kernel_seconds=([0-9.eE+-]+)")
@@ -74,31 +77,34 @@ def vs(r: float) -> str:
 
 
 def build(pycc: str, src: pathlib.Path, tmp: pathlib.Path, name: str,
-          warm: bool = True) -> tuple[pathlib.Path | None, str, float]:
+          warm: bool = True) -> tuple[pathlib.Path | None, str, float, float | None]:
     """Compiles `src`, returning the executable (or None), the build log and
-    how long `pycc build` took. An embedded build is run once (`warm`) to
-    warm the file cache."""
+    how long `pycc build` took, in wall time and in CPU time (None where
+    `build_clock` cannot measure it). An embedded build is run once (`warm`)
+    to warm the file cache."""
     if "import numpy" not in src.read_text():
         exe = tmp / name
-        t = time.perf_counter()
+        t, cpu = time.perf_counter(), build_clock.child_cpu_seconds()
         b = subprocess.run([pycc, "build", str(src), "-o", str(exe), "--release"], capture_output=True, text=True)
-        return (exe if b.returncode == 0 else None), b.stderr, time.perf_counter() - t
+        return ((exe if b.returncode == 0 else None), b.stderr, time.perf_counter() - t,
+                cpu if cpu is None else build_clock.child_cpu_seconds() - cpu)
     work = tmp / f"{name}.src"
     work.mkdir()
     copy = work / src.name
     shutil.copy(src, copy)
     lock = subprocess.run([pycc, "lock", str(copy)], capture_output=True, text=True)
     if lock.returncode != 0:
-        return None, lock.stderr, 0.0
+        return None, lock.stderr, 0.0, None
     exe = work / name
-    t = time.perf_counter()
+    t, cpu = time.perf_counter(), build_clock.child_cpu_seconds()
     b = subprocess.run([pycc, "build", str(copy), "-o", str(exe), "--release"], capture_output=True, text=True)
     seconds = time.perf_counter() - t
+    cpu = cpu if cpu is None else build_clock.child_cpu_seconds() - cpu
     if b.returncode != 0:
-        return None, b.stderr, seconds
+        return None, b.stderr, seconds, cpu
     if warm:
         subprocess.run([str(exe)], check=True, capture_output=True)
-    return exe, b.stderr, seconds
+    return exe, b.stderr, seconds, cpu
 
 
 def competitor(side: str, src: pathlib.Path, tmp: pathlib.Path, name: str,
@@ -134,21 +140,33 @@ def competitor(side: str, src: pathlib.Path, tmp: pathlib.Path, name: str,
 
 
 def build_times(args: argparse.Namespace, names: list[str], tmp: pathlib.Path) -> int:
-    """Builds each program once, printing how long the build took."""
+    """Builds each program once, printing how long the build took (wall
+    time, CPU time and, given a reference, CPU time over the reference's)."""
+    ref = None
+    if args.max_build_ratio is not None:
+        if build_clock.child_cpu_seconds() is None:
+            print("--max-build-ratio needs a POSIX system (CPU time of child processes)",
+                  file=sys.stderr)
+            return 2
+        ref = build_clock.reference_seconds()
+        print(f"reference compile (cc -O2, least of 3): {ref:.2f}s of CPU time\n")
     failed = False
-    print("| program | pycc build |")
-    print("|---|---|")
+    print("| program | pycc build | CPU time | x reference |")
+    print("|---|---|---|---|")
     for name in names:
-        exe, log, seconds = build(args.pycc, HERE / "py" / f"{name}.py", tmp, name, warm=False)
+        exe, log, seconds, cpu = build(args.pycc, HERE / "py" / f"{name}.py", tmp, name, warm=False)
         if exe is None:
-            print(f"| {name} | compile error |")
+            print(f"| {name} | compile error | | |")
             print(log, file=sys.stderr)
             failed = True
             continue
-        slow = args.max_build_seconds is not None and seconds > args.max_build_seconds
+        ratio = cpu / ref if ref else None
+        slow = ratio is not None and ratio > args.max_build_ratio
         failed |= slow
-        mark = f" (over {args.max_build_seconds:g}s)" if slow else ""
-        print(f"| {name} | {seconds:.2f}s{mark} |")
+        mark = f" (over {args.max_build_ratio:g}x)" if slow else ""
+        cpu_text = "" if cpu is None else f"{cpu:.2f}s"
+        ratio_text = "" if ratio is None else f"{ratio:.3f}{mark}"
+        print(f"| {name} | {seconds:.2f}s | {cpu_text} | {ratio_text} |")
     return 1 if failed else 0
 
 
@@ -159,7 +177,7 @@ def main() -> int:
     ap.add_argument("--json")
     ap.add_argument("names", nargs="*")
     ap.add_argument("--build-only", action="store_true")
-    ap.add_argument("--max-build-seconds", type=float)
+    ap.add_argument("--max-build-ratio", type=float)
     ap.add_argument("--no-competitors", action="store_true")
     args = ap.parse_args()
     names = args.names or sorted(p.stem for p in (HERE / "py").glob("*.py"))
@@ -179,7 +197,7 @@ def main() -> int:
             src = HERE / "py" / f"{name}.py"
             cmds = {"cpython": [sys.executable, str(src)]}
             cwds: dict[str, pathlib.Path] = {}
-            exe, log, _ = build(args.pycc, src, tmp, name)
+            exe, log, _, _ = build(args.pycc, src, tmp, name)
             if exe is None:
                 print(f"| {name} | | compile error | | | | | | | |")
                 print(log, file=sys.stderr)

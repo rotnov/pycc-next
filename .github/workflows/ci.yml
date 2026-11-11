@@ -25,20 +25,36 @@ jobs:
     needs: build
     strategy:
       fail-fast: false
-      matrix: { leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] }
+      matrix:
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.15" }
+      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
       - uses: actions/download-artifact@v4
         with: { name: pycc }
-      - run: |
+      - name: Measure
+        env: { LEG: "${{ matrix.leg }}" }
+        run: |
           tar -xzf pycc.tar.gz
-          curl -sSLo dmp.tar.gz https://files.pythonhosted.org/packages/source/d/diff-match-patch/diff_match_patch-20241021.tar.gz
-          echo "beae57a99fa48084532935ee2968b8661db861862ec82c6f21f4acdd6d835073  dmp.tar.gz" | sha256sum -c
-          mkdir dmpsrc; tar -C dmpsrc -xzf dmp.tar.gz; ls dmpsrc/*
-          grep -m1 "model name" /proc/cpuinfo; nproc
-          python3 bench/calib_experiment.py "$PWD/pycc/bin/pycc" dmpsrc/diff_match_patch-20241021 4 out.json
-      - uses: actions/upload-artifact@v4
-        with: { name: "calib-${{ matrix.leg }}", path: out.json }
+          grep -m1 "model name" /proc/cpuinfo; nproc; cc --version | head -1; clang --version | head -1 || true
+          # Odd legs: two busy processes on the 4 CPUs the whole time.
+          if [ $((LEG % 2)) = 1 ]; then
+            for i in 1 2; do python3 -c "while True: pass" & done
+            echo "LOAD 2"
+          fi
+          python3 -c "
+          import sys; sys.path.insert(0, 'bench'); import build_clock as b
+          for cc in ('cc', 'clang'):
+              print('REF', cc, round(b.reference_seconds(3, cc), 3))
+          "
+          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99 | tee pc.txt
+          python3 bench/run.py --build-only --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99 | tee run.txt
+          python3 bench/run.py --build-only --pycc "$PWD/pycc/bin/pycc" --max-build-ratio 99 | tee run2.txt
+          python3 -c "
+          import sys; sys.path.insert(0, 'bench'); import build_clock as b
+          for cc in ('cc', 'clang'):
+              print('REF', cc, round(b.reference_seconds(3, cc), 3))
+          "
