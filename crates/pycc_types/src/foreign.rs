@@ -535,6 +535,23 @@ fn is_carriable_instance(env: &Environment, ty: &Ty) -> bool {
     })
 }
 
+/// Whether a value of type `ty` is, or holds, a class instance with no
+/// carrier ([`is_carriable_instance`]): an exception or an enum member,
+/// which the instance packer must never be handed.
+pub(crate) fn holds_unboxable_instance(env: &Environment, ty: &Ty) -> bool {
+    match ty {
+        Ty::Instance(_) => !is_carriable_instance(env, ty),
+        Ty::Tuple(elements) => elements.iter().any(|e| holds_unboxable_instance(env, e)),
+        Ty::VarTuple(element) | Ty::List(element) | Ty::Set(element) | Ty::Optional(element) => {
+            holds_unboxable_instance(env, element)
+        }
+        Ty::Dict(pair) => {
+            holds_unboxable_instance(env, &pair.0) || holds_unboxable_instance(env, &pair.1)
+        }
+        _ => false,
+    }
+}
+
 /// `Err(I0404)` when `ty` is the opaque object type, `Ok(())` otherwise.
 ///
 /// The guard for the one site that keys on a *named* binding rather than
