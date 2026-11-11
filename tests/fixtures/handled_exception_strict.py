@@ -108,3 +108,35 @@ def default_after_miss(key: str) -> int:
         return d[key]
     except KeyError:
         return -1
+
+
+def handled_links() -> str:
+    e = sys.exception()
+    return repr(e.__cause__) + " " + repr(e.__suppress_context__)
+
+
+def inner_sees_from_none() -> str:
+    try:
+        raise ValueError("new") from IndexError("old")
+    except ValueError as e:
+        try:
+            raise e from None
+        except ValueError:
+            return handled_links()
+
+
+def inner_sees_new_cause() -> str:
+    try:
+        raise ValueError("new") from IndexError("old")
+    except ValueError as e:
+        try:
+            raise e from KeyError("other")
+        except ValueError:
+            return handled_links()
+
+
+def self_reraise_from_self() -> None:
+    try:
+        raise ValueError("v")
+    except ValueError as e:
+        raise e from e

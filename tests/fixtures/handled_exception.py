@@ -5,6 +5,7 @@
 # the handler is left. A dict miss that goes straight to its handler
 # (docs/design/compile-little.md, section 2.7) makes its `KeyError` the first
 # time something could see it. Every case prints what CPython prints.
+import gc
 import sys
 import traceback
 
@@ -160,6 +161,41 @@ def raises_again_from_none(d, k):
         raise ValueError("new") from IndexError("old")
     except ValueError as e:
         raise e from None
+
+
+def handled_links():
+    # The cause and the `from None` mark of what is being handled now.
+    e = sys.exception()
+    return repr(e.__cause__), e.__suppress_context__
+
+
+def inner_sees_from_none(d, k):
+    # `raise e from None` seen by the handler that catches it: no cause.
+    try:
+        raise ValueError("new") from IndexError("old")
+    except ValueError as e:
+        try:
+            raise e from None
+        except ValueError:
+            return handled_links()
+
+
+def inner_sees_new_cause(d, k):
+    # `raise e from X` seen by the handler that catches it: the new cause.
+    try:
+        raise ValueError("new") from IndexError("old")
+    except ValueError as e:
+        try:
+            raise e from KeyError("other")
+        except ValueError:
+            return handled_links()
+
+
+def self_reraise_from_self():
+    try:
+        raise ValueError("v")
+    except ValueError as e:
+        raise e from e
 
 
 def raises_stored(d, k):
@@ -377,6 +413,7 @@ def main():
     for f in (info, bound, restored, nested, returns_from_handler, after_return, raises_new,
               raises_from_none, raises_from_cause, raises_from_bound_cause, raises_again_from_none,
               raises_stored, raises_outer_in_inner, raises_caught_from_cpython, raises_from_handled,
+              inner_sees_from_none, inner_sees_new_cause,
               reraises, reraises_named,
               callee_raises, operation_raises, caught_inside, three_deep, raises_saved,
               handler_in_callee,
@@ -410,6 +447,22 @@ def main():
     log = []
     shown(raises_with_key, {}, log)
     print(log)
+    # An exception that is its own cause is freed with its handler.
+    print("self-caused left alive:", left_alive(self_reraise_from_self))
+
+
+def left_alive(f):
+    # How many `ValueError`s 1000 calls of `f` leave alive.
+    def live():
+        gc.collect()
+        return sum(1 for o in gc.get_objects() if type(o) is ValueError)
+    before = live()
+    for _ in range(1000):
+        try:
+            f()
+        except ValueError:
+            pass
+    return live() - before
 
 
 main()

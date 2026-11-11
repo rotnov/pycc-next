@@ -16,7 +16,9 @@ extern void pycc_rt_exception_incref(void *obj);
  * original it was bridged from, else the exception the export boundary would
  * raise for it (`pycc_ext_raise_pending`), which becomes its original from
  * then on, so it is built once and an escaping `exc` re-raises that very
- * object. Borrowed from `exc`; NULL with a CPython exception set on failure.
+ * object, given the traceback entries and the cause links compiled code
+ * added since. Borrowed from `exc`; NULL with a CPython exception set on
+ * failure.
  * Must be called with no pycc exception pending (inside a handler).
  */
 static PyObject *pycc_ext_exception_cpython(void *exc)
@@ -27,6 +29,8 @@ static PyObject *pycc_ext_exception_cpython(void *exc)
 
     if (original != NULL) {
         pycc_ext_tb_sync(exc, original);
+        /* A `raise exc from ...` since it was made. */
+        pycc_ext_links_sync(exc, original);
         return original;
     }
     saved = PyErr_GetRaisedException();

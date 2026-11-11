@@ -262,13 +262,17 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   object result was NULL`. While an exception is pending, an object is now freed with it
   set aside, wherever the release is (`pycc_ext_obj_dealloc`); a release on any other
   path executes what it executed before.
+- An exception that is its own cause (`except ValueError as e: raise e from e`) was never
+  freed, nor the CPython exception it stands for: one per call. It no longer holds a
+  reference to itself.
 - `--ext`: a compiled `except` clause publishes the exception it handles, as CPython's
   does. Inside it `sys.exception()` and `sys.exc_info()` returned `None` and
   `traceback.format_exc()` was empty, and an exception raised there had no `__context__`;
   they now see the handled exception, which becomes the context of what the clause raises
   (`raise X from None` marks it suppressed and drops an earlier cause, `raise X from Y`
   sets `__cause__`, neither of which compiled code did; a cause never raised keeps no
-  `__context__`), and it is the previous one again once the clause is left. Raising a
+  `__context__`; a handler that catches `e` again sees the cause the last `raise e from`
+  gave it), and it is the previous one again once the clause is left. Raising a
   stored exception (`raise e`) gives it the handled one as its context, cutting a cycle as
   CPython does, and so does a `KeyError` for a non-`str` key, which had none. The
   clause publishes the first time something could see the exception (a call, a `raise`, a

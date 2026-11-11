@@ -501,7 +501,7 @@ names the function, the call is an ordinary vectorcall. Across modules of one pa
 
 Between generic bodies, where every argument is already an object, the call is made
 without the module dict's version: the callee is read as before and compared with the
-function the callee's direct-call cell names (section 2.5, PR 7's first part). The same
+function the callee's direct-call cell names ([call-site-specialization.md](call-site-specialization.md), PR 7's first part). The same
 check serves methods, so `self.m(...)` reaches `m`'s body too unless a subclass or an
 instance overrides it. The replay targets of PR 7 in section 8 are not measured yet.
 

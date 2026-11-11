@@ -16,9 +16,10 @@
 //! exception was translated from ([`pycc_rt_exception_set_foreign`]). A
 //! chain of causes is freed with a worklist, not by recursion.
 //!
-//! Cycles are not collected: `raise e from e` (or a longer `__cause__`
-//! cycle) keeps its exceptions alive, as any reference cycle does
-//! (`docs/DEVIATIONS.md`).
+//! An exception that is its own cause (`raise e from e`) does not own that
+//! reference, so it is freed like any other. Longer cycles are not
+//! collected: `a.__cause__ = b; b.__cause__ = a` keeps both alive, as any
+//! reference cycle does (`docs/DEVIATIONS.md`).
 
 use super::PyExceptionObj;
 use crate::PyStrObj;
@@ -139,7 +140,8 @@ fn free_one(obj: *mut PyExceptionObj, dead: &mut Vec<*mut PyExceptionObj>) {
     if !foreign.is_null() {
         crate::rc::release_word(b'o', foreign as i64);
     }
-    if reaches_zero(exc.cause.get()) {
+    // Its own cause is not a reference it owns (`set_cause`).
+    if exc.cause.get() != obj && reaches_zero(exc.cause.get()) {
         dead.push(exc.cause.get());
     }
     if exc.exceptions_len != 0 {
@@ -159,10 +161,19 @@ fn free_one(obj: *mut PyExceptionObj, dead: &mut Vec<*mut PyExceptionObj>) {
 }
 
 /// Records `cause` as `obj`'s `__cause__`, taking over the caller's
-/// reference to it and releasing the cause it replaces.
+/// reference to it and releasing the cause it replaces. An exception that
+/// is its own cause (`raise e from e`) keeps no reference to itself, which
+/// would never be released: the link is borrowed, and it ends with `obj`.
 pub(super) fn set_cause(obj: &PyExceptionObj, cause: *mut PyExceptionObj) {
+    let this = std::ptr::from_ref(obj).cast_mut();
     let old = obj.cause.replace(cause);
-    pycc_rt_exception_decref(old);
+    if cause == this {
+        // The caller still holds `obj`: this cannot release the last one.
+        pycc_rt_exception_decref(cause);
+    }
+    if old != this {
+        pycc_rt_exception_decref(old);
+    }
 }
 
 /// `obj`'s `__cause__` (`raise obj from cause`), borrowed, or null.

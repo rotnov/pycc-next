@@ -95,35 +95,34 @@ extern void pycc_rt_exception_decref(void *obj);
 static int pycc_ext_exception_was_raised(void *exc);
 
 /*
- * The CPython exception just built for the pending pycc exception is
- * raised: gives it that one's `__cause__` (`raise X from Y`) or its
- * `from None` mark, then clears the pending state. `PyException_SetCause`
- * sets `__suppress_context__` either way, as `raise ... from` does. A cause
- * chain deeper than `PYCC_EXT_CAUSE_DEPTH`, which only a cycle of causes
- * reaches (`raise e from e`), is cut there.
+ * Gives `obj`, the CPython object of the pycc exception `native`, the links
+ * compiled code set on `native`: its `__cause__` (`raise X from Y`) or its
+ * `from None` mark (`PyException_SetCause` sets `__suppress_context__`
+ * either way, as `raise ... from` does). It runs wherever the object is
+ * handed to CPython -- raised at the export boundary, published by a
+ * handler, bound by `except ... as` -- so a link a later `raise e from ...`
+ * set is what an inner handler sees too. An object whose exception compiled
+ * code gave neither keeps the links it has (one from CPython keeps its own).
+ * A cause chain deeper than `PYCC_EXT_CAUSE_DEPTH`, which only a cycle of
+ * causes reaches, is cut there. CPython's error indicator is kept.
  */
 #define PYCC_EXT_CAUSE_DEPTH 64
 
-static void pycc_ext_raised_links(void)
+static void pycc_ext_links_sync(void *native, PyObject *obj)
 {
     static int depth = 0;
-    void *native = pycc_rt_exception_value();
     void *cause = pycc_rt_exception_cause(native);
-    PyObject *raised;
     PyObject *cause_object = NULL;
+    PyObject *saved;
 
     if (cause == NULL && !pycc_rt_exception_suppresses_context(native)) {
-        pycc_rt_exception_clear();
         return;
     }
-    /* The pending state's exception owns its cause: kept past the clear. */
-    pycc_rt_exception_incref(cause);
-    pycc_rt_exception_clear();
-    raised = PyErr_GetRaisedException();
-    if (raised != NULL && cause != NULL && depth < PYCC_EXT_CAUSE_DEPTH) {
+    saved = PyErr_GetRaisedException();
+    if (cause != NULL && depth < PYCC_EXT_CAUSE_DEPTH) {
         depth++;
         if (cause == native) {
-            cause_object = raised;
+            cause_object = obj;
         } else {
             /*
              * A cause compiled code never raised (`raise X from E(...)`) has
@@ -147,11 +146,34 @@ static void pycc_ext_raised_links(void)
             PyErr_Clear();
         }
     }
-    if (raised != NULL) {
-        /* Steals the cause's reference; a NULL cause still suppresses. */
-        PyException_SetCause(raised, cause_object == NULL ? NULL : Py_NewRef(cause_object));
+    /* Steals the cause's reference; a NULL cause still suppresses. */
+    PyException_SetCause(obj, cause_object == NULL ? NULL : Py_NewRef(cause_object));
+    PyErr_SetRaisedException(saved);
+}
+
+/*
+ * The CPython exception just built for the pending pycc exception is
+ * raised: gives it that one's links (`pycc_ext_links_sync`), then clears
+ * the pending state.
+ */
+static void pycc_ext_raised_links(void)
+{
+    void *native = pycc_rt_exception_value();
+    PyObject *raised;
+
+    if (pycc_rt_exception_cause(native) == NULL &&
+        !pycc_rt_exception_suppresses_context(native)) {
+        pycc_rt_exception_clear();
+        return;
     }
-    pycc_rt_exception_decref(cause);
+    /* The pending state's reference may be the last: kept past the clear. */
+    pycc_rt_exception_incref(native);
+    pycc_rt_exception_clear();
+    raised = PyErr_GetRaisedException();
+    if (raised != NULL) {
+        pycc_ext_links_sync(native, raised);
+    }
+    pycc_rt_exception_decref(native);
     PyErr_SetRaisedException(raised);
 }
 
