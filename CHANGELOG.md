@@ -267,7 +267,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `traceback.format_exc()` was empty, and an exception raised there had no `__context__`;
   they now see the handled exception, which becomes the context of what the clause raises
   (`raise X from None` marks it suppressed, `raise X from Y` sets `__cause__`, neither of
-  which compiled code did), and it is the previous one again once the clause is left. The
+  which compiled code did; a cause never raised keeps no `__context__`), and it is the
+  previous one again once the clause is left. The
   clause publishes the first time something could see the exception (a call, a `raise`, a
   release that frees an object), so entering a handler costs what it did and the path
   without an exception nothing. A `finally` clause, an `except*` clause and a generator's

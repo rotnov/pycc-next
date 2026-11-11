@@ -128,6 +128,7 @@ fn a_handler_publishes_the_exception_it_handles() {
             "raises_object",
             "raises_from_none",
             "raises_from_cause",
+            "raises_from_bound_cause",
             "raises_from_handled",
             "reraises",
             "reraises_named",

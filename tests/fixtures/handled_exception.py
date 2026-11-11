@@ -23,7 +23,8 @@ def chain(e):
     while e is not None:
         cause = e.__cause__
         out.append((type(e).__name__, e.args, e.__suppress_context__,
-                    None if cause is None else type(cause).__name__))
+                    None if cause is None else type(cause).__name__,
+                    None if cause is None else repr(cause.__context__)))
         e = e.__context__
     return out
 
@@ -141,6 +142,16 @@ def raises_from_cause(d, k):
         return d[k]
     except KeyError:
         raise ValueError("caused") from IndexError("the cause")
+
+
+def raises_from_bound_cause(d, k):
+    try:
+        return d[k]
+    except KeyError:
+        try:
+            raise IndexError("raised first")
+        except IndexError as cause:
+            raise ValueError("caused") from cause
 
 
 def raises_from_handled(d, k):
@@ -320,7 +331,8 @@ def shown(f, *args):
 
 def main():
     for f in (info, bound, restored, nested, returns_from_handler, after_return, raises_new,
-              raises_from_none, raises_from_cause, raises_from_handled, reraises, reraises_named,
+              raises_from_none, raises_from_cause, raises_from_bound_cause, raises_from_handled,
+              reraises, reraises_named,
               callee_raises, operation_raises, caught_inside, three_deep, raises_saved,
               handler_in_callee,
               default_seen, exception_type, bare_handler, second_handler):
