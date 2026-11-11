@@ -167,3 +167,30 @@ fn a_container_word_of_kind_x_counts_the_exception() {
     crate::rc::release_word(b'x', e as i64);
     assert_eq!(count(message), 1);
 }
+
+/// The `ext` shim's dealloc pointer holds its set-aside function while this
+/// thread has an exception pending, and the plain one again once no thread
+/// has (other tests' threads may have one pending meanwhile).
+#[test]
+fn the_dealloc_pointer_follows_the_pending_state() {
+    use std::sync::atomic::{AtomicPtr, Ordering};
+    static SLOT: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+    static FUNCTIONS: [u8; 2] = [0; 2];
+    let plain = (&raw const FUNCTIONS[0]).cast_mut().cast::<std::ffi::c_void>();
+    let aside = (&raw const FUNCTIONS[1]).cast_mut().cast::<std::ffi::c_void>();
+    pycc_rt_exception_clear();
+    unsafe { pycc_rt_exception_dealloc_install(SLOT.as_ptr(), plain, aside) };
+    let held = SLOT.load(Ordering::Relaxed);
+    assert!(held == plain || held == aside, "installed at once");
+    let message = shared_str("pending");
+    pycc_rt_exception_raise(exc("ValueError", message));
+    assert_eq!(SLOT.load(Ordering::Relaxed), aside);
+    let taken = pycc_rt_exception_take();
+    if super::PENDING_THREADS.load(Ordering::Relaxed) == 0 {
+        assert_eq!(SLOT.load(Ordering::Relaxed), plain);
+    }
+    pycc_rt_exception_restore(taken);
+    assert_eq!(SLOT.load(Ordering::Relaxed), aside);
+    pycc_rt_exception_clear();
+    assert_eq!(count(message), 1);
+}

@@ -13,12 +13,14 @@
 //!   3.13 keeps them all ones, 3.14 and 3.15 at `3 << 30`) are skipped; the
 //!   low 32 bits of `ob_refcnt` (offset 0) are incremented otherwise;
 //! * release: `NULL` and an object whose low 32 bits are negative (immortal)
-//!   are skipped; `ob_refcnt` is decremented and `_Py_Dealloc` (a stable-ABI
-//!   function) called at zero.
+//!   are skipped; `ob_refcnt` is decremented and, at zero, the object
+//!   freed through the shim's `pycc_ext_obj_dealloc` pointer: `_Py_Dealloc`
+//!   (a stable-ABI function), which the runtime swaps while an exception is
+//!   pending for a function that sets it aside meanwhile.
 //!
 //! The retain is always inlined (four instructions). The release is split:
 //! its `NULL` and immortality tests are inlined, and a mortal object's
-//! decrement and `_Py_Dealloc` stay one call into the module's own
+//! decrement and the freeing stay one call into the module's own
 //! `pycc_ext_obj_release_count`. Inlining the whole release everywhere
 //! doubled LLVM's time on mistune's modules for 0.7% fewer instructions at
 //! run time; the tests alone are what most releases in a generic body need
@@ -34,8 +36,14 @@ use inkwell::targets::TargetData;
 use inkwell::values::FunctionValue;
 use inkwell::{AddressSpace, IntPredicate};
 
+/// The shim's `pycc_ext_obj_dealloc` (`src/ext/module/bridge.c`): the
+/// function that frees an object, `_Py_Dealloc` -- or, while a pycc
+/// exception is pending, one that sets it aside meanwhile, so a finalizer
+/// that is compiled code does not read it as its own failure.
+const DEALLOC_SYMBOL: &str = "pycc_ext_obj_dealloc";
+
 /// The module's own out-of-line part of a release: a mortal object's
-/// decrement and its `_Py_Dealloc` at zero.
+/// decrement and its freeing at zero.
 const RELEASE_COUNT_SYMBOL: &str = "pycc_ext_obj_release_count";
 
 /// Defines the module's `pycc_ext_obj_retain`/`pycc_ext_obj_release`
@@ -119,12 +127,11 @@ fn define_release(module: &Module<'_>, function: FunctionValue<'_>) {
     let i32_type = context.i32_type();
     let i64_type = context.i64_type();
     let ptr_type = context.ptr_type(AddressSpace::default());
-    let dealloc = module.get_function("_Py_Dealloc").unwrap_or_else(|| {
-        module.add_function(
-            "_Py_Dealloc",
-            context.void_type().fn_type(&[ptr_type.into()], false),
-            Some(Linkage::External),
-        )
+    let dealloc_type = context.void_type().fn_type(&[ptr_type.into()], false);
+    let dealloc = module.get_global(DEALLOC_SYMBOL).unwrap_or_else(|| {
+        let global = module.add_global(ptr_type, None, DEALLOC_SYMBOL);
+        global.set_linkage(Linkage::External);
+        global
     });
     let count_fn = module.add_function(
         RELEASE_COUNT_SYMBOL,
@@ -176,7 +183,13 @@ fn define_release(module: &Module<'_>, function: FunctionValue<'_>) {
         .expect("compare");
     builder.build_conditional_branch(zero, free, done).expect("branch");
     builder.position_at_end(free);
-    builder.build_call(dealloc, &[object.into()], "").expect("call");
+    let dealloc = builder
+        .build_load(ptr_type, dealloc.as_pointer_value(), "dealloc")
+        .expect("load")
+        .into_pointer_value();
+    builder
+        .build_indirect_call(dealloc_type, dealloc, &[object.into()], "")
+        .expect("call");
     builder.build_unconditional_branch(done).expect("branch");
     builder.position_at_end(done);
     builder.build_return(None).expect("return");
@@ -209,7 +222,8 @@ mod tests {
         assert!(ir.contains("define internal void @pycc_ext_obj_release_count(ptr"), "{ir}");
         assert!(ir.contains("load i32, ptr"), "{ir}");
         assert!(ir.contains("icmp slt i32"), "{ir}");
-        assert!(ir.contains("call void @_Py_Dealloc(ptr"), "{ir}");
+        assert!(ir.contains("load ptr, ptr @pycc_ext_obj_dealloc"), "{ir}");
+        assert!(!ir.contains("_Py_Dealloc"), "{ir}");
         assert!(ir.contains("alwaysinline"), "{ir}");
         assert!(ir.contains("noinline"), "{ir}");
     }

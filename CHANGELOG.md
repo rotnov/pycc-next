@@ -251,6 +251,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- Non-strict `--ext`: an object freed while an exception propagates through compiled code
+  (a local of the frame it leaves, a missing key the handler held, the argument of a
+  `sorted()` that failed) may run compiled code of its own, a `__del__` or a generator's
+  `finally`. That code read the pending exception as its own failure: CPython printed
+  `Exception ignored in ...`, the exception was lost, the `except` clause it was
+  propagating to did not run, and the function returned `None` or raised `SystemError:
+  object result was NULL`. While an exception is pending, an object is now freed with it
+  set aside, wherever the release is (`pycc_ext_obj_dealloc`); a release on any other
+  path executes what it executed before.
 - `abs(-2**62)`, the most negative smallint, is `2**62` where the argument's range is known
   at compile time (a literal, a local, a `range()` loop variable); it printed
   `-4611686018427387904` (found by the fuzzer).
