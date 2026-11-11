@@ -1,289 +1,44 @@
 name: ci
+# Throwaway experiment branch (never merged): measures pycc build time and
+# calibration candidates on many ubuntu-24.04 runners.
 on:
-  # Pull requests only: a merge to `main` is not tested again (AGENTS.md: merge only after
-  # a green run against the current `main`).
-  pull_request:
-  # A manual run (e.g. of a branch); `windows_only` skips the Linux and macOS
-  # jobs, to iterate on the Windows job alone; `llvm_release` makes the Linux
-  # jobs install LLVM from its release archive, the fallback
-  # scripts/linux_llvm.sh takes when apt.llvm.org is unreachable.
   workflow_dispatch:
     inputs:
-      windows_only: { type: boolean, default: false, description: "Run only the Windows job" }
-      llvm_release: { type: boolean, default: false, description: "Linux: install LLVM from its release archive" }
+      windows_only: { type: boolean, default: false, description: "unused" }
+      llvm_release: { type: boolean, default: false, description: "unused" }
 permissions: { contents: read }
 jobs:
-  # Docs-only pull requests skip the heavy jobs: `code` is false when every changed file
-  # is prose that no test, build or package reads (blog, agent instructions, docs/ other
-  # than DEVIATIONS.md and DIAGNOSTICS.md, which tests read). README.md and
-  # CHANGELOG.md go into the release archives, so they still run everything.
-  changes:
+  build:
     runs-on: ubuntu-24.04
-    outputs:
-      code: ${{ steps.diff.outputs.code }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name == 'pull_request'
-        with: { fetch-depth: 0 }
-      - id: diff
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
-          git diff --name-only --no-renames "$(git merge-base "$BASE" "$HEAD")" "$HEAD" > changed.txt
-          code=$(awk '/^docs\/(DEVIATIONS|DIAGNOSTICS)\.md$/ || !/^(blog\/|docs\/|\.claude\/|AGENTS\.md$|CLAUDE\.md$)/' changed.txt)
-          if [ -n "$code" ]; then echo code=true; else echo code=false; fi >> "$GITHUB_OUTPUT"
-          echo "code-relevant files: ${code:-none}"
-  test:
-    # Linux x86_64 and aarch64 (GitHub's arm64 runner); the same LLVM, tests
-    # and corpus gate on both.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
-    needs: changes
-    if: ${{ !inputs.windows_only && needs.changes.outputs.code == 'true' }}
-    runs-on: ${{ matrix.os }}
     env: { LLVM_SYS_221_PREFIX: /usr/lib/llvm-22 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.15" }
-      # numpy for the hosted numpy tests and benchmarks, pinned by version and
-      # wheel hash.
-      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
-      - name: Install LLVM 22
-        env: { PYCC_LLVM_SOURCE: "${{ inputs.llvm_release && 'release' || 'apt' }}" }
-        run: scripts/linux_llvm.sh
+      - run: scripts/linux_llvm.sh
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
-      # Lints: every clippy finding in every crate and target fails the job.
-      - name: Clippy
-        if: matrix.os == 'ubuntu-24.04'
-        run: |
-          rustup component add clippy
-          cargo clippy --release --workspace --all-targets -- -D warnings
-      # The release archive as release.yml builds it (no tag here), unpacked
-      # and smoke-tested, so a packaging break shows up before a release.
-      - name: Package and smoke-test the release archive
-        run: |
-          name=pycc-ci-$(uname -m)-linux
-          scripts/package.sh dist/$name
-          tar -C dist -czf dist/$name.tar.gz $name
-          smoke=$(mktemp -d)
-          tar -C "$smoke" -xzf dist/$name.tar.gz
-          file "$smoke/$name/bin/pycc"
-          scripts/smoke.sh "$smoke/$name"
-      # `pip install` builds with pycc (v0.6 accept 1): each real package's wheel
-      # is built by `pip wheel` through the archive's PEP 517 backend
-      # (python/pycc_build-*.whl, installed into pip's isolated build
-      # environment with no index) and its bin/pycc, installed into a fresh
-      # venv (pure with no profile, which selects nothing; with the extension
-      # serving its module for diff-match-patch-selected, which forces a
-      # function in), and the package's own test suite runs against the
-      # installed wheel. The pyproject.toml selecting
-      # pycc.build is injected by the harness (the packages use other backends).
-      - name: Real packages built into wheels by pip with pycc.build
-        run: |
-          name=pycc-ci-$(uname -m)-linux
-          python3 bench/wheel_check.py diff-match-patch diff-match-patch-selected tomli pypng mistune pystache \
-            --pycc "dist/$name/bin/pycc" --backend "dist/$name/python"
-      # Includes the hosted tests that build against and compare with the
-      # CPython found as `python3` (the oracle). Skipped: the static-libpython
-      # tests (need a relocatable CPython with a PIC `libpython3.X.a`) and the
-      # nbody speed gate (timing on a shared runner).
-      # scripts/ci_test.sh: no fail-fast; on failure the failed tests and their
-      # panics go to the job summary, and each is rerun alone with a backtrace
-      # into the ci-logs artifact.
-      - name: Tests
-        run: >-
-          scripts/ci_test.sh --include-ignored
-          --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
-      # Real-world gate: every corpus program must compile in non-strict mode and
-      # print exactly what CPython prints (wrong output = miscompilation).
-      - name: Corpus (non-strict)
-        run: scripts/ci_corpus.sh -j 4 --flags=--non-strict --require-correct
-      # Strict mode refuses what a type checker refuses (v0.9 accept 5): every
-      # corpus program `pycc check` refuses must be rejected by `mypy --strict`
-      # too, or be listed with a reason in docs/DEVIATIONS.md. mypy is pinned by
-      # version and wheel hash, in a venv of its own.
-      - name: Strict refusals against mypy --strict
-        if: matrix.os == 'ubuntu-24.04'
-        run: |
-          python3 -m venv "$RUNNER_TEMP/mypy"
-          "$RUNNER_TEMP/mypy/bin/pip" install -q --only-binary=:all: --require-hashes -r .github/mypy-requirements.txt
-          python3 bench/mypy_parity.py --mypy "$RUNNER_TEMP/mypy/bin/python -m mypy"
+      - run: scripts/package.sh dist/pycc && tar -C dist -czf pycc.tar.gz pycc
       - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: ci-logs-${{ matrix.os }}
-          path: ci-logs
-          if-no-files-found: ignore
-      # Differential fuzzing smoke (v0.6 accept 4; .github/workflows/fuzz.yml runs
-      # 30 minutes nightly): two minutes of generated programs, each compared with
-      # CPython in every build mode; any mismatch or compiler crash fails the job.
-      - name: Fuzz harness unit tests
-        if: matrix.os == 'ubuntu-24.04'
-        run: python3 fuzz/test_harness.py
-      - name: Differential fuzzing smoke
-        if: matrix.os == 'ubuntu-24.04'
-        run: python3 fuzz/fuzz.py --seconds 120 -j 4 --seed 1 --reduce-seconds 120 --findings fuzz-findings
-      - uses: actions/upload-artifact@v4
-        if: failure() && matrix.os == 'ubuntu-24.04'
-        with:
-          name: fuzz-smoke-findings
-          path: fuzz-findings
-          if-no-files-found: ignore
-      # Real-package gates (v0.3 accept 4, v0.4 accept 4, v0.5 accept 2, v0.8
-      # accept 4): diff-match-patch, pypng and mistune (sdist sha256) and tomli
-      # (GitHub tag archive sha256, and that of the files used), each built
-      # module by module with --ext --non-strict, and each package's own test
-      # suite run by CPython against the compiled modules. Compile speed (v0.5
-      # accept 4): each package builds in 10 s at most, its modules in
-      # parallel as pycc.build builds them (the time is printed per module).
-      - name: Real packages (diff-match-patch, tomli, pypng, mistune) against their own tests
-        if: matrix.os == 'ubuntu-24.04'
-        run: python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --time --runs 1 --max-build-seconds 10
-      # Hot-path instruction counts under callgrind (stable on a shared runner,
-      # unlike wall time): each package's hot path executes at most its
-      # documented bound per call (`max_instructions` in bench/package_check_workloads.py,
-      # 5% above the count on this runner with this CPython). `--select all`:
-      # a profile build's selection comes from pass 3's timings, which vary
-      # from run to run, so only an every-eligible-function build has stable
-      # counts.
-      - name: Real packages' hot-path instruction counts
-        if: matrix.os == 'ubuntu-24.04'
-        run: |
-          sudo apt-get install -y -q valgrind
-          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --instructions --select all
-      # Compile speed (v0.5 accept 4): `pycc build` of every bench/py program
-      # takes 2 s at most.
-      - name: Benchmark programs build in 2 s
-        if: matrix.os == 'ubuntu-24.04'
-        run: python3 bench/run.py --build-only --max-build-seconds 2
-  macos:
-    # Apple silicon, macOS 26 -- the newest arm64 image GitHub hosts; macOS 26
-    # is also the minimum the binaries target (README).
-    needs: changes
-    if: ${{ !inputs.windows_only && needs.changes.outputs.code == 'true' }}
-    runs-on: macos-26
-    env: { MACOSX_DEPLOYMENT_TARGET: "26.0" }
+        with: { name: pycc, path: pycc.tar.gz }
+  calib:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix: { leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] }
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.15" }
-      # numpy for the hosted numpy tests and benchmarks, pinned by version and
-      # wheel hash.
-      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
-      - name: Install LLVM 22
-        run: scripts/macos_llvm.sh
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
-      # The release archive as release.yml builds it (no tag here), unpacked
-      # and smoke-tested, so a macOS packaging break shows up before a release.
-      - name: Package and smoke-test the release archive
-        run: |
-          scripts/package.sh dist/pycc-ci-aarch64-macos
-          tar -C dist -czf dist/pycc-ci-aarch64-macos.tar.gz pycc-ci-aarch64-macos
-          smoke=$(mktemp -d)
-          tar -C "$smoke" -xzf dist/pycc-ci-aarch64-macos.tar.gz
-          pkg="$smoke/pycc-ci-aarch64-macos"
-          otool -L "$pkg/bin/pycc"
-          vtool -show-build "$pkg/bin/pycc"
-          codesign --verify --verbose "$pkg/bin/pycc"
-          scripts/smoke.sh "$pkg"
-      # As on Linux: each real package's wheel built by pip through the
-      # archive's pycc.build backend, installed, and its own tests run.
-      - name: Real packages built into wheels by pip with pycc.build
-        run: |
-          python3 bench/wheel_check.py diff-match-patch diff-match-patch-selected tomli pypng mistune pystache \
-            --pycc dist/pycc-ci-aarch64-macos/bin/pycc --backend dist/pycc-ci-aarch64-macos/python
-      # Same skips and failure reporting as the Linux job.
-      - name: Tests
-        run: >-
-          scripts/ci_test.sh --include-ignored
-          --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
-      - name: Corpus (non-strict)
-        run: scripts/ci_corpus.sh -j 4 --flags=--non-strict --require-correct
+      - uses: actions/download-artifact@v4
+        with: { name: pycc }
+      - run: |
+          tar -xzf pycc.tar.gz
+          curl -sSLo dmp.tar.gz https://files.pythonhosted.org/packages/source/d/diff-match-patch/diff_match_patch-20241021.tar.gz
+          echo "beae57a99fa48084532935ee2968b8661db861862ec82c6f21f4acdd6d835073  dmp.tar.gz" | sha256sum -c
+          mkdir src && tar -C src -xzf dmp.tar.gz
+          grep -m1 "model name" /proc/cpuinfo; nproc
+          python3 bench/calib_experiment.py "$PWD/pycc/bin/pycc" src/diff_match_patch-20241021 4 out.json
       - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: ci-logs-macos
-          path: ci-logs
-          if-no-files-found: ignore
-  windows:
-    # x86_64 Windows with the MSVC toolchain (ROADMAP v0.7 accept 1).
-    needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' }}
-    runs-on: windows-2025
-    timeout-minutes: 240
-    # Git Bash, so the same scripts as on Linux and macOS run here.
-    defaults: { run: { shell: bash } }
-    # UTF-8 mode, for CPython and the native programs alike (without it both
-    # write the ANSI code page): the tests compare with UTF-8 text, and
-    # tests/text_stdio.rs checks the ANSI code page itself.
-    env: { PYTHONUTF8: "1" }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.15" }
-      # The tests and scripts run the oracle as `python3`; the Windows
-      # install may only provide python.exe.
-      - name: CPython 3.15 as python3
-        run: |
-          py_dir=$(cygpath -u "$pythonLocation")
-          [ -e "$py_dir/python3.exe" ] || cp "$py_dir/python.exe" "$py_dir/python3.exe"
-          python3 -c "import sys; assert sys.version_info[:2] == (3, 15), sys.version"
-          python3 -c "import os, sys; p = os.path.join(sys.base_prefix, 'libs', 'python3.lib'); sys.exit(0 if os.path.isfile(p) else 'missing ' + p)"
-      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
-      # The MSVC developer environment (what vcvarsall.bat sets: LIB, INCLUDE,
-      # VCToolsInstallDir, ...): Rust's and pycc's links need it.
-      - uses: ilammy/msvc-dev-cmd@v1
-      # Git Bash puts its coreutils `link.exe` ahead of MSVC's on PATH, so
-      # cargo is given MSVC's linker by absolute path. (pycc's own driver,
-      # clang, finds MSVC's through VCToolsInstallDir.)
-      - name: MSVC link.exe for cargo
-        shell: pwsh
-        run: |
-          $link = Join-Path $env:VCToolsInstallDir "bin\Hostx64\x64\link.exe"
-          if (-not (Test-Path $link)) { Write-Error "no $link"; exit 1 }
-          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$link" >> $env:GITHUB_ENV
-      - name: Install LLVM 22
-        run: scripts/windows_llvm.sh
-      - uses: Swatinem/rust-cache@v2
-      - id: build
-        run: cargo build --release
-      # The release archive as release.yml builds it (no tag here), unpacked
-      # and smoke-tested.
-      - name: Package and smoke-test the release archive
-        run: |
-          name=pycc-ci-x86_64-windows
-          scripts/package.sh dist/$name
-          (cd dist && python3 -m zipfile -c $name.zip $name)
-          smoke=$(mktemp -d)
-          python3 -m zipfile -e dist/$name.zip "$smoke"
-          scripts/smoke.sh "$smoke/$name"
-      - name: Real packages built into wheels by pip with pycc.build
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: |
-          python3 bench/wheel_check.py diff-match-patch diff-match-patch-selected tomli pypng mistune pystache \
-            --pycc dist/pycc-ci-x86_64-windows/bin/pycc.exe --backend dist/pycc-ci-x86_64-windows/python
-      - name: Real packages (diff-match-patch, tomli, pypng, mistune) against their own tests
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache
-      # Same skips and failure reporting as the Linux job.
-      - name: Tests
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: >-
-          scripts/ci_test.sh --include-ignored
-          --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
-      - name: Corpus (non-strict)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: scripts/ci_corpus.sh -j 4 --flags=--non-strict --require-correct
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: ci-logs-windows
-          path: ci-logs
-          if-no-files-found: ignore
+        with: { name: "calib-${{ matrix.leg }}", path: out.json }
