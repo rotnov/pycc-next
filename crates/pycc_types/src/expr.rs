@@ -238,6 +238,20 @@ fn infer_expr_here(
             {
                 return Ok(Ty::Object);
             }
+            // Any other argument is CPython's to format too (`binop.rs`),
+            // boxed as codegen boxes an operand -- which has no form for an
+            // exception or an enum member: such an instance is not the
+            // carrier the instance packer takes it for.
+            if *op == BinOpKind::Mod
+                && left_ty == Ty::Str
+                && crate::non_strict::is_non_strict()
+                && crate::foreign::holds_unboxable_instance(env, &right_ty)
+            {
+                return Err(crate::foreign::object_operation_unsupported(&format!(
+                    "formatting a `{}` argument with `%`",
+                    right_ty.name()
+                )));
+            }
             // Non-strict mode: a fresh native list operand of an operator
             // on a CPython object crosses as a CPython copy.
             let crosses = |operand: &HirExpr, ty: &Ty| {

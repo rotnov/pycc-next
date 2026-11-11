@@ -10,7 +10,9 @@
 //!   its result and then the item (`tests/fixtures/comprehension_unwinding.py`);
 //! - an exception passing a `try` statement adds a traceback entry where
 //!   it is raised, and none for an unmatched handler, a bare `raise` or a
-//!   `finally` clause (`tests/fixtures/traceback_entries.py`).
+//!   `finally` clause (`tests/fixtures/traceback_entries.py`);
+//! - `"..." % e` of a caught exception is CPython's to format: the function
+//!   is not compiled (`tests/fixtures/exception_operands.py`).
 
 #[path = "harness_support/ext_oracle.rs"]
 mod ext_oracle;
@@ -96,4 +98,10 @@ fn an_exception_passing_a_try_statement_adds_no_traceback_entry() {
         None,
         None,
     );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_exception_is_formatted_by_cpython_not_read_as_another_object() {
+    check("exception_operands", &["native"], None, None);
 }

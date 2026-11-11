@@ -265,6 +265,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   the item is released on that path too, after the iterator and the result, and a
   comprehension that ends releases its exhausted iterator before its last item, both as
   CPython does.
+- Non-strict: `"..." % e` with a caught exception `e` (alone or in a tuple of arguments)
+  read the exception as another kind of object: it printed garbage (`caught _io`) or
+  crashed. Only an operand codegen can box is formatted in compiled code; a function that
+  formats an exception or an enum member this way runs in CPython (`I0404` in
+  `--report-fallbacks`).
 - An exception no `except*` clause matched propagates as the same object, with its
   traceback entries, and the subgroups an `except*` statement derives carry the original's
   entries on; the remainder was a new group that had lost them.
