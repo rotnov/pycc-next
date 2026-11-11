@@ -564,7 +564,9 @@ pub const EXT_OBJ_RAISE_SYMBOL: &str = "pycc_ext_obj_raise";
 
 /// `raise o from cause` with a CPython object `o` (`src/ext/module/object_ops.c`):
 /// `void pycc_ext_obj_raise_from(PyObject *o, void *native_cause, PyObject
-/// *object_cause)`, exactly one cause non-NULL, both borrowed. Raises as
+/// *object_cause)`, at most one cause non-NULL: `object_cause` borrowed,
+/// `native_cause` an owned reference the helper takes over (codegen hands it
+/// an exception value as it hands one to `pycc_ext_raise_with_cause`). Raises as
 /// [`EXT_OBJ_RAISE_SYMBOL`] does, with the cause as `__cause__`.
 pub const EXT_OBJ_RAISE_FROM_SYMBOL: &str = "pycc_ext_obj_raise_from";
 

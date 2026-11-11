@@ -90,6 +90,50 @@ fn a_cause_chain_is_released_with_its_effect() {
 }
 
 #[test]
+fn an_exception_that_is_its_own_cause_is_freed() {
+    // `except ValueError as e: raise e from e`: two references handed over,
+    // one for the raise and one for the cause.
+    pycc_rt_exception_clear();
+    let message = shared_str("self");
+    let e = exc("ValueError", message);
+    unsafe { pycc_rt_exception_incref(e) };
+    unsafe { pycc_rt_exception_raise_with_cause(e, e) };
+    assert_eq!(unsafe { lifetime::pycc_rt_exception_cause(e) }, e);
+    // Taken back and raised `from None`: the self link goes, owning nothing.
+    let e = pycc_rt_exception_take();
+    unsafe { lifetime::pycc_rt_exception_suppress_context(e) };
+    assert!(unsafe { lifetime::pycc_rt_exception_cause(e) }.is_null());
+    // And `from e` once more, then the last holder lets go.
+    unsafe { pycc_rt_exception_incref(e) };
+    unsafe { pycc_rt_exception_raise_with_cause(e, e) };
+    pycc_rt_exception_clear();
+    assert_eq!(count(message), 1, "freed with its last holder");
+}
+
+#[test]
+fn releasing_a_cause_frees_it_and_keeps_the_context_shown() {
+    // The `ext` shim's, once a CPython object holds the link: the cause is
+    // released, and the exception is not marked raised `from None`.
+    pycc_rt_exception_clear();
+    let cause_text = shared_str("cause");
+    let e = exc("ValueError", shared_str("e"));
+    unsafe { pycc_rt_exception_raise_with_cause(e, exc("KeyError", cause_text)) };
+    let e = pycc_rt_exception_take();
+    unsafe { lifetime::pycc_rt_exception_release_cause(e) };
+    assert!(unsafe { lifetime::pycc_rt_exception_cause(e) }.is_null());
+    assert_eq!(count(cause_text), 1, "the cause is freed");
+    assert_eq!(unsafe { lifetime::pycc_rt_exception_suppresses_context(e) }, 0);
+    // A self-cause is a borrowed link: releasing it releases nothing.
+    unsafe { pycc_rt_exception_incref(e) };
+    unsafe { pycc_rt_exception_raise_with_cause(e, e) };
+    let e = pycc_rt_exception_take();
+    unsafe { lifetime::pycc_rt_exception_release_cause(e) };
+    assert!(unsafe { lifetime::pycc_rt_exception_cause(e) }.is_null());
+    unsafe { lifetime::pycc_rt_exception_release_cause(std::ptr::null_mut()) };
+    pycc_rt_exception_decref(e);
+}
+
+#[test]
 fn groups_and_partitions_own_their_members_and_message() {
     let a_text = shared_str("a");
     let b_text = shared_str("b");

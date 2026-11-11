@@ -355,33 +355,27 @@ void pycc_ext_obj_raise(PyObject *o)
  * (`EXT_OBJ_RAISE_FROM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`): what
  * `pycc_ext_obj_raise` raises, with `__cause__` set as CPython's own
  * `raise ... from ...` sets it. The cause is either a CPython object
- * (`object_cause`) or a pycc exception (`native_cause`), which crosses as
- * the CPython exception it was bridged from, or else as the one the bridge
- * builds for it when it escapes. Both are borrowed.
+ * (`object_cause`, borrowed) or a pycc exception (`native_cause`, whose
+ * reference is handed over, as to `pycc_ext_raise_with_cause`), which
+ * crosses as the CPython object `pycc_ext_cause_object` gives it, as any
+ * compiled `raise ... from` does.
  */
-extern void pycc_rt_exception_incref(void *obj);
-
 void pycc_ext_obj_raise_from(PyObject *o, void *native_cause, PyObject *object_cause)
 {
     PyObject *cause = NULL;
     PyObject *instance = NULL;
-    PyObject *foreign;
 
     if (object_cause != NULL) {
         cause = Py_NewRef(object_cause);
     } else if (native_cause != NULL) {
-        foreign = pycc_rt_exception_foreign(native_cause);
-        if (foreign != NULL) {
-            cause = Py_NewRef(foreign);
-        } else {
-            /* The pending state takes its own reference, which raising it
-             * through the bridge then releases. */
-            pycc_rt_exception_incref(native_cause);
-            pycc_rt_exception_raise(native_cause);
-            if (pycc_ext_raise_pending()) {
-                cause = PyErr_GetRaisedException();
-            }
+        /* As every pycc cause crosses (`pycc_ext_cause_object`): one never
+         * raised has no context of its own. Borrowed from `native_cause`. */
+        PyObject *crossed = pycc_ext_cause_object(native_cause);
+
+        if (crossed != NULL) {
+            cause = Py_NewRef(crossed);
         }
+        pycc_rt_exception_decref(native_cause);
     }
     if (o == NULL) {
         PyErr_SetString(PyExc_SystemError, "pycc: raise of a missing CPython object");

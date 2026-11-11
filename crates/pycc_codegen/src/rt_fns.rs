@@ -307,6 +307,9 @@ pub(super) struct RtFns<'ctx> {
     /// Set for an `ext` build: check the pending state with
     /// `exception_active` rather than the process-wide `exc_pending` load.
     pub(super) thread_safe_exception_check: std::cell::Cell<bool>,
+    /// Set for an `ext` build: an `except` handler publishes the exception
+    /// it handles to CPython (`exception::handled`).
+    pub(super) publish_handled: std::cell::Cell<bool>,
     /// Set when the target's libm is glibc, whose documented `pow` error
     /// bound lets `float_fast` prove `pow(x, 0.5) == sqrt(x)` for most `x`.
     pub(super) glibc_libm: std::cell::Cell<bool>,
@@ -333,6 +336,9 @@ pub(super) struct RtFns<'ctx> {
     pub(super) exception_alloc: FunctionValue<'ctx>,
     /// `exception_raise(obj: *mut PyExceptionObj)` — sets pending state (void).
     pub(super) exception_raise: FunctionValue<'ctx>,
+    /// `exception_suppress_context(obj: *mut PyExceptionObj)` (void): marks
+    /// an exception as raised `from None`.
+    pub(super) exception_suppress_context: FunctionValue<'ctx>,
     /// `exception_restore(obj: *mut PyExceptionObj)` (void): makes a taken
     /// exception pending again; nothing for null (`object_release`).
     pub(super) exception_restore: FunctionValue<'ctx>,

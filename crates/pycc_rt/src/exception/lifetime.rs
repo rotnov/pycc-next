@@ -16,9 +16,10 @@
 //! exception was translated from ([`pycc_rt_exception_set_foreign`]). A
 //! chain of causes is freed with a worklist, not by recursion.
 //!
-//! Cycles are not collected: `raise e from e` (or a longer `__cause__`
-//! cycle) keeps its exceptions alive, as any reference cycle does
-//! (`docs/DEVIATIONS.md`).
+//! An exception that is its own cause (`raise e from e`) does not own that
+//! reference, so it is freed like any other. Longer cycles are not
+//! collected: `a.__cause__ = b; b.__cause__ = a` keeps both alive, as any
+//! reference cycle does (`docs/DEVIATIONS.md`).
 
 use super::PyExceptionObj;
 use crate::PyStrObj;
@@ -55,6 +56,7 @@ pub(crate) fn new_exception(
         frame_function: std::ptr::null(),
         frame_function_len: 0,
         cause: Cell::new(std::ptr::null_mut()),
+        suppress_context: Cell::new(false),
         exceptions,
         exceptions_len,
         str_form: Cell::new(std::ptr::null_mut()),
@@ -138,7 +140,8 @@ fn free_one(obj: *mut PyExceptionObj, dead: &mut Vec<*mut PyExceptionObj>) {
     if !foreign.is_null() {
         crate::rc::release_word(b'o', foreign as i64);
     }
-    if reaches_zero(exc.cause.get()) {
+    // Its own cause is not a reference it owns (`set_cause`).
+    if exc.cause.get() != obj && reaches_zero(exc.cause.get()) {
         dead.push(exc.cause.get());
     }
     if exc.exceptions_len != 0 {
@@ -158,10 +161,73 @@ fn free_one(obj: *mut PyExceptionObj, dead: &mut Vec<*mut PyExceptionObj>) {
 }
 
 /// Records `cause` as `obj`'s `__cause__`, taking over the caller's
-/// reference to it and releasing the cause it replaces.
+/// reference to it and releasing the cause it replaces. An exception that
+/// is its own cause (`raise e from e`) keeps no reference to itself, which
+/// would never be released: the link is borrowed, and it ends with `obj`.
 pub(super) fn set_cause(obj: &PyExceptionObj, cause: *mut PyExceptionObj) {
+    let this = std::ptr::from_ref(obj).cast_mut();
     let old = obj.cause.replace(cause);
-    pycc_rt_exception_decref(old);
+    if cause == this {
+        // The caller still holds `obj`: this cannot release the last one.
+        pycc_rt_exception_decref(cause);
+    }
+    if old != this {
+        pycc_rt_exception_decref(old);
+    }
+}
+
+/// `obj`'s `__cause__` (`raise obj from cause`), borrowed, or null.
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_cause(obj: *mut PyExceptionObj) -> *mut PyExceptionObj {
+    if obj.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY (caller): live.
+    unsafe { (*obj).cause.get() }
+}
+
+/// Releases `obj`'s `__cause__` (null is a no-op) without marking it raised
+/// `from None`: the `ext` shim's, once the CPython object it made for `obj`
+/// holds that link, so the native field holds nothing that object no longer
+/// reads (`src/ext/module/exception_raise.c`).
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_release_cause(obj: *mut PyExceptionObj) {
+    if !obj.is_null() {
+        // SAFETY (caller): live.
+        set_cause(unsafe { &*obj }, std::ptr::null_mut());
+    }
+}
+
+/// Marks `obj` as raised `from None` (null is a no-op): its context is kept
+/// but not shown, and a cause an earlier `raise obj from cause` gave it is
+/// released, as CPython sets `__cause__` to `None`.
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_suppress_context(obj: *mut PyExceptionObj) {
+    if !obj.is_null() {
+        // SAFETY (caller): live.
+        let obj = unsafe { &*obj };
+        obj.suppress_context.set(true);
+        set_cause(obj, std::ptr::null_mut());
+    }
+}
+
+/// Whether `obj` was raised `from None`.
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_suppresses_context(obj: *mut PyExceptionObj) -> i32 {
+    // SAFETY (caller): live.
+    i32::from(!obj.is_null() && unsafe { (*obj).suppress_context.get() })
 }
 
 /// Attaches `foreign`, the original CPython exception (`PyObject *`) the

@@ -36,6 +36,7 @@ use std::sync::OnceLock;
 /// translation-unit order, with `instances.c`'s include of the companion.
 const FIXED_C: &str = concat!(
     include_str!("../ext/module/bridge.c"),
+    include_str!("../ext/module/exception_raise.c"),
     include_str!("../ext/module/frames.c"),
     include_str!("../ext/module/boundary.c"),
     include_str!("../ext/module/global_sync.c"),

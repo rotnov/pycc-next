@@ -1,7 +1,8 @@
-//! Builds a fixture as a non-strict `--ext` module (`--select all`) and
-//! compares what its compiled functions print with CPython's output for the
-//! source, with the fast paths on and off (`PYCC_NO_FAST_OPS=1`). Shared by
-//! `tests/idiom_lowerings.rs` and `tests/handler_exceptions.rs`.
+//! Builds a fixture as a non-strict `--ext` module (`--select all`), or as a
+//! strict one ([`check_strict`]), and compares what its compiled functions
+//! print with CPython's output for the source, with the fast paths on and
+//! off (`PYCC_NO_FAST_OPS=1`). Shared by `tests/idiom_lowerings.rs` and
+//! `tests/handler_exceptions.rs`.
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -130,3 +131,53 @@ pub fn check(fixture: &str, compiled: &[&str], counter: Option<(&str, bool)>, ex
     }
 }
 
+
+/// Builds `tests/fixtures/<fixture>.py` as a strict `--ext` module, every
+/// function of which is compiled, and compares what
+/// `tests/fixtures/<driver>.py`'s `run(module)` prints for it with what it
+/// prints for the source under CPython, with the fast paths on and off.
+#[allow(dead_code)]
+pub fn check_strict(fixture: &str, driver: &str) {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let source = fixtures.join(format!("{fixture}.py"));
+    let driver_source = fixtures.join(format!("{driver}.py"));
+    let run = |dir: &Path, module: &str, off: bool| {
+        std::fs::copy(&driver_source, dir.join(format!("{driver}.py"))).expect("copy the driver");
+        let mut python = python();
+        python
+            .args(["-c", &format!("import {driver}, {module}\n{driver}.run({module})\n")])
+            .current_dir(dir);
+        if off {
+            python.env("PYCC_NO_FAST_OPS", "1");
+        } else {
+            python.env_remove("PYCC_NO_FAST_OPS");
+        }
+        let out = python.output().expect("python3 should spawn");
+        let stderr = text(&pycc_scratch::lf(&out.stderr));
+        assert!(out.status.success(), "{module}, lowerings off: {off}\n{stderr}");
+        text(&pycc_scratch::lf(&out.stdout))
+    };
+
+    let oracle_dir = ScratchDir::new(&format!("{fixture}_oracle")).expect("scratch");
+    let oracle_module = format!("{fixture}_src");
+    std::fs::copy(&source, oracle_dir.join(format!("{oracle_module}.py"))).expect("copy the fixture");
+    let expected = run(&oracle_dir, &oracle_module, false);
+    assert!(!expected.is_empty());
+
+    let dir = ScratchDir::new(fixture).expect("scratch");
+    let module = format!("{fixture}_ext");
+    std::fs::copy(&source, dir.join(format!("{module}.py"))).expect("copy the fixture");
+    let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .args(["build", "--ext", "--release"])
+        .arg(dir.join(format!("{module}.py")))
+        .arg("-o")
+        .arg(dir.join(&module))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    // Only the extension is left to import.
+    std::fs::remove_file(dir.join(format!("{module}.py"))).expect("remove the source");
+    for off in [false, true] {
+        assert_eq!(run(&dir, &module, off), expected, "lowerings off: {off}");
+    }
+}

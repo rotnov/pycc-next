@@ -27,8 +27,12 @@ use inkwell::builder::Builder;
 pub(super) enum Cause<'a, 'ctx> {
     /// A CPython object, evaluated after `o`.
     Object(&'a MirExpr),
-    /// A pycc exception object, already evaluated.
+    /// A pycc exception object, already evaluated: an owned reference,
+    /// which the helper takes over.
     Native(PointerValue<'ctx>),
+    /// `from None`: no cause, the context marked suppressed (the helper's
+    /// two null causes).
+    Suppressed,
 }
 
 /// Emits one `raise o` (or `raise o from cause`) and terminates the
@@ -60,6 +64,7 @@ pub(super) fn emit_obj_raise<'ctx>(
         }
         Some(cause) => {
             let (native, object) = match cause {
+                Cause::Suppressed => (ptr.const_null(), ptr.const_null()),
                 Cause::Native(native) => (native, ptr.const_null()),
                 Cause::Object(expr) => {
                     let evaluated =

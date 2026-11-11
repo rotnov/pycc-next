@@ -57,6 +57,7 @@ pub(crate) fn test_param_names(params: &[Ty]) -> Vec<String> {
 #[cfg(test)]
 pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/bridge.c"),
+    include_str!("ext/module/exception_raise.c"),
     include_str!("ext/module/frames.c"),
     include_str!("ext/module/boundary.c"),
     include_str!("ext/module/global_sync.c"),

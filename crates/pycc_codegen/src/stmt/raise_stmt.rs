@@ -34,6 +34,7 @@ pub(crate) fn emit_raise_stmt<'ctx>(
         "exception",
     )?;
     emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+    emit_raise_context(context, builder, module, rt, exception, exc_obj);
     builder
         .build_call(rt.exception_raise, &[exc_obj.into()], "")
         .expect("build_call should not fail for exception_raise");
@@ -47,6 +48,65 @@ pub(crate) fn emit_raise_stmt<'ctx>(
         .build_unreachable()
         .expect("build_unreachable should not fail after raise");
     Ok(())
+}
+
+/// `void pycc_ext_raise_context(void *exc)`: chains the exception being
+/// handled onto one being raised that already is a CPython object.
+pub(crate) const EXT_RAISE_CONTEXT_SYMBOL: &str = "pycc_ext_raise_context";
+
+/// In an `--ext` module, a `raise` of an existing exception (`raise e`, not
+/// `raise E(...)`) gives it its `__context__` there, as CPython does at
+/// every raise, when it already is a CPython object (the shim decides). A
+/// constructed one has none yet and gets it where its object is made.
+fn emit_raise_context<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    exception: &pycc_mir::MirExceptionValue,
+    exc_obj: inkwell::values::PointerValue<'ctx>,
+) {
+    if !rt.publish_handled.get() || !matches!(exception, pycc_mir::MirExceptionValue::Existing(_)) {
+        return;
+    }
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let chain = crate::foreign_pack::shim_fn(
+        module,
+        EXT_RAISE_CONTEXT_SYMBOL,
+        context.void_type().fn_type(&[ptr.into()], false),
+    );
+    builder
+        .build_call(chain, &[exc_obj.into()], "")
+        .expect("build_call should not fail for pycc_ext_raise_context");
+}
+
+/// `void pycc_ext_raise_with_cause(void *exc, void *cause)`: an `--ext`
+/// module's `raise exc from cause`.
+const EXT_RAISE_WITH_CAUSE_SYMBOL: &str = "pycc_ext_raise_with_cause";
+/// `void pycc_ext_raise_from_none(void *exc)`: an `--ext` module's mark of
+/// `raise exc from None`.
+const EXT_RAISE_FROM_NONE_SYMBOL: &str = "pycc_ext_raise_from_none";
+
+/// In an `--ext` module, the shim's form of a runtime call that sets an
+/// exception's `__cause__` or `from None` mark (`symbol`, taking `params`
+/// pointers): once the exception has a CPython object, the object holds
+/// those links (`src/ext/module/exception_raise.c`). None elsewhere.
+fn ext_links_fn<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    symbol: &str,
+    params: usize,
+) -> Option<inkwell::values::FunctionValue<'ctx>> {
+    if !rt.publish_handled.get() {
+        return None;
+    }
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    Some(crate::foreign_pack::shim_fn(
+        module,
+        symbol,
+        context.void_type().fn_type(&vec![ptr.into(); params], false),
+    ))
 }
 
 // Part 9 of #1371: `raise o` with a CPython object `o`.
@@ -66,6 +126,10 @@ pub(crate) fn emit_obj_raise_stmt<'ctx>(
     // pycc exception, passed as the native exception object.
     let cause = match cause {
         None => None,
+        // `raise o from None`.
+        Some(pycc_mir::MirExceptionValue::Existing(MirExpr::NoneLiteral)) => {
+            Some(foreign_raise::Cause::Suppressed)
+        }
         Some(pycc_mir::MirExceptionValue::Existing(expr)) if expr.ty() == pycc_mir::Ty::Object => {
             Some(foreign_raise::Cause::Object(expr))
         }
@@ -123,6 +187,25 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
         exception,
         "exception",
     )?;
+    if matches!(cause, pycc_mir::MirExceptionValue::Existing(MirExpr::NoneLiteral)) {
+        // `raise X from None`: no cause, and the context -- the exception
+        // being handled, which an `--ext` handler publishes -- is marked
+        // suppressed.
+        emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+        emit_raise_context(context, builder, module, rt, exception, exc_obj);
+        let suppress = ext_links_fn(context, module, rt, EXT_RAISE_FROM_NONE_SYMBOL, 1)
+            .unwrap_or(rt.exception_suppress_context);
+        builder
+            .build_call(suppress, &[exc_obj.into()], "")
+            .expect("build_call should not fail for exception_suppress_context");
+        builder
+            .build_call(rt.exception_raise, &[exc_obj.into()], "")
+            .expect("build_call should not fail for exception_raise");
+        builder
+            .build_unreachable()
+            .expect("build_unreachable should not fail after raise_from");
+        return Ok(());
+    }
     let cause_obj = emit_exception_value(
         context,
         builder,
@@ -134,9 +217,12 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
         "cause",
     )?;
     emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+    emit_raise_context(context, builder, module, rt, exception, exc_obj);
+    let raise_with_cause = ext_links_fn(context, module, rt, EXT_RAISE_WITH_CAUSE_SYMBOL, 2)
+        .unwrap_or(rt.exception_raise_with_cause);
     builder
         .build_call(
-            rt.exception_raise_with_cause,
+            raise_with_cause,
             &[exc_obj.into(), cause_obj.into()],
             "",
         )

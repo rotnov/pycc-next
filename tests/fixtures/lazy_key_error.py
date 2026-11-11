@@ -1,5 +1,5 @@
-# A `try: d[k] except KeyError:` whose handler cannot see the exception
-# takes a missing key of an exact dict straight into the handler
+# A `try: d[k] except KeyError:` whose handler neither binds nor re-raises
+# the exception takes a missing key of an exact dict straight into the handler
 # (docs/design/compile-little.md, section 2.7). Every case prints what
 # CPython prints.
 import collections
