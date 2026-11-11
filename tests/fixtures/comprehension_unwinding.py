@@ -1,7 +1,7 @@
 # What a comprehension over an object releases, and in which order: the
 # exhausted iterator before the last item, and, when the element or the
-# condition raises, the result, the iterator and then the item. Every case
-# prints what CPython prints.
+# condition raises, the iterator, the result (and what it holds) and then the
+# item. Every case prints what CPython prints.
 
 
 class Fin:
@@ -11,6 +11,8 @@ class Fin:
         self.log = log
 
     def __hash__(self):
+        if self.name == "bad":
+            raise TypeError("no hash for " + self.name)
         return hash(self.name)
 
     def __eq__(self, other):
@@ -96,6 +98,40 @@ def tuple_element_raises(names, log):
         return "handled"
 
 
+def items_kept(names, log):
+    # The result holds the items collected so far: it goes after the
+    # iterator and before the item that failed.
+    try:
+        return len({x: x.name for x in Source(names, log)})
+    except TypeError:
+        log.append("caught TypeError")
+        return "handled"
+
+
+def items_kept_in_set(names, log):
+    try:
+        return len({x for x in Source(names, log)})
+    except TypeError:
+        log.append("caught TypeError")
+        return "handled"
+
+
+def produced(names, log):
+    try:
+        for name in names:
+            yield Fin(name, log)
+    finally:
+        log.append("generator closed")
+
+
+def items_kept_from_generator(names, log):
+    try:
+        return len({x: x.name for x in produced(names, log)})
+    except TypeError:
+        log.append("caught TypeError")
+        return "handled"
+
+
 def over_list(items, log):
     # The list keeps its items: only the comprehension's own reference to
     # the item that failed is released.
@@ -132,11 +168,15 @@ def shown(f, *args):
 
 def main():
     for f in (names_of, name_set, name_dict, pairs_of, filtered, element_raises,
-              element_raises_escapes, condition_raises, key_raises, tuple_element_raises, twice):
-        for names in (["abc", "xyz"], ["abc", "d", "xyz"], ["d"], []):
+              element_raises_escapes, condition_raises, key_raises, tuple_element_raises, twice,
+              items_kept, items_kept_from_generator):
+        for names in (["abc", "xyz"], ["abc", "d", "xyz"], ["d"], [], ["abc", "bad", "xyz"]):
             log = []
             shown(f, names, log)
             print(log)
+    log = []
+    shown(items_kept_in_set, ["abc", "bad", "xyz"], log)
+    print(log)
     log = []
     items = [Fin("abc", log), Fin("d", log), Fin("xyz", log)]
     shown(over_list, items, log)

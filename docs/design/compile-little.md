@@ -726,7 +726,7 @@ Other idioms join this table only with a measured win on a profiled function.
   comprehension assigned by a statement of its own (`xs = [... for k, v in ...]`) does
   not carry it yet and keeps each item.
   Whatever the iterable, the exhausted iterator is released before the last item, and an
-  exception out of the element or the condition releases the result, the iterator and
+  exception out of the element or the condition releases the iterator, the result and
   then the item, as CPython's unwinding does (`tests/fixtures/comprehension_unwinding.py`).
 
 The `PyDict_Next` loop, the items moved into the tuple, the indexed list loop and the

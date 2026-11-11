@@ -100,6 +100,19 @@ impl TbRecords {
         self.records.borrow().clone()
     }
 
+    /// Makes these records a copy of `other`'s, each with a reference of
+    /// its own to its frame object: a group derived from an exception
+    /// carries on its traceback.
+    pub(crate) fn copy_from(&self, other: &TbRecords) {
+        self.release();
+        for record in other.records.borrow().iter() {
+            if !record.frame.is_null() {
+                crate::rc::retain_word(b'o', record.frame as i64);
+            }
+            self.records.borrow_mut().push(*record);
+        }
+    }
+
     /// Releases the frame objects the records own.
     pub(crate) fn release(&self) {
         self.synced.set(0);

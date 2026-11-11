@@ -35,7 +35,7 @@ fn item_releases(text: &str) -> usize {
 /// releases the iterator, and the discarded result is released by its
 /// statement. The loop variable's slot owns each item, and is held from
 /// before the source is evaluated: every failure edge releases what it
-/// holds too, after the result and the iterator.
+/// holds too, after the iterator and the result.
 #[test]
 fn a_comprehension_releases_its_produced_filter_and_element() {
     let var = || MirExpr::Name {
@@ -82,13 +82,13 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     for fail in &later {
         assert_eq!(releases_of(fail, ITERATOR), 1, "{fail}\n{ir}");
         assert_eq!(releases_of(fail, RESULT), 1, "{fail}\n{ir}");
-        // The result, the iterator, then the item, as CPython unwinds.
+        // The iterator, the result, then the item, as CPython unwinds.
         let result = fail.find(&format!("%{RESULT})")).expect("the result is released");
         let iterator = fail.find(&format!("%{ITERATOR})")).expect("the iterator is released");
         let item = fail
             .find(&format!("{RELEASE}ptr %{ITEM}"))
             .expect("the item is released");
-        assert!(result < iterator && iterator < item, "{fail}\n{ir}");
+        assert!(iterator < result && result < item, "{fail}\n{ir}");
     }
     // The truth test's failure releases the filter as well.
     assert_eq!(releases(blocks(&ir, "foreign_truthy_fail")[0]), 4, "{ir}");

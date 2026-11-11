@@ -98,7 +98,8 @@ pub unsafe extern "C" fn pycc_rt_exception_group_alloc(
 ///
 /// `matched_out` receives a new reference to a fresh group of the matched
 /// members, or null when none matched; `rest_out` the same for the
-/// unmatched members. Both are tagged `group_type_tag`/`group_name`, which
+/// unmatched members, or `group` itself (a new reference) when none
+/// matched. A fresh group carries on `group`'s traceback entries. Both are tagged `group_type_tag`/`group_name`, which
 /// codegen supplies, and share `group`'s message (each holding its own
 /// reference).
 ///
@@ -142,6 +143,17 @@ pub unsafe extern "C" fn pycc_rt_exception_group_partition(
         let member_tag = unsafe { (**member).type_tag };
         tag_slice.is_empty() || tag_slice.iter().any(|tag| tag_matches(member_tag, *tag))
     });
+    if matched.is_empty() {
+        // No member matched: the exception goes on unchanged, the same
+        // object with its traceback, as CPython re-raises it.
+        // SAFETY (caller): live, and both out-pointers are writable.
+        unsafe {
+            pycc_rt_exception_incref(group);
+            *matched_out = std::ptr::null_mut();
+            *rest_out = group;
+        }
+        return;
+    }
     // A bridged group carries no message of its own (`str_form`).
     let message = if obj.message.is_null() {
         super::str_form::exception_str(obj)
@@ -158,5 +170,12 @@ pub unsafe extern "C" fn pycc_rt_exception_group_partition(
             message,
         );
         *rest_out = build_group_or_null(&rest, group_type_tag, group_name, group_name_len, message);
+        // Each half continues the original's traceback, as the halves of
+        // CPython's `split()` do.
+        for half in [*matched_out, *rest_out] {
+            if !half.is_null() {
+                (*half).tb.copy_from(&obj.tb);
+            }
+        }
     }
 }

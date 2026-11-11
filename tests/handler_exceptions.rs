@@ -6,8 +6,8 @@
 //!   which neither sees the exception nor loses it
 //!   (`tests/fixtures/unwinding_finalizers.py`);
 //! - a comprehension over an object releases its exhausted iterator before
-//!   its last item, and, when its element or condition raises, its result,
-//!   its iterator and then the item (`tests/fixtures/comprehension_unwinding.py`);
+//!   its last item, and, when its element or condition raises, its iterator,
+//!   its result and then the item (`tests/fixtures/comprehension_unwinding.py`);
 //! - an exception passing a `try` statement adds a traceback entry where
 //!   it is raised, and none for an unmatched handler, a bare `raise` or a
 //!   `finally` clause (`tests/fixtures/traceback_entries.py`).
@@ -62,6 +62,9 @@ fn a_comprehension_releases_its_iterator_and_item_as_cpython_does() {
             "over_list",
             "miss_in_comprehension",
             "twice",
+            "items_kept",
+            "items_kept_in_set",
+            "items_kept_from_generator",
         ],
         None,
         None,
@@ -86,6 +89,8 @@ fn an_exception_passing_a_try_statement_adds_no_traceback_entry() {
             "nested",
             "in_else",
             "in_loop",
+            "star_unmatched",
+            "star_unmatched_then_finally",
             "main",
         ],
         None,

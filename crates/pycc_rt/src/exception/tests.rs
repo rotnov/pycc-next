@@ -502,10 +502,9 @@ fn partition_where_no_member_matches_leaves_matched_null() {
     let group = group_of(&[value_err]);
     let (matched, rest) = partition(group, &[EXCEPTION_TYPE_KEY_ERROR]);
     assert!(matched.is_null());
-    unsafe {
-        assert!(!rest.is_null());
-        assert_eq!((*rest).exceptions_len, 1);
-    }
+    // The group itself goes on, with its traceback: a new reference to it.
+    assert_eq!(rest, group);
+    assert_eq!(unsafe { (*group).rc.get() }, 2);
 }
 
 #[test]
@@ -561,10 +560,8 @@ fn partition_of_a_non_group_exception_that_does_not_match_leaves_it_in_rest() {
     let plain = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "plain");
     let (matched, rest) = partition(plain, &[EXCEPTION_TYPE_KEY_ERROR]);
     assert!(matched.is_null());
-    unsafe {
-        assert!(!rest.is_null());
-        assert_eq!(std::slice::from_raw_parts((*rest).exceptions, 1), [plain]);
-    }
+    // Unwrapped: the exception propagates as CPython re-raises it.
+    assert_eq!(rest, plain);
 }
 
 /// A `NameError` names a dependency module's global by its plain name.

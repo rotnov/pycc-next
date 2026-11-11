@@ -98,6 +98,22 @@ def in_loop(d, keys):
     return "done"
 
 
+def star_unmatched(d, k, log):
+    try:
+        fails(d, k)
+    except* ValueError:
+        log.append("no")
+
+
+def star_unmatched_then_finally(d, k, log):
+    try:
+        fails(d, k)
+    except* ValueError:
+        log.append("no")
+    finally:
+        log.append("finally")
+
+
 def entries(f, *args):
     try:
         f(*args)
@@ -114,7 +130,8 @@ def main():
     log = []
     for f in (unmatched, unmatched_call, bare, named, replaced, in_else):
         entries(f, {}, "k")
-    for f in (bare_after_work, through_finally, unmatched_then_finally, nested):
+    for f in (bare_after_work, through_finally, unmatched_then_finally, nested,
+              star_unmatched, star_unmatched_then_finally):
         entries(f, {}, "k", log)
     entries(in_loop, {}, ["k"])
     print(log)
