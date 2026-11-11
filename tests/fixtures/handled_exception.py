@@ -175,6 +175,34 @@ def raises_object_from_bound(d, k, e):
             raise e from cause
 
 
+def object_from_once():
+    raises_object_from({}, "k", ValueError("passed"))
+
+
+def object_from_bound_once():
+    raises_object_from_bound({}, "k", ValueError("passed"))
+
+
+def local_from_new_cause():
+    x = ValueError("s")
+    raise x from KeyError("c")
+
+
+def caught_unpublished():
+    # Handed back from its handler, which runs nothing that could see it:
+    # it has no CPython object yet.
+    try:
+        raise ValueError("v")
+    except ValueError as e:
+        return e
+
+
+def self_cause_unpublished():
+    # Its own cause before it has a CPython object.
+    e = caught_unpublished()
+    raise e from e
+
+
 def raises_again_from_none(d, k):
     # `raise e from None` drops the cause an earlier `raise ... from` gave.
     try:
@@ -524,18 +552,21 @@ def main():
     print(log)
     # An exception that is its own cause is freed with its handler.
     print("self-caused left alive:", left_alive(self_reraise_from_self))
+    print("self-caused unpublished left alive:", left_alive(self_cause_unpublished))
+    for f in (object_from_once, object_from_bound_once, local_from_new_cause):
+        print(f.__name__, "left alive:", left_alive(f))
 
 
 def left_alive(f):
-    # How many `ValueError`s 1000 calls of `f` leave alive.
+    # How many exceptions 1000 calls of `f` leave alive.
     def live():
         gc.collect()
-        return sum(1 for o in gc.get_objects() if type(o) is ValueError)
+        return sum(1 for o in gc.get_objects() if isinstance(o, BaseException))
     before = live()
     for _ in range(1000):
         try:
             f()
-        except ValueError:
+        except Exception:
             pass
     return live() - before
 

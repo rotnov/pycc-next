@@ -355,9 +355,10 @@ void pycc_ext_obj_raise(PyObject *o)
  * (`EXT_OBJ_RAISE_FROM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`): what
  * `pycc_ext_obj_raise` raises, with `__cause__` set as CPython's own
  * `raise ... from ...` sets it. The cause is either a CPython object
- * (`object_cause`) or a pycc exception (`native_cause`), which crosses as
- * the CPython object `pycc_ext_cause_object` gives it, as any compiled
- * `raise ... from` does. Both are borrowed.
+ * (`object_cause`, borrowed) or a pycc exception (`native_cause`, whose
+ * reference is handed over, as to `pycc_ext_raise_with_cause`), which
+ * crosses as the CPython object `pycc_ext_cause_object` gives it, as any
+ * compiled `raise ... from` does.
  */
 void pycc_ext_obj_raise_from(PyObject *o, void *native_cause, PyObject *object_cause)
 {
@@ -374,6 +375,7 @@ void pycc_ext_obj_raise_from(PyObject *o, void *native_cause, PyObject *object_c
         if (crossed != NULL) {
             cause = Py_NewRef(crossed);
         }
+        pycc_rt_exception_decref(native_cause);
     }
     if (o == NULL) {
         PyErr_SetString(PyExc_SystemError, "pycc: raise of a missing CPython object");

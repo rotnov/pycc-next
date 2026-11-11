@@ -265,6 +265,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - An exception that is its own cause (`except ValueError as e: raise e from e`) was never
   freed, nor the CPython exception it stands for: one per call. It no longer holds a
   reference to itself.
+- `--ext --non-strict`: `raise o from cause` with `o` a CPython object and the cause a
+  compiled exception (`raise o from KeyError("c")`, `except KeyError as k: raise o from k`)
+  never freed the cause: one per call. The cause is now released after the raise, and an
+  exception's own record of its cause is released once its CPython object holds it.
 - `--ext`: a compiled `except` clause publishes the exception it handles, as CPython's
   does. Inside it `sys.exception()` and `sys.exc_info()` returned `None` and
   `traceback.format_exc()` was empty, and an exception raised there had no `__context__`;

@@ -27,7 +27,8 @@ use inkwell::builder::Builder;
 pub(super) enum Cause<'a, 'ctx> {
     /// A CPython object, evaluated after `o`.
     Object(&'a MirExpr),
-    /// A pycc exception object, already evaluated.
+    /// A pycc exception object, already evaluated: an owned reference,
+    /// which the helper takes over.
     Native(PointerValue<'ctx>),
     /// `from None`: no cause, the context marked suppressed (the helper's
     /// two null causes).

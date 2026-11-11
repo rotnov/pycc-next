@@ -189,6 +189,21 @@ pub unsafe extern "C" fn pycc_rt_exception_cause(obj: *mut PyExceptionObj) -> *m
     unsafe { (*obj).cause.get() }
 }
 
+/// Releases `obj`'s `__cause__` (null is a no-op) without marking it raised
+/// `from None`: the `ext` shim's, once the CPython object it made for `obj`
+/// holds that link, so the native field holds nothing that object no longer
+/// reads (`src/ext/module/exception_raise.c`).
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_release_cause(obj: *mut PyExceptionObj) {
+    if !obj.is_null() {
+        // SAFETY (caller): live.
+        set_cause(unsafe { &*obj }, std::ptr::null_mut());
+    }
+}
+
 /// Marks `obj` as raised `from None` (null is a no-op): its context is kept
 /// but not shown, and a cause an earlier `raise obj from cause` gave it is
 /// released, as CPython sets `__cause__` to `None`.

@@ -91,6 +91,7 @@ extern void *pycc_rt_exception_cause(void *obj);
 extern int pycc_rt_exception_suppresses_context(void *obj);
 extern void pycc_rt_exception_incref(void *obj);
 extern void pycc_rt_exception_decref(void *obj);
+extern void pycc_rt_exception_release_cause(void *obj);
 /* `frames.c`: whether compiled code has raised a pycc exception. */
 static int pycc_ext_exception_was_raised(void *exc);
 
@@ -98,8 +99,8 @@ static int pycc_ext_exception_was_raised(void *exc);
  * `__cause__` and `__suppress_context__` have one authority at a time. Until
  * a pycc exception has a CPython object, compiled code records them on the
  * exception itself (`raise X from Y`, `from None`), and they are given to
- * the object once, when it is made (`pycc_ext_raised_links`). From then on
- * the object holds them: a compiled `raise e from ...` writes to it
+ * the object once, when it is made (`pycc_ext_raised_links`), and the
+ * exception releases its cause. From then on the object holds them: a compiled `raise e from ...` writes to it
  * (`pycc_ext_raise_with_cause`, `pycc_ext_raise_from_none`), and so may
  * Python code, whose edits stay.
  *
@@ -169,6 +170,10 @@ static void pycc_ext_raised_links(void)
 
         /* Steals the cause's reference; a NULL cause still suppresses. */
         PyException_SetCause(raised, cause_object == NULL ? NULL : Py_NewRef(cause_object));
+        /* The object holds the link from now on: the native field lets go
+         * of it, so a cause compiled code no longer reaches is freed, and
+         * a cycle through it is broken where the object's is. */
+        pycc_rt_exception_release_cause(native);
     }
     pycc_rt_exception_decref(native);
     PyErr_SetRaisedException(raised);
