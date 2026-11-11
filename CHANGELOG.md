@@ -260,6 +260,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   object result was NULL`. While an exception is pending, an object is now freed with it
   set aside, wherever the release is (`pycc_ext_obj_dealloc`); a release on any other
   path executes what it executed before.
+- Non-strict `--ext`: a comprehension over an object whose element or condition raised
+  kept its current item until the process ended (one reference leaked per failing call):
+  the item is released on that path too, after the iterator and the result, and a
+  comprehension that ends releases its exhausted iterator before its last item, both as
+  CPython does.
+- An exception no `except*` clause matched propagates as the same object, with its
+  traceback entries, and the subgroups an `except*` statement derives carry the original's
+  entries on; the remainder was a new group that had lost them.
+- A compiled frame's traceback no longer gains a second entry, at the line of the last
+  statement of the `try` statement, when an exception passes that statement: an unmatched
+  handler, a bare `raise` and a `finally` clause add none, as CPython's `RERAISE` adds
+  none.
 - `abs(-2**62)`, the most negative smallint, is `2**62` where the argument's range is known
   at compile time (a literal, a local, a `range()` loop variable); it printed
   `-4611686018427387904` (found by the fuzzer).

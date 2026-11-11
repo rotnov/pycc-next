@@ -132,8 +132,11 @@ pub(super) fn emit_finally_tail<'ctx>(
 
     builder.position_at_end(tail.after_bb);
     // A locally unmatched exception (or one restored after `finally`) must
-    // leave this structured statement immediately.
-    guard_statement_effects(context, builder, rt);
+    // leave this structured statement immediately. It adds no traceback
+    // entry here: the statement that raised it recorded one, and passing an
+    // unmatched handler, a bare `raise` or a `finally` clause records
+    // nothing, as CPython's `RERAISE` does not.
+    crate::frames::without_record(rt, || guard_statement_effects(context, builder, rt));
     Ok(())
 }
 

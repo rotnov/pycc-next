@@ -4,7 +4,13 @@
 //!
 //! - a value an exception edge releases may run compiled code (a `__del__`),
 //!   which neither sees the exception nor loses it
-//!   (`tests/fixtures/unwinding_finalizers.py`).
+//!   (`tests/fixtures/unwinding_finalizers.py`);
+//! - a comprehension over an object releases its exhausted iterator before
+//!   its last item, and, when its element or condition raises, its iterator,
+//!   its result and then the item (`tests/fixtures/comprehension_unwinding.py`);
+//! - an exception passing a `try` statement adds a traceback entry where
+//!   it is raised, and none for an unmatched handler, a bare `raise` or a
+//!   `finally` clause (`tests/fixtures/traceback_entries.py`).
 
 #[path = "harness_support/ext_oracle.rs"]
 mod ext_oracle;
@@ -28,6 +34,63 @@ fn a_finalizer_run_while_an_exception_unwinds_leaves_it_pending() {
             "temporary_released",
             "busy_finalizer",
             "finally_released",
+            "main",
+        ],
+        None,
+        None,
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_comprehension_releases_its_iterator_and_item_as_cpython_does() {
+    check(
+        "comprehension_unwinding",
+        &[
+            "Fin.__del__",
+            "Source.__del__",
+            "names_of",
+            "name_set",
+            "name_dict",
+            "pairs_of",
+            "filtered",
+            "element_raises",
+            "element_raises_escapes",
+            "condition_raises",
+            "key_raises",
+            "tuple_element_raises",
+            "over_list",
+            "miss_in_comprehension",
+            "twice",
+            "items_kept",
+            "items_kept_in_set",
+            "items_kept_from_generator",
+        ],
+        None,
+        None,
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_exception_passing_a_try_statement_adds_no_traceback_entry() {
+    check(
+        "traceback_entries",
+        &[
+            "fails",
+            "unmatched",
+            "unmatched_call",
+            "bare",
+            "bare_after_work",
+            "named",
+            "replaced",
+            "through_finally",
+            "unmatched_then_finally",
+            "nested",
+            "in_else",
+            "in_loop",
+            "star_unmatched",
+            "star_unmatched_then_finally",
             "main",
         ],
         None,

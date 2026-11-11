@@ -345,14 +345,14 @@ fn a_new_raise_in_the_handler_replaces_the_import_error() {
     assert_ok(&run);
 }
 
-/// The recorded `except*` deviation, not intended behaviour: an unmatched
-/// `except*` re-raises the exception group pycc wrapped the bridged
-/// exception in, whose pointer is not in the bridge table, so the host sees
-/// the rebuilt group tag's fallback -- a plain `Exception` carrying the
-/// import's message -- rather than CPython's original `ModuleNotFoundError`.
+/// An unmatched `except*` re-raises the exception itself, not a group
+/// wrapped around it (`pycc_rt_exception_group_partition`), so the host
+/// sees CPython's original `ModuleNotFoundError`. It used to see the
+/// wrapping group's fallback, a plain `Exception` with the import's
+/// message.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_unmatched_except_star_escapes_as_the_recorded_deviation() {
+fn an_unmatched_except_star_escapes_as_the_original() {
     let run = run_hosted(
         "bridge_star_escape",
         "pycc_bridge_star_escape_mod",
@@ -365,7 +365,7 @@ fn an_unmatched_except_star_escapes_as_the_recorded_deviation() {
     assert_ok(&run);
     assert_eq!(
         stdout_of(&run),
-        "Exception \"No module named 'pycc_nosuch_1293'\"\n"
+        "ModuleNotFoundError \"No module named 'pycc_nosuch_1293'\"\n"
     );
 }
 

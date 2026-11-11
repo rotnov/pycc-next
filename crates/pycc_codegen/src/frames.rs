@@ -633,6 +633,23 @@ pub(crate) fn exception_edge<'ctx>(
     edge
 }
 
+/// Emits `emit` with no current position, so the exception edges it makes
+/// record no traceback entry: an exception leaving a `try` statement was
+/// recorded where it was raised, and CPython's `RERAISE` adds nothing.
+pub(crate) fn without_record<'ctx, R>(rt: &RtFns<'ctx>, emit: impl FnOnce() -> R) -> R {
+    let position = rt
+        .frames
+        .current
+        .borrow_mut()
+        .as_mut()
+        .and_then(|frame| frame.current.take());
+    let result = emit();
+    if let Some(frame) = rt.frames.current.borrow_mut().as_mut() {
+        frame.current = position;
+    }
+    result
+}
+
 /// Adds this frame's traceback entry, at the current position, to the
 /// CPython exception set now: an `--ext` module body's failed CPython
 /// operation, which fails the import directly with that exception

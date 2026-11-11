@@ -98,6 +98,10 @@ use inkwell::builder::Builder;
 pub(super) struct PendingObject<'ctx> {
     pointer: PointerValue<'ctx>,
     release: FunctionValue<'ctx>,
+    /// Whether `pointer` is a slot holding the reference (or null) rather
+    /// than the reference itself: released by loading and clearing it
+    /// ([`hold_slot`]).
+    slot: bool,
 }
 
 /// A produced operand on `pending_object_releases`, or nothing when the
@@ -157,14 +161,28 @@ fn produced<'ctx>(
         Scalar::Object(pointer) if is_produced(operand_source(expr)) => Some(PendingObject {
             pointer: *pointer,
             release: release_fn(context, module),
+            slot: false,
         }),
         _ => None,
     }
 }
 
 fn emit_release<'ctx>(builder: &Builder<'ctx>, object: PendingObject<'ctx>) {
+    let pointer = if object.slot {
+        let ptr = object.pointer.get_type();
+        let held = builder
+            .build_load(ptr, object.pointer, "obj_slot_held")
+            .expect("build_load should not fail for a held slot")
+            .into_pointer_value();
+        builder
+            .build_store(object.pointer, ptr.const_null())
+            .expect("build_store should not fail for a held slot");
+        held
+    } else {
+        object.pointer
+    };
     builder
-        .build_call(object.release, &[object.pointer.into()], "obj_release")
+        .build_call(object.release, &[pointer.into()], "obj_release")
         .expect("build_call should not fail for pycc_ext_obj_release");
 }
 
@@ -180,6 +198,7 @@ pub(super) fn release_now<'ctx>(
         PendingObject {
             pointer,
             release: release_fn(context, module),
+            slot: false,
         },
     );
 }
@@ -215,6 +234,30 @@ pub(super) fn hold_new_reference<'ctx>(
     let object = PendingObject {
         pointer,
         release: release_fn(context, module),
+        slot: false,
+    };
+    rt.exceptions
+        .pending_object_releases
+        .borrow_mut()
+        .push(object);
+    Held(Some(object))
+}
+
+/// Holds what `slot` holds -- a pointer slot owning one reference, or null
+/// -- so that every failure edge emitted until the matching [`Held`] is
+/// retired releases it and clears the slot: a comprehension's loop variable,
+/// which no frame epilogue releases. [`Held::consumed`] retires it; the
+/// owner then releases the slot itself.
+pub(super) fn hold_slot<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    slot: PointerValue<'ctx>,
+) -> Held<'ctx> {
+    let object = PendingObject {
+        pointer: slot,
+        release: release_fn(context, module),
+        slot: true,
     };
     rt.exceptions
         .pending_object_releases
@@ -350,6 +393,7 @@ pub(super) fn enter_loop_iterator<'ctx>(
     let iterator = PendingObject {
         pointer: iterator,
         release: release_fn(context, module),
+        slot: false,
     };
     let enclosing = *rt
         .exceptions
