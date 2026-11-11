@@ -102,6 +102,11 @@ pub struct PyExceptionObj {
     pub(crate) frame_function_len: usize,
     /// Explicit `raise ... from cause` chain: an owned reference, or null.
     pub(crate) cause: Cell<*mut PyExceptionObj>,
+    /// `raise ... from None`: the exception being handled when this one was
+    /// raised stays its `__context__` but is not shown
+    /// (`__suppress_context__`). Read by the `ext` shim when the exception
+    /// becomes a CPython object; a cause sets the same flag there.
+    pub(crate) suppress_context: Cell<bool>,
     /// Part 3 of #382 (#542, PEP 654): an `ExceptionGroup`/`BaseExceptionGroup`
     /// instance's member exceptions, as an owned, heap-allocated array of
     /// `exceptions_len` pointers. Null (with `exceptions_len == 0`) for every

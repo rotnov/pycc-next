@@ -99,6 +99,7 @@ fn compile_module(
     let i64_type = context.i64_type();
     let rt = declare_rt_functions(&context, &module);
     rt.thread_safe_exception_check.set(options.ext);
+    rt.publish_handled.set(options.ext);
     rt.glibc_libm
         .set(float_fast::target_libm_is_glibc(target_triple));
     *rt.rc_class_kinds.borrow_mut() = heap_rc::rc_class_kinds(&mir.class_defs);

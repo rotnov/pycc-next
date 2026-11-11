@@ -633,6 +633,29 @@ pub(crate) fn exception_edge<'ctx>(
     edge
 }
 
+/// The frame description and the live frame of the function being emitted,
+/// each `None` when it has none.
+pub(crate) fn here<'ctx>(
+    rt: &RtFns<'ctx>,
+) -> (
+    Option<inkwell::values::PointerValue<'ctx>>,
+    Option<inkwell::values::PointerValue<'ctx>>,
+) {
+    let current = rt.frames.current.borrow();
+    let Some(frame) = current.as_ref() else {
+        return (None, None);
+    };
+    (
+        Some(frame.info.as_pointer_value()),
+        frame.live.map(|live| live.frame),
+    )
+}
+
+/// The current position's index in the function's position table.
+pub(crate) fn current_position(rt: &RtFns<'_>) -> Option<u32> {
+    rt.frames.current.borrow().as_ref().and_then(|frame| frame.current)
+}
+
 /// Emits `emit` with no current position, so the exception edges it makes
 /// record no traceback entry: an exception leaving a `try` statement was
 /// recorded where it was raised, and CPython's `RERAISE` adds nothing.

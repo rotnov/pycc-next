@@ -55,6 +55,7 @@ pub(crate) fn new_exception(
         frame_function: std::ptr::null(),
         frame_function_len: 0,
         cause: Cell::new(std::ptr::null_mut()),
+        suppress_context: Cell::new(false),
         exceptions,
         exceptions_len,
         str_form: Cell::new(std::ptr::null_mut()),
@@ -162,6 +163,42 @@ fn free_one(obj: *mut PyExceptionObj, dead: &mut Vec<*mut PyExceptionObj>) {
 pub(super) fn set_cause(obj: &PyExceptionObj, cause: *mut PyExceptionObj) {
     let old = obj.cause.replace(cause);
     pycc_rt_exception_decref(old);
+}
+
+/// `obj`'s `__cause__` (`raise obj from cause`), borrowed, or null.
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_cause(obj: *mut PyExceptionObj) -> *mut PyExceptionObj {
+    if obj.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY (caller): live.
+    unsafe { (*obj).cause.get() }
+}
+
+/// Marks `obj` as raised `from None` (null is a no-op): its context is kept
+/// but not shown.
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_suppress_context(obj: *mut PyExceptionObj) {
+    if !obj.is_null() {
+        // SAFETY (caller): live.
+        unsafe { (*obj).suppress_context.set(true) };
+    }
+}
+
+/// Whether `obj` was raised `from None`.
+///
+/// # Safety
+/// A non-null `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_suppresses_context(obj: *mut PyExceptionObj) -> i32 {
+    // SAFETY (caller): live.
+    i32::from(!obj.is_null() && unsafe { (*obj).suppress_context.get() })
 }
 
 /// Attaches `foreign`, the original CPython exception (`PyObject *`) the

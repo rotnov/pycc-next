@@ -895,6 +895,55 @@ static int pycc_ext_exception_tag_matches(unsigned char exc_tag, void *foreign,
     return *cached > 0;
 }
 
+/* `object_except.c`: the CPython exception a pycc exception stands for. */
+static PyObject *pycc_ext_exception_cpython(void *exc);
+extern void *pycc_rt_exception_cause(void *obj);
+extern int pycc_rt_exception_suppresses_context(void *obj);
+extern void pycc_rt_exception_incref(void *obj);
+extern void pycc_rt_exception_decref(void *obj);
+
+/*
+ * The CPython exception just built for the pending pycc exception is
+ * raised: gives it that one's `__cause__` (`raise X from Y`) or its
+ * `from None` mark, then clears the pending state. `PyException_SetCause`
+ * sets `__suppress_context__` either way, as `raise ... from` does. A cause
+ * chain deeper than `PYCC_EXT_CAUSE_DEPTH`, which only a cycle of causes
+ * reaches (`raise e from e`), is cut there.
+ */
+#define PYCC_EXT_CAUSE_DEPTH 64
+
+static void pycc_ext_raised_links(void)
+{
+    static int depth = 0;
+    void *native = pycc_rt_exception_value();
+    void *cause = pycc_rt_exception_cause(native);
+    PyObject *raised;
+    PyObject *cause_object = NULL;
+
+    if (cause == NULL && !pycc_rt_exception_suppresses_context(native)) {
+        pycc_rt_exception_clear();
+        return;
+    }
+    /* The pending state's exception owns its cause: kept past the clear. */
+    pycc_rt_exception_incref(cause);
+    pycc_rt_exception_clear();
+    raised = PyErr_GetRaisedException();
+    if (raised != NULL && cause != NULL && depth < PYCC_EXT_CAUSE_DEPTH) {
+        depth++;
+        cause_object = cause == native ? raised : pycc_ext_exception_cpython(cause);
+        depth--;
+        if (cause_object == NULL) {
+            PyErr_Clear();
+        }
+    }
+    if (raised != NULL) {
+        /* Steals the cause's reference; a NULL cause still suppresses. */
+        PyException_SetCause(raised, cause_object == NULL ? NULL : Py_NewRef(cause_object));
+    }
+    pycc_rt_exception_decref(cause);
+    PyErr_SetRaisedException(raised);
+}
+
 static int pycc_ext_raise_pending(void)
 {
     int tag = pycc_rt_ext_pending_type();
@@ -919,7 +968,7 @@ static int pycc_ext_raise_pending(void)
         pycc_ext_tb_sync(pycc_rt_exception_value(), original);
         Py_INCREF(original);
         PyErr_SetRaisedException(original);
-        pycc_rt_exception_clear();
+        pycc_ext_raised_links();
         return 1;
     }
     exc_type = pycc_ext_builtin_exception_class(tag);
@@ -976,14 +1025,14 @@ static int pycc_ext_raise_pending(void)
             Py_DECREF(message);
             PyErr_SetRaisedException(raised);
             pycc_ext_tb_sync_raised(pycc_rt_exception_value());
-            pycc_rt_exception_clear();
+            pycc_ext_raised_links();
             return 1;
         }
     }
     PyErr_SetObject(exc_type, message);
     Py_DECREF(message);
     pycc_ext_tb_sync_raised(pycc_rt_exception_value());
-    pycc_rt_exception_clear();
+    pycc_ext_raised_links();
     return 1;
 }
 

@@ -74,6 +74,10 @@ pub(crate) fn pop_to(rt: &RtFns<'_>, depth: usize) {
         .owned_object_slots
         .borrow_mut()
         .retain(|(slot, _)| !gone.contains(slot));
+    rt.exceptions
+        .handler_slots
+        .borrow_mut()
+        .retain(|slot| !gone.contains(slot));
 }
 
 /// Releases the reference `slot` holds and nulls it.
@@ -98,7 +102,7 @@ pub(crate) fn release<'ctx>(
         .iter()
         .find(|(object_slot, _)| *object_slot == slot)
         .map(|(_, release_fn)| *release_fn);
-    match object_release {
+    let call = match object_release {
         Some(release_fn) => builder
             .build_call(release_fn, &[held.into()], "")
             .expect("build_call should not fail for pycc_ext_obj_release"),
@@ -106,6 +110,7 @@ pub(crate) fn release<'ctx>(
             .build_call(rt.exc_decref, &[held.into()], "")
             .expect("build_call should not fail for pycc_rt_exception_decref"),
     };
+    super::handled::exits(rt, slot, call);
 }
 
 /// Releases every live slot above `depth`, innermost first.

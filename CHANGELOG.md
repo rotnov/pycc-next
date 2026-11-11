@@ -33,7 +33,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   - `try: d[k]` with a first handler that catches `KeyError` and neither binds the
     exception nor re-raises it: a key missing from an exact `dict` goes straight to the
     handler, with no exception made; the handler keeps the key until it is left. Other
-    mappings and other failures raise as before.
+    mappings and other failures raise as before. The `KeyError` is made the first time
+    something in the handler could see it (see Fixed, below), so a handler that returns a
+    default, or finds the key in a second dict of `str` keys, makes none.
   - `tuple(a)`, `list(a)` and `sorted(a)` of an object no longer go through a call of the
     builtin when it is CPython's own.
   - A comprehension that unpacks its item (`for k, v in d.items()`) over a dict's own
@@ -260,6 +262,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   object result was NULL`. While an exception is pending, an object is now freed with it
   set aside, wherever the release is (`pycc_ext_obj_dealloc`); a release on any other
   path executes what it executed before.
+- `--ext`: a compiled `except` clause publishes the exception it handles, as CPython's
+  does. Inside it `sys.exception()` and `sys.exc_info()` returned `None` and
+  `traceback.format_exc()` was empty, and an exception raised there had no `__context__`;
+  they now see the handled exception, which becomes the context of what the clause raises
+  (`raise X from None` marks it suppressed, `raise X from Y` sets `__cause__`, neither of
+  which compiled code did), and it is the previous one again once the clause is left. The
+  clause publishes the first time something could see the exception (a call, a `raise`, a
+  release that frees an object), so entering a handler costs what it did and the path
+  without an exception nothing. A `finally` clause, an `except*` clause and a generator's
+  handlers do not publish yet (`docs/DEVIATIONS.md`).
 - Non-strict `--ext`: a comprehension over an object whose element or condition raised
   kept its current item until the process ended (one reference leaked per failing call):
   the item is released on that path too, after the iterator and the result, and a

@@ -21,16 +21,24 @@
 //! temporary, or that the handler rebinds, is finalized where CPython
 //! finalizes it.
 //!
-//! A handler sees the exception only through an `as` binding or a bare
-//! `raise` of its own (one not inside a nested handler, which re-raises
-//! that handler's exception). Nothing else can: a pycc handler sets neither
-//! CPython's handled exception (`sys.exc_info()`) nor the `__context__` of
-//! what it raises (`pycc_ext_obj_raise`). So in such a handler the two
-//! entries -- the real `KeyError` taken from the pending state, and the lazy
-//! miss with no exception -- run the same statements with the same results.
-//! If handlers come to publish the exception they handle, this lowering
-//! must make the `KeyError` wherever the handler can then observe it (a
-//! call, a `raise`).
+//! A handler sees the exception itself only through an `as` binding or a
+//! bare `raise` of its own (one not inside a nested handler, which
+//! re-raises that handler's exception); such a handler is not eligible.
+//! Everything else sees it through CPython: `sys.exception()` in code the
+//! handler calls, the `__context__` of what it raises. An `--ext` handler
+//! publishes the exception it handles the first time something could see
+//! it (`handled`), and a handler a lazy miss entered makes its `KeyError`
+//! then, from the key and the position of the subscript that missed
+//! (`pycc_ext_handler_publish`). So the two entries -- the real `KeyError`
+//! taken from the pending state, and the lazy miss with none -- run the
+//! same statements with the same results, and a handler nothing looks at
+//! the exception from (it returns a default, or finds the key in a second
+//! dict of `str` keys) never makes one.
+//!
+//! A subscript of this lowering inside a handler's body (a nested `try`)
+//! goes through `pycc_ext_obj_getitem_lazy_in`, which publishes the
+//! enclosing handler's exception first unless the lookup provably runs no
+//! code and raises nothing.
 //!
 //! With the fast paths off (`PYCC_NO_FAST_OPS=1`) the helper raises on every
 //! miss, which is how `tests/idiom_lowerings.rs` compares the two paths.
@@ -50,6 +58,9 @@ const EXCEPTION_TAG: u8 = 0;
 /// `pycc_ext_obj_getitem_lazy`: `o[k]` answering [`LAZY_MISS`] for a key
 /// missing from an exact `dict`.
 pub(crate) const EXT_OBJ_GETITEM_LAZY_SYMBOL: &str = "pycc_ext_obj_getitem_lazy";
+/// `pycc_ext_obj_getitem_lazy_in`: the same inside a handler's body, taking
+/// that handler's record (`handled`).
+pub(crate) const EXT_OBJ_GETITEM_LAZY_IN_SYMBOL: &str = "pycc_ext_obj_getitem_lazy_in";
 /// The pointer `pycc_ext_obj_getitem_lazy` answers for a lazy miss.
 const LAZY_MISS: u64 = 1;
 
@@ -64,6 +75,9 @@ pub(crate) struct LazyMiss<'ctx> {
     /// The slot the missing key is kept in while the handler runs: null
     /// when the handler was entered by an exception.
     pub(crate) key_slot: PointerValue<'ctx>,
+    /// The record of a handler that publishes (`handled`): its key slot is
+    /// `key_slot`, and a miss stores the subscript's position in it.
+    pub(crate) state: Option<super::handled::State<'ctx>>,
 }
 
 /// Whether a plain `KeyError` reaches the first handler, and that handler
@@ -114,7 +128,12 @@ pub(crate) fn open<'ctx>(
 ) {
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let entry = context.append_basic_block(function, "try_lazy_miss");
-    let key_slot = alloca_at_entry(builder, ptr, "lazy_miss_key");
+    // A handler that publishes keeps the key in its record.
+    let state = super::handled::publishes(rt).then(|| super::handled::new_state(context, builder));
+    let key_slot = match state {
+        Some(state) => state.key,
+        None => alloca_at_entry(builder, ptr, "lazy_miss_key"),
+    };
     builder
         .build_store(key_slot, ptr.const_null())
         .expect("build_store should not fail for the missing key's slot");
@@ -122,6 +141,7 @@ pub(crate) fn open<'ctx>(
         dispatch,
         entry,
         key_slot,
+        state,
     });
 }
 
@@ -145,11 +165,11 @@ pub(crate) fn close<'ctx>(rt: &RtFns<'ctx>) -> Option<LazyMiss<'ctx>> {
 
 /// The lazy-miss entry a subscript emitted now may branch to: the innermost
 /// open one, when its `try` is also the innermost exception target.
-fn active_entry<'ctx>(rt: &RtFns<'ctx>) -> Option<(BasicBlock<'ctx>, PointerValue<'ctx>)> {
+fn active_entry<'ctx>(rt: &RtFns<'ctx>) -> Option<LazyMiss<'ctx>> {
     let lazy = rt.exceptions.lazy_misses.borrow();
     let last = lazy.last()?;
     let target = *rt.exceptions.targets.borrow().last()?;
-    (target == last.dispatch).then_some((last.entry, last.key_slot))
+    (target == last.dispatch).then_some(*last)
 }
 
 /// Emits `o[k]` (`base` borrowed, `key` a packed new reference the helper
@@ -168,20 +188,37 @@ pub(crate) fn emit_subscript<'ctx>(
     base: PointerValue<'ctx>,
     key: impl FnOnce() -> PointerValue<'ctx>,
 ) -> Option<PointerValue<'ctx>> {
-    let (entry, key_slot) = active_entry(rt)?;
+    let lazy = active_entry(rt)?;
+    let (entry, key_slot) = (lazy.entry, lazy.key_slot);
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let function = builder
         .get_insert_block()
         .and_then(|b| b.get_parent())
         .expect("the builder is positioned inside a function");
     let key = key();
-    let getitem = crate::foreign_pack::shim_fn(
-        module,
-        EXT_OBJ_GETITEM_LAZY_SYMBOL,
-        ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
-    );
-    let result = builder
-        .build_call(getitem, &[base.into(), key.into(), key_slot.into()], "lazy_subscript")
+    // Inside a handler's body the lookup is one the handled exception
+    // could be seen from, unless the helper finds it cannot (`handled`).
+    let call = match super::handled::innermost(rt) {
+        Some(handler) => builder.build_call(
+            crate::foreign_pack::shim_fn(
+                module,
+                EXT_OBJ_GETITEM_LAZY_IN_SYMBOL,
+                ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false),
+            ),
+            &[base.into(), key.into(), key_slot.into(), handler.record.into()],
+            "lazy_subscript",
+        ),
+        None => builder.build_call(
+            crate::foreign_pack::shim_fn(
+                module,
+                EXT_OBJ_GETITEM_LAZY_SYMBOL,
+                ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+            ),
+            &[base.into(), key.into(), key_slot.into()],
+            "lazy_subscript",
+        ),
+    };
+    let result = call
         .expect("build_call should not fail for pycc_ext_obj_getitem_lazy")
         .try_as_basic_value()
         .expect_basic("pycc_ext_obj_getitem_lazy returns PyObject *")
@@ -199,6 +236,14 @@ pub(crate) fn emit_subscript<'ctx>(
         .build_conditional_branch(is_miss, miss_bb, cont_bb)
         .expect("build_conditional_branch should not fail for an i1 condition");
     builder.position_at_end(miss_bb);
+    // Where the `KeyError` would have been raised, should the handler come
+    // to make it.
+    if let Some(state) = lazy.state {
+        let position = crate::frames::current_position(rt).unwrap_or(0);
+        builder
+            .build_store(state.pos, context.i64_type().const_int(u64::from(position), false))
+            .expect("build_store should not fail for a handler's record");
+    }
     let snapshot: Vec<IntValue<'ctx>> = rt.exceptions.pending_int_releases.borrow().clone();
     for word in snapshot {
         emit_bigint_refcount_call(context, builder, rt, word, BigIntRefcount::Release);

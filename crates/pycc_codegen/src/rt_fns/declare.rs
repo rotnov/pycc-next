@@ -462,6 +462,7 @@ pub(crate) fn declare_rt_functions<'ctx>(
             context.i8_type().fn_type(&[], false),
         ),
         thread_safe_exception_check: std::cell::Cell::new(false),
+        publish_handled: std::cell::Cell::new(false),
         glibc_libm: std::cell::Cell::new(false),
         assigned_slots: std::cell::RefCell::new(Default::default()),
         emitting_ctor: std::cell::Cell::new(false),
@@ -490,6 +491,10 @@ pub(crate) fn declare_rt_functions<'ctx>(
         ),
         exception_raise: declare(
             "pycc_rt_exception_raise",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        exception_suppress_context: declare(
+            "pycc_rt_exception_suppress_context",
             void_type.fn_type(&[ptr_type.into()], false),
         ),
         exception_restore: declare(

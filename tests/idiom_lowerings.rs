@@ -1,7 +1,7 @@
 //! The lowerings of docs/design/compile-little.md sections 2.6 and 2.7 in
 //! generic bodies, built `--ext --non-strict --select all`:
 //!
-//! - a dict miss caught by a handler that cannot see the exception goes
+//! - a dict miss caught by a handler that neither binds nor re-raises it goes
 //!   straight to the handler (`tests/fixtures/lazy_key_error.py`);
 //! - `tuple(a)`, `list(a)` and `sorted(a)` skip the call through the builtin
 //!   (`tests/fixtures/sequence_builtins.py`), unless it was rebound

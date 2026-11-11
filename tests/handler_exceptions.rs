@@ -12,7 +12,11 @@
 //!   it is raised, and none for an unmatched handler, a bare `raise` or a
 //!   `finally` clause (`tests/fixtures/traceback_entries.py`);
 //! - `"..." % e` of a caught exception is CPython's to format: the function
-//!   is not compiled (`tests/fixtures/exception_operands.py`).
+//!   is not compiled (`tests/fixtures/exception_operands.py`);
+//! - an `except` clause publishes the exception it handles: `sys.exception()`
+//!   sees it, what the clause raises gets it as its `__context__`, and a
+//!   dict miss that went straight to its handler makes its `KeyError` when
+//!   something could see it (`tests/fixtures/handled_exception.py`).
 
 #[path = "harness_support/ext_oracle.rs"]
 mod ext_oracle;
@@ -104,4 +108,48 @@ fn an_exception_passing_a_try_statement_adds_no_traceback_entry() {
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn an_exception_is_formatted_by_cpython_not_read_as_another_object() {
     check("exception_operands", &["native"], None, None);
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_handler_publishes_the_exception_it_handles() {
+    check(
+        "handled_exception",
+        &[
+            "seen",
+            "info",
+            "bound",
+            "restored",
+            "nested",
+            "in_loop",
+            "returns_from_handler",
+            "after_return",
+            "raises_new",
+            "raises_object",
+            "raises_from_none",
+            "raises_from_cause",
+            "raises_from_handled",
+            "reraises",
+            "reraises_named",
+            "callee_raises",
+            "operation_raises",
+            "caught_inside",
+            "three_deep",
+            "raises_saved",
+            "raises_with_key",
+            "handler_in_callee",
+            "config",
+            "Probe.__eq__",
+            "Watcher.__del__",
+            "default_seen",
+            "temporary_in_handler",
+            "exception_type",
+            "bare_handler",
+            "second_handler",
+        ],
+        // The lazy misses still happen: `default_seen` and `config` make no
+        // exception on their way to a default.
+        Some(("pycc_ext_lazy_misses", true)),
+        None,
+    );
 }

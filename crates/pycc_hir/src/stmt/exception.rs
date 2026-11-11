@@ -324,17 +324,15 @@ mod tests {
     }
 
     #[test]
-    fn lower_raise_from_none_drops_the_cause() {
-        // PEP 409: `from None` suppresses implicit context chaining, whose
-        // only observable effect is traceback rendering. pycc emits no
-        // traceback, so the suppression marker lowers to "no cause" rather
-        // than to a `None`-valued cause expression.
+    fn lower_raise_from_none_keeps_a_none_cause() {
+        // PEP 409: `from None` marks the implicit context suppressed. The
+        // marker is a `None` cause, which codegen turns into the mark.
         let module = pycc_parser::parse("raise ValueError(\"bad\") from None\n")
             .expect("test fixture must parse");
         let hir = crate::lower_checked(&module).expect("lowering must succeed");
         let (exc, cause) = expect_top_level_raise(&hir.items[0]);
         assert!(exc.is_some());
-        assert!(cause.is_none());
+        assert!(matches!(cause, Some(crate::HirExpr::NoneLiteral)));
     }
 
     #[test]

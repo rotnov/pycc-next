@@ -293,7 +293,9 @@ pub(crate) fn emit_try<'ctx>(
 ///
 /// The handler takes the pending exception: its saved slot (what a bare
 /// `raise` re-raises) owns the reference, and an `as` binding owns one of
-/// its own. Both are exception slots (`owned_slots`): released when the
+/// its own. In an `--ext` module the saved slot is part of the handler's
+/// record, through which the body publishes the exception to CPython the
+/// first time something could see it (`handled`). Both are exception slots (`owned_slots`): released when the
 /// handler falls through to `finally_bb`, by a cleanup block on its
 /// exception edge, and by a `return`, `break` or `continue` out of it --
 /// so `e` is unbound after the handler, as in CPython.
@@ -338,12 +340,37 @@ fn emit_handler<'ctx>(
         phi.add_incoming(&[(&exc_val, taken), (&ptr.const_null(), entry)]);
         exc_val = phi.as_basic_value().into_pointer_value();
     }
-    let saved_exc = owned_slots::new_slot(context, builder, "handler_saved_exc");
+    // An `--ext` handler publishes the exception it handles the first time
+    // something could see it (`handled`): its record holds the exception,
+    // and the key of a lazy miss.
+    let state = super::handled::publishes(rt).then(|| {
+        lazy_entry
+            .as_ref()
+            .and_then(|lazy| lazy.state)
+            .unwrap_or_else(|| super::handled::new_state(context, builder))
+    });
+    let saved_exc = match state {
+        Some(state) => state.exc,
+        None => owned_slots::new_slot(context, builder, "handler_saved_exc"),
+    };
     owned_slots::hold(builder, rt, saved_exc, exc_val);
     if let Some(lazy) = &lazy_entry {
         // The key a lazy miss kept, released wherever the handler is left,
         // as the `KeyError` would have released it.
         owned_slots::hold_object(rt, lazy.key_slot, crate::object_release::release_fn(context, module));
+    } else if let Some(state) = state {
+        builder
+            .build_store(
+                state.key,
+                context.ptr_type(inkwell::AddressSpace::default()).const_null(),
+            )
+            .expect("build_store should not fail for a handler's record");
+    }
+    if let Some(state) = state {
+        super::handled::enter(context, builder, module, rt, state);
+        super::handled::mark_exit_slot(rt, state.exc);
+        super::handled::mark_exit_slot(rt, state.key);
+        super::handled::mark_exit_slot(rt, state.prev);
     }
     if let Some(binding_name) = &handler.binding_name {
         let exc_slot = owned_slots::new_slot(context, builder, binding_name);
@@ -351,6 +378,9 @@ fn emit_handler<'ctx>(
             .build_call(rt.exc_incref, &[exc_val.into()], "")
             .expect("build_call should not fail for pycc_rt_exception_incref");
         owned_slots::hold(builder, rt, exc_slot, exc_val);
+        if state.is_some() {
+            super::handled::mark_exit_slot(rt, exc_slot);
+        }
         locals.insert(
             binding_name.clone(),
             StorageSlot {
@@ -365,6 +395,7 @@ fn emit_handler<'ctx>(
     }
     rt.exceptions.reraise_values.borrow_mut().push(saved_exc);
     let cleanup = owned_slots::push_cleanup_target(context, builder, rt, "handler_exc_cleanup");
+    let region = state.map(|state| super::handled::open(builder, rt, state));
     emit_body(
         context,
         builder,
@@ -378,6 +409,9 @@ fn emit_handler<'ctx>(
     )?;
     rt.exceptions.targets.borrow_mut().pop();
     rt.exceptions.reraise_values.borrow_mut().pop();
+    if let Some(state) = state {
+        super::handled::unwind(context, builder, module, state, cleanup);
+    }
     owned_slots::fill_cleanup_target(context, builder, rt, cleanup, depth, finally_bb);
     // A `raise`/`reraise` inside the handler body terminates the block with
     // `unreachable`. Erase it so the handler-completion check can run here.
@@ -392,6 +426,9 @@ fn emit_handler<'ctx>(
         builder
             .build_unconditional_branch(finally_bb)
             .expect("build_unconditional_branch should not fail");
+    }
+    if let Some(region) = region {
+        region.publish_where_seen(context, builder, module, rt);
     }
     owned_slots::pop_to(rt, depth);
     Ok(())

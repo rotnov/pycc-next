@@ -735,7 +735,7 @@ inlined generator consumers are not implemented.
 ### 2.7 Exceptions as control flow
 
 A subscript directly in a `try` body, whose first handler catches a plain `KeyError` and
-cannot see the exception, takes a missing key of an exact `dict` straight into that
+neither binds nor re-raises it, takes a missing key of an exact `dict` straight into that
 handler: `PyDict_GetItemRef` answers 0, and no `KeyError`, bridged exception or traceback
 record is made (`crates/pycc_codegen/src/exception/lazy_miss.rs`,
 `pycc_ext_obj_getitem_lazy`). The handler keeps the key until it is left, as the
@@ -744,7 +744,7 @@ finalized where CPython finalizes it. An exact dict raises nothing else on a mis
 `__missing__`). Every other mapping, and every other failure of the lookup (an unhashable
 key, a `__hash__` or `__eq__` that raises), raises and is dispatched as before.
 
-A handler sees the exception in two ways only, and neither is lowered:
+A handler reads the exception itself in two ways, and neither is lowered:
 
 - it binds it (`as e`);
 - it re-raises it with a bare `raise` of its own (one inside a nested handler re-raises
@@ -754,15 +754,39 @@ Only the first handler is considered. An earlier handler of another class may ca
 `KeyError` too (a base class, a class another module defines), which only the run-time
 dispatch knows.
 
-Nothing else in a compiled handler can reach the exception today: a compiled handler does
-not publish the exception it handles to CPython, so `sys.exc_info()` in code it calls
-reads none and an exception raised in it has no `__context__`, with or without this
-lowering. That is an existing difference from CPython, not one this lowering adds. If
-compiled handlers come to publish the handled exception, this lowering has to make the
-`KeyError` at the points that can observe it (a call, a `raise`), as first planned here.
+Everything else sees the exception through CPython: `sys.exception()` in code the handler
+calls, the `__context__` of what it raises. A compiled `except` clause publishes the
+exception it handles, as a CPython handler does, but not at its entry: the first time
+something could see it (`crates/pycc_codegen/src/exception/handled.rs`). Once a handler's
+body is emitted, a call of `pycc_ext_handler_publish` is put before every call in it that
+can run other code or raise. A retain, the pending-exception test, a bare `raise` and the
+handler's own way out get none; a release publishes only when it frees its object, whose
+finalizer could look (`pycc_ext_handler_release`). So the path without an exception pays
+nothing, and a handler that only returns a default never makes a CPython exception or a
+traceback entry.
+
+A handler a lazy miss entered has no exception until it publishes: the `KeyError` the
+lookup would have raised is made then, from the key the handler holds and the position of
+the subscript that missed, with the context and the traceback entry it would have had. A
+subscript of this lowering inside a handler's body (the second lookup of
+`ConfigWrapper.__getattr__`) publishes the enclosing handler's exception first unless the
+lookup provably runs no code and raises nothing: an exact `str` key in an exact dict whose
+keys are all `str`s, which no key's `__eq__` is called for
+(`pycc_ext_obj_getitem_lazy_in`). `PyDictKeysObject.dk_kind`, which says so, is not part of
+the stable ABI: it is read at the offset CPython 3.13 to 3.15 share after a probe has
+checked it against a dict of `str` keys and one with an `int` key; on another version, or a
+failed probe, every such lookup publishes first.
+
+An exception leaving a handler's body that compiled code raised itself (no CPython object
+exists for it yet) is made one in the handler's cleanup, while the handler's exception is
+still the handled one, so it gets its `__context__` where CPython's `raise` sets it
+(`pycc_ext_handler_unwind`). `raise X from None` marks the context suppressed and
+`raise X from Y` sets the cause on that object (`pycc_ext_raised_links`).
 
 `ConfigWrapper.__getattr__` (a dict miss, then a second dict miss, then `raise ... from None`)
-is the case matched: no exception exists on its hit and first-miss paths.
+is the case matched: no exception exists on its hit and first-miss paths, and on the
+second miss the `AttributeError` carries both `KeyError`s as its context chain, suppressed,
+as in CPython.
 
 Not implemented: `o.name` with `except AttributeError` (`PyObject_GetOptionalAttr`
 answering 0), and `l[i]` with `except IndexError` on an exact `list` or `tuple`.

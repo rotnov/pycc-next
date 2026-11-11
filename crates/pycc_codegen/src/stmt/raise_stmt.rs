@@ -66,6 +66,10 @@ pub(crate) fn emit_obj_raise_stmt<'ctx>(
     // pycc exception, passed as the native exception object.
     let cause = match cause {
         None => None,
+        // `raise o from None`.
+        Some(pycc_mir::MirExceptionValue::Existing(MirExpr::NoneLiteral)) => {
+            Some(foreign_raise::Cause::Suppressed)
+        }
         Some(pycc_mir::MirExceptionValue::Existing(expr)) if expr.ty() == pycc_mir::Ty::Object => {
             Some(foreign_raise::Cause::Object(expr))
         }
@@ -123,6 +127,22 @@ pub(crate) fn emit_raise_from_stmt<'ctx>(
         exception,
         "exception",
     )?;
+    if matches!(cause, pycc_mir::MirExceptionValue::Existing(MirExpr::NoneLiteral)) {
+        // `raise X from None`: no cause, and the context -- the exception
+        // being handled, which an `--ext` handler publishes -- is marked
+        // suppressed.
+        emit_exception_set_frame(context, builder, module, rt, exc_obj, frame_function);
+        builder
+            .build_call(rt.exception_suppress_context, &[exc_obj.into()], "")
+            .expect("build_call should not fail for exception_suppress_context");
+        builder
+            .build_call(rt.exception_raise, &[exc_obj.into()], "")
+            .expect("build_call should not fail for exception_raise");
+        builder
+            .build_unreachable()
+            .expect("build_unreachable should not fail after raise_from");
+        return Ok(());
+    }
     let cause_obj = emit_exception_value(
         context,
         builder,
