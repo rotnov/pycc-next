@@ -341,14 +341,18 @@ pub enum Command {
         /// Skip pass 3: keep the selection rule's candidates unmeasured.
         #[arg(long)]
         no_verify: bool,
-        /// Pass 3's interleaved rounds per check (at most 15), each one run
-        /// of the workload in CPython and one with the candidates compiled.
-        #[arg(long, default_value_t = 7, value_parser = clap::value_parser!(u32).range(1..=15))]
+        /// Pass 3's most interleaved rounds per check (at most 15), each one
+        /// run of the workload in CPython and one with the candidates
+        /// compiled; a check stops after 5 once the two are apart.
+        #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u32).range(1..=15))]
         verify_rounds: u32,
-        /// Pass 3 also counts each check's instructions under callgrind
-        /// (needs valgrind), as evidence beside the wall-time verdict.
-        #[arg(long)]
-        verify_instructions: bool,
+        /// What decides pass 3's checks: the workload's instruction counts
+        /// under callgrind (`instructions`, needs valgrind), its wall time
+        /// (`wall`), or (`auto`) instruction counts when CPython runs the
+        /// workload in at most a second and callgrind can run it, else wall
+        /// time.
+        #[arg(long, value_enum, default_value_t = crate::profile::verify::Signal::Auto)]
+        verify_signal: crate::profile::verify::Signal,
         /// A file or directory pass 3's copy holds besides the project (its
         /// tests, data), at the same path relative to the package's import
         /// root; repeatable. The copy is of the project root (the nearest

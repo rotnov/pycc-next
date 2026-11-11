@@ -109,6 +109,16 @@ Accept (carried over from v0.11, not met there):
    compiles only selected functions. The tests that used it build with `--select all`,
    `bench/package_check.py` and `bench/pydantic_check.py` take `--select profile|all`,
    and CI's package checks run the profile build, its instruction gate `--select all`.
+   **Status (pass 3 signal):** pass 3 decides a short training workload's checks on its
+   instruction counts under callgrind, which repeat to a few instructions in billions,
+   where fresh-process wall times vary by about 15% (the design's section 2.3). Locally,
+   two profiles each: pypng selects its 8 hot functions both times (-17.0% of the
+   workload's instructions; wall time had flipped between 8 and 30), tomli and pystache
+   select nothing both times, now on evidence rather than noise (their candidates add
+   1.3% and 11-13% instructions); diff-match-patch (13 s) and mistune (1.6 s) stay on wall
+   time. tomli's 36 candidates built without the profile's observed-type
+   specializations run 15% fewer instructions than CPython, with them 2% more: those
+   specializations, not the selection, are what keeps tomli in CPython.
 
    Every step reports wall time, instructions, I1 misses and branch mispredictions, and the
    extension's size (the design's section 3). The three suites fail no test that passes

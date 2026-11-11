@@ -4,10 +4,13 @@
 //! The selection rule picks candidates from the profile's self times, but a
 //! compiled untyped body called from bytecode, or calling back into it, can be
 //! slower than CPython's specializing interpreter running it. So the profile
-//! builds the candidates and times the training workload with them compiled
-//! against the unchanged sources, interleaved over `--verify-rounds` fresh
-//! processes each after one discarded warm-up run of each (a check stops after [`EARLY_ROUNDS`] once the two
-//! interquartile ranges are apart):
+//! builds the candidates and checks the training workload with them compiled
+//! against the unchanged sources: its wall time, interleaved over at most
+//! `--verify-rounds` fresh processes each after one discarded warm-up run of
+//! each (a check stops after [`EARLY_ROUNDS`] once the two interquartile
+//! ranges are apart), and, when pass 3 counts them ([`Signal`]), its
+//! instructions under callgrind, once per check against one count of CPython
+//! for the whole pass. The sets checked:
 //!
 //! 1. all the candidates together, and the hot ones among them (each at
 //!    least the rule's share and calls on its own) alone;
@@ -17,25 +20,22 @@
 //! 3. then the regions that won, together, once more: one build is
 //!    reserved for this check before any region is measured.
 //!
-//! The selection is exactly one set measured as a whole that won (the
-//! compiled median under CPython's first quartile): the smallest, unless a
-//! larger one is faster beyond the noise of both, its compiled third
-//! quartile under the smaller one's first ([`replaces`], [`decide`]). It is never a union of sets
-//! measured apart, so a region pulls a cold function in only when that
-//! pays, and when the regions together cannot be measured, or lose, the
-//! best single winner is kept.
+//! A check is decided by its instruction count when there is one, else by
+//! its wall times ([`verdict`]: [`Check::faster`], [`replaces`]). The
+//! selection is exactly one set measured as a whole that won: the smallest,
+//! unless a larger one beats it by more than noise ([`replaces`],
+//! [`decide`]). It is never a union of sets measured apart, so a region
+//! pulls a cold function in only when that pays, and when the regions
+//! together cannot be measured, or lose, the best single winner is kept.
 //!
-//! A win inside CPython's interquartile range is noise, and a function that wins
-//! only by noise adds size and risk for no gain, so it is not kept. At most
-//! [`MAX_BUILDS`] builds. A function a check does not find faster, or one no
-//! check could reach within the budget, is not selected; the
-//! selection rule rejects it from then on, in `--check` and in builds alike.
-//! A later `pycc profile` keeps every verdict, a win as well as a rejection,
-//! while the function's source hash is unchanged (`carry_verdicts`), and
-//! measures only the candidates without one, so a re-run never flips a
-//! recorded verdict. The verdict is on wall time;
-//! `--verify-instructions` adds each check's instruction delta under callgrind
-//! as evidence.
+//! A win inside the noise adds size and risk for no gain, so it is not
+//! kept. At most [`MAX_BUILDS`] builds. A function a check does not find
+//! faster, or one no check could reach within the budget, is not selected;
+//! the selection rule rejects it from then on, in `--check` and in builds
+//! alike. A later `pycc profile` keeps every verdict, a win as well as a
+//! rejection, while the function's source hash is unchanged
+//! (`carry_verdicts`), and measures only the candidates without one, so a
+//! re-run never flips a recorded verdict.
 
 use super::{Driver, FunctionKey, Measured, Profile};
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,10 +43,12 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-/// The most rounds per check.
-pub(crate) const MAX_ROUNDS: u32 = 15;
-/// Rounds after which a check whose interquartile ranges are apart stops.
-pub(crate) const EARLY_ROUNDS: u32 = 5;
+mod verdict;
+pub(crate) use verdict::{
+    clear, counts_instructions, quartiles, replaces, Check, Instructions, Signal, EARLY_ROUNDS, MAX_ROUNDS, MIN_GAIN_PPM,
+    PROBE_RUNS,
+};
+
 /// The most builds pass 3 makes.
 pub(crate) const MAX_BUILDS: usize = 8;
 
@@ -55,8 +57,8 @@ pub(crate) const MAX_BUILDS: usize = 8;
 pub(crate) struct Options {
     /// Interleaved rounds per check (each one run in CPython and one compiled).
     pub(crate) rounds: u32,
-    /// Also count each check's instructions under callgrind.
-    pub(crate) instructions: bool,
+    /// What decides the checks (`--verify-signal`).
+    pub(crate) signal: Signal,
     /// Files and directories the copy holds besides the project
     /// (`--verify-include`, [`copy_package`]).
     pub(crate) include: Vec<PathBuf>,
@@ -141,64 +143,9 @@ pub(crate) fn regions(profile: &Profile, candidates: &[FunctionKey]) -> Vec<Vec<
     out.into_iter().map(|(_, r)| r).collect()
 }
 
-/// First quartile, median and third quartile (each the median of its half).
-pub(crate) fn quartiles(samples: &[u64]) -> [u64; 3] {
-    let mut v = samples.to_vec();
-    v.sort_unstable();
-    let median = |v: &[u64]| -> u64 {
-        match v.len() {
-            0 => 0,
-            n if n % 2 == 1 => v[n / 2],
-            n => (v[n / 2 - 1] + v[n / 2]) / 2,
-        }
-    };
-    let n = v.len();
-    if n < 2 {
-        let m = median(&v);
-        return [m, m, m];
-    }
-    [median(&v[..n / 2]), median(&v), median(&v[n.div_ceil(2)..])]
-}
-
-/// Whether the two samples' interquartile ranges do not overlap: the verdict
-/// will not change with more rounds.
-pub(crate) fn clear(plain: &[u64], built: &[u64]) -> bool {
-    let (p, b) = (quartiles(plain), quartiles(built));
-    b[0] > p[2] || b[2] < p[0]
-}
-
 /// The file in pass 3's scratch directory holding the profile its builds
 /// read observed types from (`--types-profile`).
 const TYPES_FILE: &str = "types.json";
-
-/// The outcome of one check.
-#[derive(Debug, Clone)]
-pub(super) struct Check {
-    cpython: [u64; 3],
-    compiled: [u64; 3],
-    instructions: Option<i64>,
-}
-
-impl Check {
-    /// Whether the workload ran faster compiled: the compiled median under
-    /// CPython's first quartile, outside the noise of CPython's own runs.
-    fn faster(&self) -> bool {
-        self.compiled[1] < self.cpython[0]
-    }
-}
-
-/// Whether a winning set of `larger` functions timed `challenger` replaces
-/// one of `smaller` functions timed `incumbent` (`larger >= smaller`): only
-/// when it is faster beyond the noise of both, its compiled third quartile
-/// under the incumbent's compiled first quartile. Two medians whose
-/// interquartile ranges overlap do not order the sets: the pick between them
-/// would flip from run to run, and each function more costs build time,
-/// size and risk, so the smaller set stays. A set of the same size
-/// replaces the one measured first (more self time) the same way.
-fn replaces(challenger: &Check, larger: usize, incumbent: &Check, smaller: usize) -> bool {
-    debug_assert!(larger >= smaller);
-    challenger.compiled[2] < incumbent.compiled[0]
-}
 
 /// Pass 3 over `candidates` (the selection rule's picks from `profile`):
 /// records a [`Measured`] on each. `core` holds the candidates hot on their
@@ -259,8 +206,9 @@ pub(super) fn verify(
         return Ok(());
     }
     let started = Instant::now();
+    let baseline = baseline(cx)?;
     let regions = regions(profile, &candidates);
-    let mut run = |set: &BTreeSet<FunctionKey>, builds: usize| check(set, cx, builds);
+    let mut run = |set: &BTreeSet<FunctionKey>, builds: usize| check(set, cx, builds, baseline);
     let (mut verdicts, builds) = decide(&candidates, &regions, core, &base, MAX_BUILDS, &mut run)?;
     let kept = verdicts.values().filter(|m| m.compiled).count();
     for e in &mut profile.functions {
@@ -275,6 +223,93 @@ pub(super) fn verify(
     );
     record_winner(profile, cx.excludes);
     Ok(())
+}
+
+/// CPython's instructions for the training workload, once for the whole
+/// pass, when its checks count them ([`Signal`]): under `auto`, when the
+/// median of [`PROBE_RUNS`] CPython runs is short enough
+/// ([`counts_instructions`]) and callgrind runs the workload; else `None`,
+/// and the checks are decided on wall time.
+fn baseline(cx: &Context<'_>) -> Result<Option<u64>, String> {
+    let signal = cx.options.signal;
+    if signal == Signal::Wall {
+        return Ok(None);
+    }
+    let out = cx.scratch.join("baseline.json");
+    let mut wall = Vec::new();
+    if signal == Signal::Auto {
+        for _ in 0..PROBE_RUNS {
+            wall.push(time(cx.driver, &out, cx.workload)?);
+        }
+    }
+    let median = quartiles(&wall)[1];
+    if !counts_instructions(signal, median) {
+        eprintln!(
+            "pycc profile: pass 3 decides on wall time: CPython runs the workload in {:.0} ms, too long to count its instructions under callgrind",
+            median as f64 / 1e6
+        );
+        return Ok(None);
+    }
+    match instructions(cx.driver, &out, cx.workload) {
+        Ok(n) => {
+            eprintln!("pycc profile: pass 3 decides on instruction counts: CPython runs the workload in {n} instructions");
+            Ok(Some(n))
+        }
+        Err(why) if signal == Signal::Auto => {
+            let why = why.lines().next().unwrap_or_default();
+            eprintln!("pycc profile: pass 3 decides on wall time: its instructions cannot be counted ({why})");
+            Ok(None)
+        }
+        Err(why) => Err(why),
+    }
+}
+
+/// A check's instructions from CPython's count and the compiled copy's
+/// callgrind run (`None` when the pass does not count). Under `auto`, a
+/// compiled copy callgrind cannot run (a deadline its slowdown misses, its
+/// memory) leaves the check to its wall times, as a CPython run that cannot
+/// be counted leaves the whole pass ([`baseline`]); under `instructions` it
+/// is an error.
+pub(super) fn counted(
+    signal: Signal,
+    run: Option<(u64, Result<u64, String>)>,
+) -> Result<Option<Instructions>, String> {
+    match run {
+        None => Ok(None),
+        Some((cpython, Ok(compiled))) => Ok(Some(Instructions { cpython, compiled })),
+        Some((_, Err(why))) if signal == Signal::Auto => {
+            let why = why.lines().next().unwrap_or_default();
+            eprintln!("pycc profile: pass 3: this check decides on wall time: its instructions cannot be counted ({why})");
+            Ok(None)
+        }
+        Some((_, Err(why))) => Err(why),
+    }
+}
+
+/// The verdict a check records on each function it compiled.
+fn measured(c: &Check, compiled: bool, with: usize) -> Measured {
+    Measured {
+        compiled,
+        with,
+        cpython_ns: c.cpython,
+        compiled_ns: c.compiled,
+        instructions: c.instructions.map(|i| -i.saved()),
+        cpython_instructions: c.instructions.map(|i| i.cpython),
+        refused: None,
+        without: None,
+    }
+}
+
+/// The check a recorded verdict carries.
+fn carried_check(m: &Measured) -> Check {
+    Check {
+        cpython: m.cpython_ns,
+        compiled: m.compiled_ns,
+        instructions: m.instructions.zip(m.cpython_instructions).map(|(delta, cpython)| Instructions {
+            cpython,
+            compiled: (cpython as i64 + delta).max(0) as u64,
+        }),
+    }
 }
 
 /// Records the winning set's key on `profile` (its members, now marked
@@ -400,11 +435,7 @@ impl<'r, 's> Pass<'r, 's> {
             pass.carried = Some(0);
             pass.entries.push(Measurement {
                 set: base.keys().cloned().collect(),
-                check: Some(Check {
-                    cpython: m.cpython_ns,
-                    compiled: m.compiled_ns,
-                    instructions: m.instructions,
-                }),
+                check: Some(carried_check(m)),
                 valid: true,
             });
         }
@@ -475,18 +506,7 @@ impl<'r, 's> Pass<'r, 's> {
                     let with = whole.len();
                     for key in &whole {
                         self.last.insert(key.clone(), i);
-                        self.verdicts.insert(
-                            key.clone(),
-                            Measured {
-                                compiled: c.faster(),
-                                with,
-                                cpython_ns: c.cpython,
-                                compiled_ns: c.compiled,
-                                instructions: c.instructions,
-                                refused: None,
-                                without: None,
-                            },
-                        );
+                        self.verdicts.insert(key.clone(), measured(&c, c.faster(), with));
                     }
                     let valid = c.faster() && whole.is_disjoint(&self.refused);
                     self.entries.push(Measurement { set: whole, check: Some(c), valid });
@@ -528,9 +548,10 @@ impl<'r, 's> Pass<'r, 's> {
 
     /// The selection, settled: of the measurements still valid (each won as
     /// a whole), taken smallest first (the first measured among sets of one
-    /// size), a set replaces the one selected so far only when it is faster
-    /// beyond the noise ([`replaces`]). The selection is compiled, whole, on
-    /// its own times; every other function measured is not. One that the selection left out of a set it was measured in
+    /// size), a set replaces the one selected so far only when it beats it
+    /// by more than noise ([`replaces`]). The selection is compiled, whole,
+    /// on its own check; every other function measured is not. One that the
+    /// selection left out of a set it was measured in
     /// (the selection is part of that set), or whose own set won too,
     /// records the selection's times (`without`). The verdicts and the
     /// builds made.
@@ -557,15 +578,7 @@ impl<'r, 's> Pass<'r, 's> {
             }
             match best {
                 Some((set, c)) if set.set.contains(key) => {
-                    *m = Measured {
-                        compiled: true,
-                        with: set.set.len(),
-                        cpython_ns: c.cpython,
-                        compiled_ns: c.compiled,
-                        instructions: c.instructions,
-                        refused: None,
-                        without: None,
-                    };
+                    *m = measured(c, true, set.set.len());
                 }
                 Some((set, c)) => {
                     let within = self.last.get(key).is_some_and(|&i| set.set.is_subset(&self.entries[i].set));
@@ -582,13 +595,10 @@ impl<'r, 's> Pass<'r, 's> {
 }
 
 /// Builds exactly `set` into a copy of the package and times the workload
-/// against it and against the sources; or, when the build leaves a function
-/// of `set` bytecode, those functions and why, untimed.
-fn check(
-    set: &BTreeSet<FunctionKey>,
-    cx: &Context<'_>,
-    builds: usize,
-) -> Outcome {
+/// against it and against the sources, and, given CPython's instruction
+/// count (`baseline`), counts the compiled copy's; or, when the build leaves
+/// a function of `set` bytecode, those functions and why, untimed.
+fn check(set: &BTreeSet<FunctionKey>, cx: &Context<'_>, builds: usize, baseline: Option<u64>) -> Outcome {
     let dir = cx.scratch.join(format!("verify{builds}"));
     let copy = copy_package(cx.driver.pkg, &dir.join("tree"), &cx.options.include)?;
     let refused = build(&copy, set, cx)?;
@@ -623,19 +633,26 @@ fn check(
             break;
         }
     }
-    let instructions = if cx.options.instructions {
-        Some(instructions(&compiled, &out, cx.workload)? - instructions(cx.driver, &out, cx.workload)?)
-    } else {
-        None
-    };
+    let instructions = counted(
+        cx.options.signal,
+        baseline.map(|cpython| (cpython, instructions(&compiled, &out, cx.workload))),
+    )?;
     let c = Check {
         cpython: quartiles(&plain),
         compiled: quartiles(&built),
         instructions,
     };
     let ms = |ns: u64| ns as f64 / 1e6;
+    let counted = c.instructions.map_or(String::new(), |i| {
+        format!(
+            "; {:+.2}% instructions ({} against {})",
+            -i.saved() as f64 * 100.0 / i.cpython.max(1) as f64,
+            i.compiled,
+            i.cpython
+        )
+    });
     eprintln!(
-        "pycc profile: pass 3: {} functions compiled: {:.1} ms (IQR {:.1}-{:.1}) against CPython's {:.1} ms (IQR {:.1}-{:.1}): {}",
+        "pycc profile: pass 3: {} functions compiled: {:.1} ms (IQR {:.1}-{:.1}) against CPython's {:.1} ms (IQR {:.1}-{:.1}){counted}: {}",
         set.len(),
         ms(c.compiled[1]),
         ms(c.compiled[0]),
@@ -697,14 +714,14 @@ fn unpatchable(stderr: &[u8]) -> Result<(), String> {
 }
 
 /// One run of the workload under callgrind: its instruction count.
-fn instructions(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<i64, String> {
+fn instructions(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, String> {
     let file = format!("--callgrind-out-file={}", out.with_extension("cg").display());
     let wrapper: [&OsStr; 3] = ["valgrind".as_ref(), "--tool=callgrind".as_ref(), file.as_ref()];
     let output = driver
         .command("time", out, &[], workload, &wrapper)
         .env("PYCC_REQUIRE_PATCH", "1")
         .output()
-        .map_err(|e| format!("--verify-instructions needs valgrind: {e}"))?;
+        .map_err(|e| format!("counting instructions needs valgrind: {e}"))?;
     let _ = std::fs::remove_file(out.with_extension("cg"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {

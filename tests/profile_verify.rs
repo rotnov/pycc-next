@@ -27,13 +27,23 @@ fn pycc(args: &[&std::ffi::OsStr]) -> Output {
         .expect("pycc runs")
 }
 
-/// `pycc profile PKG -o OUT -- PYTHON WORK`.
+/// `pycc profile PKG -o OUT --verify-signal wall -- PYTHON WORK`: these
+/// tests are about what pass 3 measures and keeps, on the wall times they
+/// assert, so they do not count instructions where valgrind is installed
+/// (`counted` does).
 fn profile(pkg: &Path, out: &Path, work: &Path) -> Output {
+    profile_with(pkg, out, work, "wall")
+}
+
+/// `pycc profile PKG -o OUT --verify-signal SIGNAL -- PYTHON WORK`.
+fn profile_with(pkg: &Path, out: &Path, work: &Path, signal: &str) -> Output {
     pycc(&[
         "profile".as_ref(),
         pkg.as_os_str(),
         "-o".as_ref(),
         out.as_os_str(),
+        "--verify-signal".as_ref(),
+        signal.as_ref(),
         "--".as_ref(),
         &python(),
         work.as_os_str(),
@@ -123,6 +133,46 @@ fn a_leaf_called_from_the_interpreter_is_rejected_as_not_faster_when_compiled() 
     assert!(!stderr.contains("pass 3"), "{stderr}");
     assert_eq!(measured(&out, "leaf"), m);
     assert!(check(&pkg, &out).contains("rejected: pkg.m:leaf: not faster when compiled"));
+}
+
+/// Where valgrind runs, `auto` decides on instruction counts: the leaf
+/// called from the interpreter runs more instructions compiled and is
+/// rejected with them, the integer loop fewer and is kept. Skipped (with a
+/// note) without valgrind.
+#[test]
+fn counted_checks_reject_the_leaf_and_keep_the_loop() {
+    if Command::new("valgrind").arg("--version").output().is_err() {
+        eprintln!("skipped: no valgrind");
+        return;
+    }
+    let _turn = timing();
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = package(
+        &dir,
+        "from pkg import m\n\
+         leaf = m.leaf\n\
+         for i in range(50000):\n    leaf(i, 1, 2)\n    leaf(i, 1, 2)\n",
+    );
+    let out = dir.join("p.json");
+    let r = profile_with(&pkg, &out, &work, "auto");
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    assert!(stderr.contains("pass 3 decides on instruction counts"), "{stderr}");
+    let m = measured(&out, "leaf");
+    assert_eq!(m["compiled"], false, "{m}");
+    assert!(m["instructions"].as_i64().unwrap() > 0, "{m}");
+    assert!(m["cpython_instructions"].as_u64().unwrap() > 0, "{m}");
+    let shown = check(&pkg, &out);
+    assert!(shown.contains("rejected: pkg.m:leaf: not faster when compiled: with it and 0 other functions compiled the workload ran +"), "{shown}");
+    let dir = ScratchDir::new("profile_verify").unwrap();
+    let (pkg, work) = package(&dir, "from pkg import m\nfor i in range(60):\n    m.work(20000)\n");
+    let out = dir.join("p.json");
+    let r = profile_with(&pkg, &out, &work, "instructions");
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(r.status.success(), "{stderr}");
+    let m = measured(&out, "work");
+    assert_eq!(m["compiled"], true, "{m}");
+    assert!(m["instructions"].as_i64().unwrap() < 0, "{m}");
 }
 
 #[test]
@@ -421,6 +471,8 @@ fn an_exclude_the_winning_set_was_not_measured_with_selects_nothing() {
         out.as_os_str(),
         "--exclude".as_ref(),
         "b".as_ref(),
+        "--verify-signal".as_ref(),
+        "wall".as_ref(),
         "--".as_ref(),
         &python(),
         work.as_os_str(),

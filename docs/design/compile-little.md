@@ -222,34 +222,68 @@ profile's numbers, never a function's name.
 
 The rule's picks are candidates, not the selection: only measured winners are
 selected. Pass 3 of `pycc profile` (`src/profile/verify.rs`) builds the candidates into
-a copy of the project and times the training workload with them compiled against the
-unchanged sources, interleaved in fresh processes after one discarded warm-up run of each
-(`--verify-rounds`, default 7, at most 15; a check stops after 5 rounds once the two interquartile ranges are apart). The
-verdict is on wall time: the compiled median must be under CPython's first quartile. A
-median inside CPython's interquartile range is noise, and a function that wins only by
-noise adds size and risk for no gain, so it is not kept (PR 5 measured pydantic's 5
-training candidates kept in one run and rejected in another under the earlier "no
-slower than CPython's third quartile").
+a copy of the project and checks the training workload with them compiled against the
+unchanged sources: its wall time, interleaved in fresh processes after one discarded
+warm-up run of each (at most `--verify-rounds`, default 15; a check stops after 5 rounds
+once the two interquartile ranges are apart), and, when pass 3 counts them, its
+instructions under callgrind, one run per check against one CPython count for the whole
+pass (`src/profile/verify/verdict.rs`).
+
+**The signal.** A check is decided on the least noisy signal pass 3 has. The training
+workload is mostly a package's test suite, of which a set's functions are a part, so a
+set saves a few percent of it, and measured on a 4-core VM (CPython 3.15, 21 interleaved
+rounds of each package's training workload) the wall time of one fresh process varies
+by 13-17% (interquartile range over median), CPU time likewise; pairing each compiled run
+with the CPython run beside it does not help (the paired ratios spread 17-20%), as the
+noise is each process's own, not drift. Two runs of one workload under callgrind counted
+5,035,292,422 and 5,035,292,414 instructions (pypng), 858,541,355 twice (pystache) and
+989,337,212 and 989,337,218 (tomli). So `--verify-signal auto` (the default) counts
+instructions when valgrind runs the workload and CPython runs it in at most a second (the
+median of 3 runs; callgrind runs it 60 to 90 times slower), and the counts decide:
+
+- a set wins when the workload runs at least 0.5% fewer instructions with it compiled,
+  and its wall times do not show it slower beyond the noise (its compiled first quartile
+  over CPython's third quartile: fewer instructions can still run slower, through cache
+  misses or mispredictions, section 3's caveat);
+- of two winners, the larger replaces the smaller only when it saves at least 0.5% of
+  the workload's instructions more; a gain smaller than that is not worth the code size
+  and the risk of a compiled function.
+
+Neither depends on the wall times' noise, so the same sources and the same pycc give the
+same selection on every run. Without valgrind (macOS, Windows), for a longer workload
+(diff-match-patch's 13 s, mistune's 1.6 s), or when the workload fails under callgrind
+(mistune's suite has tests with wall-clock deadlines, which callgrind's slowdown misses;
+diff-match-patch's ran out of 16 GB of memory under it), the wall times decide: the
+compiled median must be under CPython's first quartile (PR 5 measured pydantic's 5 training
+candidates kept in one run and rejected in another under the earlier "no slower than
+CPython's third quartile"), and a larger winner replaces a smaller one only when its
+compiled third quartile is under the smaller one's first quartile and its median saves at
+least 5% of CPython's median time more: interquartile ranges of a few rounds come apart by
+chance, and diff-match-patch's 30-function region (2535 ms, IQR 2237-2575) replaced
+`diff_bisect` alone (2710 ms, IQR 2596-2747) so in one local run, both over five times
+CPython's 14212 ms. Under `auto`, a single check whose compiled copy callgrind cannot run is
+decided on its own wall times the same way. `--verify-signal instructions` makes counting
+an error when it fails, `wall` never counts.
+
 A region pulls its cold functions in only when that pays. Measured on diff-match-patch's
 diff_main (best of 3), CPython took 4.89 s, `diff_bisect` alone compiled 1.75 s (2.8x),
 its whole region compiled 1.88 s (2.6x) and `--select all` 2.11 s (2.3x): a generic lift
 of a cold function costs more than its bytecode. So pass 3 checks all the candidates
 together and their hot functions (each at least 0.5% and 50 calls on its own) alone, and
-If neither is faster, each region (the candidates connected by calls among them, most
+if neither is faster, each region (the candidates connected by calls among them, most
 self time first) is checked the same way alone, then the regions that won are checked
 together once more; at most 8 builds, one of them reserved for that last check before any
 region is measured. The selection is always exactly one set that was measured as a whole
-and won, never a union of sets measured apart: the smallest winner, unless a larger one is
-faster beyond the noise of both, its compiled third quartile under the smaller one's first
-quartile (sets of one size: the one measured first, more self time, unless beaten the same
-way). A lower median alone does not order two winners: with overlapping interquartile
-ranges the pick flipped from run to run, and on diff-match-patch CI selected a 30-function
-region (a build of about 9 s, near `bench/package_check.py`'s then `--max-build-seconds 10`) in
-one run and `diff_bisect` alone (1.4 s) in the next. Each function more costs build time,
-size and risk, so a larger set must earn its place by more than noise. The quartiles
-compared are each check's own compiled runs: every check interleaves its rounds with
-CPython's, so drift inside a check is controlled, and normalizing by each check's CPython
-median would add that median's noise to the comparison. When the regions together cannot be built within the budget, or lose,
+and won, never a union of sets measured apart: the smallest winner, unless a larger one
+beats it as above (sets of one size: the one measured first, more self time, unless
+beaten the same way). A lower median alone does not order two winners: with overlapping
+interquartile ranges the pick flipped from run to run, and on diff-match-patch CI selected
+a 30-function region (a build of about 9 s, near `bench/package_check.py`'s then
+`--max-build-seconds 10`) in one run and `diff_bisect` alone (1.4 s) in the next; pypng
+selected its 8 hot functions in one local run and all 30 candidates in the next, its 8
+measured "not faster" (358.6 ms against CPython's 381.7 ms, IQR 342.4-422.7). Each
+function more costs build time, size and risk, so a larger set must earn its place by
+more than noise. When the regions together cannot be built within the budget, or lose,
 the best single winner is kept (a region, a core, or nothing). A function the winner
 leaves out of a set it was measured in is rejected ("faster without it",
 `measured.without`). Pass 3 enforces this structurally:
@@ -278,8 +312,9 @@ excluded from the profile's candidates by the same `--exclude` (it is still prof
 the calls into it count as crossings), so the build compiles exactly the set pass 3
 measured; `bench/package_check.py --select profile` checks that it does. Every candidate gets its
 last check's outcome in the profile (`measured`: `compiled`, `with`, `cpython_ns`,
-`compiled_ns` as first quartile, median and third quartile, and with
-`--verify-instructions` the instruction delta under callgrind, as evidence only). A
+`compiled_ns` as first quartile, median and third quartile, and, when counted,
+`instructions`, the compiled run's instructions less CPython's, and
+`cpython_instructions`). A
 function measured not faster is rejected ("not faster when compiled") by builds and `--check`
 alike. A later `pycc profile` keeps every verdict, a win as well as a rejection, while
 the function's source hash is unchanged, and measures only the candidates without one,

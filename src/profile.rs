@@ -78,8 +78,10 @@ pub(crate) struct Entry {
 /// One pass-3 check's outcome, recorded on each function it compiled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Measured {
-    /// Whether the workload ran faster compiled: the compiled median under
-    /// CPython's first quartile.
+    /// Whether the check's set won (`verify::Check::faster`): with
+    /// instruction counts, at least 0.5% fewer instructions and no slower
+    /// beyond the noise of the wall times; without, the compiled median
+    /// under CPython's first quartile.
     pub(crate) compiled: bool,
     /// The functions the check compiled, this one among them.
     pub(crate) with: usize,
@@ -88,11 +90,13 @@ pub(crate) struct Measured {
     pub(crate) cpython_ns: [u64; 3],
     /// The same with the functions compiled.
     pub(crate) compiled_ns: [u64; 3],
-    /// Instructions of one run compiled minus one in CPython, when
-    /// `--verify-instructions` ran it under callgrind: evidence, never the
-    /// verdict.
+    /// Instructions of one run compiled minus one in CPython, when pass 3
+    /// counted them under callgrind (`--verify-signal`): then they decide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) instructions: Option<i64>,
+    /// The instructions of one run in CPython, when counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cpython_instructions: Option<u64>,
     /// Why the check's build did not compile this function, when it did
     /// not: it was never timed, and is rejected for this reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -115,6 +119,7 @@ impl Measured {
             cpython_ns: [0; 3],
             compiled_ns: [0; 3],
             instructions: None,
+            cpython_instructions: None,
             refused: Some(reason),
             without: None,
         }
@@ -132,6 +137,21 @@ impl Measured {
                 ms(without[1]),
                 ms(self.compiled_ns[1]),
                 self.with - 1,
+            );
+        }
+        let wall = format!(
+            "{:.1} ms, against CPython's {:.1} ms (IQR {:.1}-{:.1})",
+            ms(self.compiled_ns[1]),
+            ms(self.cpython_ns[1]),
+            ms(self.cpython_ns[0]),
+            ms(self.cpython_ns[2]),
+        );
+        if let (Some(delta), Some(cpython)) = (self.instructions, self.cpython_instructions) {
+            let percent = delta as f64 * 100.0 / cpython.max(1) as f64;
+            return format!(
+                "not faster when compiled: with it and {} other functions compiled the workload ran {percent:+.2}% instructions against CPython's {cpython} (a set wins at {:.1}% or fewer, and not slower in wall time), and took {wall}",
+                self.with - 1,
+                -(verify::MIN_GAIN_PPM as f64) / 1e4,
             );
         }
         format!(
