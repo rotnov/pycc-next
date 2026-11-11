@@ -261,8 +261,9 @@ compiled third quartile is under the smaller one's first quartile and its median
 least 5% of CPython's median time more: interquartile ranges of a few rounds come apart by
 chance, and diff-match-patch's 30-function region (2535 ms, IQR 2237-2575) replaced
 `diff_bisect` alone (2710 ms, IQR 2596-2747) so in one local run, both over five times
-CPython's 14212 ms. `--verify-signal instructions` makes counting an error when it fails,
-`wall` never counts.
+CPython's 14212 ms. Under `auto`, a single check whose compiled copy callgrind cannot run is
+decided on its own wall times the same way. `--verify-signal instructions` makes counting
+an error when it fails, `wall` never counts.
 
 A region pulls its cold functions in only when that pays. Measured on diff-match-patch's
 diff_main (best of 3), CPython took 4.89 s, `diff_bisect` alone compiled 1.75 s (2.8x),

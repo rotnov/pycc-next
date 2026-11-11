@@ -817,6 +817,21 @@ fn counted_a_set_slower_in_wall_time_is_rejected() {
     assert!(why.starts_with("faster without it"), "{why}");
 }
 
+/// A compiled copy callgrind cannot run: under `auto` the check falls back
+/// to its wall times, under `instructions` the profile fails; a counted run
+/// gives its instructions, and a pass that does not count gives none.
+#[test]
+fn an_uncountable_check_falls_back_to_wall_time_under_auto_only() {
+    let failed = || Some((1_000_000, Err("callgrind failed\nits output".to_string())));
+    assert_eq!(counted(Signal::Auto, failed()), Ok(None));
+    assert_eq!(counted(Signal::Instructions, failed()), Err("callgrind failed\nits output".to_string()));
+    assert_eq!(
+        counted(Signal::Auto, Some((1_000_000, Ok(900_000)))),
+        Ok(Some(Instructions { cpython: 1_000_000, compiled: 900_000 }))
+    );
+    assert_eq!(counted(Signal::Wall, None), Ok(None));
+}
+
 /// A verdict records a check's instructions and gives them back: a carried
 /// winner is compared on the counts it was measured with.
 #[test]

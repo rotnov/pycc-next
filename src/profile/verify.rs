@@ -264,6 +264,28 @@ fn baseline(cx: &Context<'_>) -> Result<Option<u64>, String> {
     }
 }
 
+/// A check's instructions from CPython's count and the compiled copy's
+/// callgrind run (`None` when the pass does not count). Under `auto`, a
+/// compiled copy callgrind cannot run (a deadline its slowdown misses, its
+/// memory) leaves the check to its wall times, as a CPython run that cannot
+/// be counted leaves the whole pass ([`baseline`]); under `instructions` it
+/// is an error.
+pub(super) fn counted(
+    signal: Signal,
+    run: Option<(u64, Result<u64, String>)>,
+) -> Result<Option<Instructions>, String> {
+    match run {
+        None => Ok(None),
+        Some((cpython, Ok(compiled))) => Ok(Some(Instructions { cpython, compiled })),
+        Some((_, Err(why))) if signal == Signal::Auto => {
+            let why = why.lines().next().unwrap_or_default();
+            eprintln!("pycc profile: pass 3: this check decides on wall time: its instructions cannot be counted ({why})");
+            Ok(None)
+        }
+        Some((_, Err(why))) => Err(why),
+    }
+}
+
 /// The verdict a check records on each function it compiled.
 fn measured(c: &Check, compiled: bool, with: usize) -> Measured {
     Measured {
@@ -611,13 +633,10 @@ fn check(set: &BTreeSet<FunctionKey>, cx: &Context<'_>, builds: usize, baseline:
             break;
         }
     }
-    let instructions = match baseline {
-        Some(cpython) => Some(Instructions {
-            cpython,
-            compiled: instructions(&compiled, &out, cx.workload)?,
-        }),
-        None => None,
-    };
+    let instructions = counted(
+        cx.options.signal,
+        baseline.map(|cpython| (cpython, instructions(&compiled, &out, cx.workload))),
+    )?;
     let c = Check {
         cpython: quartiles(&plain),
         compiled: quartiles(&built),
