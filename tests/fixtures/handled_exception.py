@@ -155,6 +155,26 @@ def raises_from_bound_cause(d, k):
             raise ValueError("caused") from cause
 
 
+def raises_object_from(d, k, e):
+    # `raise e from cause` with `e` a CPython object (a parameter): a cause
+    # never raised has no `__context__`, as for a compiled exception.
+    try:
+        return d[k]
+    except KeyError:
+        raise e from IndexError("the cause")
+
+
+def raises_object_from_bound(d, k, e):
+    # The same with a cause that was raised and caught: it keeps its context.
+    try:
+        return d[k]
+    except KeyError:
+        try:
+            raise IndexError("raised first")
+        except IndexError as cause:
+            raise e from cause
+
+
 def raises_again_from_none(d, k):
     # `raise e from None` drops the cause an earlier `raise ... from` gave.
     try:
@@ -471,6 +491,9 @@ def main():
             shown(f, d, k)
     shown(raises_object, {}, "k", RuntimeError)
     shown(raises_object, {}, "k", fails)
+    for f in (raises_object_from, raises_object_from_bound):
+        shown(f, {}, "k", ValueError("passed"))
+        shown(f, {}, "k", RuntimeError)
     for edit in (clear_cause, set_new_cause, unsuppress):
         shown(edited_then_reraised, {}, "k", edit)
         shown(edited_inner_sees, {}, "k", edit)

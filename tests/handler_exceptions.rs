@@ -130,6 +130,8 @@ fn a_handler_publishes_the_exception_it_handles() {
             "after_return",
             "raises_new",
             "raises_object",
+            "raises_object_from",
+            "raises_object_from_bound",
             "raises_from_none",
             "raises_from_cause",
             "raises_from_bound_cause",
