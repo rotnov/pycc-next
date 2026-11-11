@@ -5,6 +5,7 @@ use super::*;
 use std::cell::{Cell, RefCell};
 
 mod finally;
+pub(crate) mod handled;
 pub(crate) mod lazy_miss;
 pub(crate) mod owned_slots;
 mod try_star;
@@ -64,6 +65,14 @@ pub(super) struct ExceptionCodegenState<'ctx> {
     /// The `try`s whose `KeyError` handler takes lazy misses, innermost
     /// last (`lazy_miss`).
     pub(super) lazy_misses: RefCell<Vec<lazy_miss::LazyMiss<'ctx>>>,
+    /// The handlers that publish the exception they handle whose bodies
+    /// are being emitted, innermost last (`handled`).
+    pub(super) handlers: RefCell<Vec<handled::Open<'ctx>>>,
+    /// The slots a publishing handler's way out releases, and the releases
+    /// emitted for them since the outermost such handler was entered
+    /// (`handled::exits`).
+    pub(super) handler_slots: RefCell<Vec<PointerValue<'ctx>>>,
+    pub(super) handler_exits: RefCell<Vec<inkwell::values::InstructionValue<'ctx>>>,
 }
 
 impl ExceptionCodegenState<'_> {
@@ -79,6 +88,9 @@ impl ExceptionCodegenState<'_> {
             owned_slots: RefCell::new(Vec::new()),
             owned_object_slots: RefCell::new(Vec::new()),
             lazy_misses: RefCell::new(Vec::new()),
+            handlers: RefCell::new(Vec::new()),
+            handler_slots: RefCell::new(Vec::new()),
+            handler_exits: RefCell::new(Vec::new()),
         }
     }
 }

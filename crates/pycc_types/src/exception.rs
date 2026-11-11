@@ -349,7 +349,9 @@ pub(super) fn check_raise_stmt(
             Span::new(0, 0),
         ));
     }
-    if let Some(cause) = cause {
+    // `raise X from None` has no cause to check: the `None` only marks the
+    // context suppressed.
+    if let Some(cause) = cause.as_ref().filter(|cause| !matches!(cause, HirExpr::NoneLiteral)) {
         object_operand |= check_raise_operand(
             env,
             local_names,
