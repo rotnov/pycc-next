@@ -347,7 +347,7 @@ fn main() -> ExitCode {
             select_handled,
             no_verify,
             verify_rounds,
-            verify_instructions,
+            verify_signal,
             verify_include,
             excludes,
             check,
@@ -368,7 +368,7 @@ fn main() -> ExitCode {
             } else {
                 let verify = (!no_verify).then_some(profile::verify::Options {
                     rounds: verify_rounds,
-                    instructions: verify_instructions,
+                    signal: verify_signal,
                     include: verify_include,
                 });
                 profile::run_profile(&path, &out, &workload, runs, rule, verify, &excludes)

@@ -140,10 +140,14 @@ jobs:
       # (GitHub tag archive sha256, and that of the files used), each built
       # module by module with --ext --non-strict, and each package's own test
       # suite run by CPython against the compiled modules (the build time is
-      # printed per module; the next step gates it).
+      # printed per module; the next step gates it). valgrind first: the
+      # profile's pass 3 decides a short training workload's checks on its
+      # instruction counts under callgrind (`pycc profile --verify-signal auto`).
       - name: Real packages (diff-match-patch, tomli, pypng, mistune) against their own tests
         if: matrix.os == 'ubuntu-24.04'
-        run: python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --time --runs 1
+        run: |
+          sudo apt-get install -y -q valgrind
+          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --time --runs 1
       # Hot-path instruction counts under callgrind (stable on a shared runner,
       # unlike wall time): each package's hot path executes at most its
       # documented bound per call (`max_instructions` in bench/package_check_workloads.py,
@@ -157,9 +161,7 @@ jobs:
       # ratio does not change with the runner's CPU model.
       - name: Real packages' hot-path instruction counts and build time
         if: matrix.os == 'ubuntu-24.04'
-        run: |
-          sudo apt-get install -y -q valgrind
-          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --instructions --select all --build-ratio
+        run: python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache --instructions --select all --build-ratio
       # Compile speed (v0.5 accept 4): `pycc build` of every bench/py program
       # takes 2 s at most.
       - name: Benchmark programs build in 2 s

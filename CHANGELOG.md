@@ -28,6 +28,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- `pycc profile`'s pass 3 decides its checks on the training workload's instruction
+  counts under callgrind when it can (`--verify-signal auto|instructions|wall`, replacing
+  `--verify-instructions`; `docs/design/compile-little.md`, section 2.3): fresh-process
+  wall times of a package's test suite vary by about 15% from run to run, which made a
+  set saving a few percent a coin toss (pypng's selection flipped between 8 and 30
+  functions, diff-match-patch's between 1 and 30), while the counts repeat to a few
+  instructions in billions. A set wins at 0.5% fewer instructions and no slower beyond
+  the noise of its wall times, and a larger set replaces a smaller one only by saving
+  0.5% more. `auto` counts when valgrind runs the workload and CPython runs it in at
+  most a second; else wall time decides as before, where a larger set must now also save
+  5% of CPython's median time more. `--verify-rounds` is now the most rounds a check runs (default
+  15; it stops after 5 once the wall times are apart).
 - Non-strict generic bodies (`docs/design/compile-little.md`, sections 2.6 and 2.7;
   `PYCC_NO_FAST_OPS=1` turns each off):
   - `try: d[k]` with a first handler that catches `KeyError` and neither binds the

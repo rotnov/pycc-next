@@ -232,15 +232,17 @@ first 1,000 calls (`sys.monitoring`). Then it builds those candidates into a cop
 project (the nearest directory above the package with a `pyproject.toml`, `setup.cfg` or
 `setup.py`; else the package alone, plus any `--verify-include PATH`) and times the
 workload with them compiled against the sources, interleaved in fresh processes
-(`--verify-rounds`, default 7). The selection is the one set it measured as a whole that
+(at most `--verify-rounds`, default 15), and, when valgrind can run the workload and
+CPython runs it in at most a second, counts its instructions under callgrind, which then
+decide (`--verify-signal`): a set must save 0.5% of them and not run slower beyond the
+noise. The selection is the one set it measured as a whole that
 won, recorded with its members' source hashes, the `--exclude` list and the Python
 version: if a member changed, the Python version differs or a whole-package build's
 `--exclude` list does, the build selects nothing and asks for a new profile. A selected
 function whose parameters the profile saw holding one exact `int`, `float`, `str` or
 `bytearray` is compiled with a native copy typed with them, behind an exact-type guard
 (`specialized:` in `--report-fallbacks`). A function measured slower stays rejected while its source is unchanged
-(`--no-verify` skips this; `--verify-instructions` adds callgrind instruction counts as
-evidence).
+(`--no-verify` skips this).
 `pycc profile pkg -o pycc.profile.json --check -- python3` reads a profile against the
 current sources: which entries are stale (their function's source changed) and what the
 rule selects. A non-strict `--ext` build reads it with `--profile`; the plan is

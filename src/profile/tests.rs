@@ -341,6 +341,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
         cpython_ns: [10, 11, 12],
         compiled_ns: if compiled { [9, 10, 11] } else { [20, 21, 22] },
         instructions: None,
+        cpython_instructions: None,
         refused: None,
         without: None,
     };
@@ -389,6 +390,7 @@ fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
         cpython_ns: [100, 110, 120],
         compiled_ns: [80, 85, 90],
         instructions: None,
+        cpython_instructions: None,
         refused: None,
         without: None,
     };

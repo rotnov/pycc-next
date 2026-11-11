@@ -42,6 +42,7 @@ fn slower() -> Measured {
         cpython_ns: [90, 100, 110],
         compiled_ns: [115, 120, 125],
         instructions: None,
+        cpython_instructions: None,
         refused: None,
         without: None,
     }
@@ -456,6 +457,7 @@ fn an_earlier_winning_set_is_in_every_set_measured_and_stays_when_nothing_wins()
         cpython_ns: [90, 100, 110],
         compiled_ns: [94, 95, 96],
         instructions: None,
+        cpython_instructions: None,
         refused: None,
         without: None,
     };
@@ -495,6 +497,7 @@ fn a_carried_set_with_a_refused_member_is_invalid_whole() {
         cpython_ns: [90, 100, 110],
         compiled_ns: [80, 85, 90],
         instructions: None,
+        cpython_instructions: None,
         refused: None,
         without: None,
     };
@@ -571,6 +574,7 @@ fn the_selection_is_always_one_valid_measured_winner_and_the_build_compiles_it()
             cpython_ns: [90, 100, 110],
             compiled_ns: [80 + rng.below(20), 99, 100],
             instructions: None,
+            cpython_instructions: None,
             refused: None,
             without: None,
         };
@@ -720,9 +724,11 @@ fn overlapping_winners_select_the_smaller_set_every_run() {
     // Medians either way round inside each other's ranges: the hot one.
     assert_eq!(pick([1650, 1700, 1800], [1680, 1750, 1850]), core);
     assert_eq!(pick([1700, 1760, 1850], [1650, 1700, 1800]), core);
-    // The region's third quartile under the hot one's first: the region.
+    // The region's third quartile under the hot one's first but saving less
+    // than 5% of CPython's 4890 ms more: the hot one; saving more: the region.
     let all: BTreeSet<FunctionKey> = region.iter().cloned().collect();
-    assert_eq!(pick([1500, 1550, 1599], [1600, 1700, 1800]), all);
+    assert_eq!(pick([1500, 1550, 1599], [1600, 1700, 1800]), core);
+    assert_eq!(pick([1300, 1400, 1599], [1600, 1700, 1800]), all);
     // The same in the settling over every valid measurement: regions
     // measured apart with overlapping ranges keep the smallest.
     let (candidates, regions, core) = regions_of(&["a", "b"]);
@@ -740,4 +746,96 @@ fn overlapping_winners_select_the_smaller_set_every_run() {
     };
     let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
     assert_eq!(compiled(&verdicts), [k("b_hot")].into_iter().collect());
+}
+
+/// The CI flips, counted: diff-match-patch's 30-function region and its one
+/// hot function both win, pypng's 8 hot functions and their 30-function
+/// set alike. With instruction counts the pick no longer depends on the
+/// wall times: over runs whose wall times are drawn at random, from clear
+/// wins to the edge of CPython's noise, the selection is the same set
+/// every run (the hot core, unless the region saves 0.5% of the workload's
+/// instructions more), and a set that saves too little or adds
+/// instructions is never selected.
+#[test]
+fn counted_checks_select_the_same_set_whatever_the_wall_times() {
+    let region: Vec<FunctionKey> = (0..30).map(|i| k(&format!("f{i}"))).collect();
+    let core: BTreeSet<FunctionKey> = [k("f0")].into_iter().collect();
+    let all: BTreeSet<FunctionKey> = region.iter().cloned().collect();
+    let mut rng = Rng(0x5eed);
+    let mut pick = |region_saves: u64, alone_saves: u64| {
+        let mut picks = BTreeSet::new();
+        for _ in 0..200 {
+            let mut noise = Rng(rng.next() | 1);
+            let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+                let saves = if set.len() == 1 { alone_saves } else { region_saves };
+                let ms = 60 + noise.below(45);
+                Ok(Ok(Check {
+                    cpython: [90, 100, 110],
+                    compiled: [ms - 5, ms, ms + 5],
+                    instructions: Some(Instructions { cpython: 1_000_000, compiled: 1_000_000 - saves }),
+                }))
+            };
+            let (verdicts, _) =
+                decide(&region, std::slice::from_ref(&region), &core, &BTreeMap::new(), 8, &mut run).unwrap();
+            picks.insert(compiled(&verdicts));
+        }
+        assert_eq!(picks.len(), 1, "{picks:?}");
+        picks.into_iter().next().unwrap()
+    };
+    // Region and core save about the same: the core, every run.
+    assert_eq!(pick(820_000, 818_000), core);
+    assert_eq!(pick(818_000, 820_000), core);
+    // The region saves 0.5% of the workload more: the region, every run.
+    assert_eq!(pick(825_000, 820_000), all);
+    // Neither saves 0.5%: nothing, every run.
+    assert!(pick(4_000, 3_000).is_empty());
+    // Neither saves anything: nothing.
+    assert!(pick(0, 0).is_empty());
+}
+
+/// Counted, a check whose wall times show it slower beyond the noise is
+/// rejected even when it saves instructions, and the set that is not slower
+/// is kept.
+#[test]
+fn counted_a_set_slower_in_wall_time_is_rejected() {
+    let (candidates, regions, core) = regions_of(&["a"]);
+    let mut run = |set: &BTreeSet<FunctionKey>, _: usize| -> Outcome {
+        // The whole region saves the most instructions but runs slower; its
+        // hot function alone saves less and is not slower.
+        let (wall, compiled) = if set.len() == 2 { ([120, 125, 130], 700_000) } else { ([95, 100, 105], 900_000) };
+        Ok(Ok(Check {
+            cpython: [90, 100, 110],
+            compiled: wall,
+            instructions: Some(Instructions { cpython: 1_000_000, compiled }),
+        }))
+    };
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
+    assert_eq!(compiled(&verdicts), core);
+    assert_eq!(verdicts[&k("a_hot")].instructions, Some(-100_000));
+    assert_eq!(verdicts[&k("a_hot")].cpython_instructions, Some(1_000_000));
+    let why = verdicts[&k("a_cold")].rejection();
+    assert!(why.starts_with("faster without it"), "{why}");
+}
+
+/// A verdict records a check's instructions and gives them back: a carried
+/// winner is compared on the counts it was measured with.
+#[test]
+fn a_recorded_verdict_carries_its_instruction_counts() {
+    let c = Check {
+        cpython: [90, 100, 110],
+        compiled: [70, 75, 80],
+        instructions: Some(Instructions { cpython: 1_000_000, compiled: 900_000 }),
+    };
+    let m = measured(&c, true, 3);
+    assert_eq!((m.instructions, m.cpython_instructions), (Some(-100_000), Some(1_000_000)));
+    let back = carried_check(&m);
+    assert_eq!(back.instructions, c.instructions);
+    assert!(back.faster());
+    // A verdict measured on wall time alone carries no counts.
+    let wall = measured(&Check { instructions: None, ..c.clone() }, true, 3);
+    assert_eq!(carried_check(&wall).instructions, None);
+    // Not faster, counted: the rejection names the instructions.
+    let more = Some(Instructions { cpython: 1_000_000, compiled: 1_010_000 });
+    let why = measured(&Check { instructions: more, ..c }, false, 3).rejection();
+    assert!(why.contains("+1.00% instructions"), "{why}");
 }
