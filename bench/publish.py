@@ -182,7 +182,7 @@ def markdown(doc: dict) -> str:
         d = doc["pydantic"]["pydantic"]
         out += [f"## pydantic {d['version']} (`bench/pydantic_check.py --time`, {d['runs']} "
                 f"runs, each phase x{d['repeat']} per run, mean per repetition; "
-                f"{d['native']} functions native; `process`: a run's whole-process wall "
+                f"{d['compiled']} functions compiled; `process`: a run's whole-process wall "
                 f"time)", "",
                 "| phase | CPython | pycc-next | Cython | mypyc | CPython / pycc-next | "
                 "pycc vs Cython | pycc vs mypyc |", "|---|---|---|---|---|---|---|---|"]
