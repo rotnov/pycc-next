@@ -44,7 +44,9 @@ pub(crate) const EARLY_ROUNDS: u32 = 5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Signal {
     /// Instruction counts when valgrind runs the workload and CPython runs
-    /// it in at most [`AUTO_MAX_WALL_NS`]; else wall time.
+    /// it in at most a second; else wall time.
+    // The second is `AUTO_MAX_WALL_NS`; this doc comment is
+    // `--verify-signal`'s help, so it names no constant.
     Auto,
     /// Instruction counts under callgrind; an error when they cannot be had.
     Instructions,

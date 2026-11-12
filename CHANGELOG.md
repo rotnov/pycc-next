@@ -4,6 +4,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Fixed
+
+- `pycc --help` and `pycc <command> --help` describe every subcommand and flag for the
+  user. v0.12.0 printed internal doc comments there (`run`, `check` and `lock` showed
+  "Non-strict mode (#3)...", `build` a design-document reference, flag help carried issue
+  numbers and decision ids) and no description at all for `test`, `explain`, `init`,
+  `clean` and `version`. `tests/cli_help.rs` checks every subcommand's description and help.
+
 ## [0.12.0] - 2026-11-12
 
 Compile little, compile well -- non-strict `--ext` builds now compile only the functions a
