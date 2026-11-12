@@ -25,8 +25,10 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
            compile only the functions the training profile selects
            (docs/design/compile-little.md): `pycc profile` first runs
            `bench/pydantic_workload.py --train` against the unchanged sources
-           (with the `--time` interpreter, else this one), the build passes it
-           as `--profile`.
+           (with the `--time` interpreter, else this one, and `--exclude v1`, as
+           the build), the build passes it as `--profile` and targets the same
+           interpreter (`PYCC_PYTHON`, unless set): a winning set measured with
+           other excludes or another Python is not valid for the build.
   --select all
            compile every eligible function (`pycc build --select all`).
   --separate
@@ -112,6 +114,7 @@ PYDANTIC = package_check.Package(
     instructions_label="",
     max_instructions=0,
     instruction_calls=0,
+    max_build_ratio=0,
 )
 
 def compiled_lines(r: subprocess.CompletedProcess) -> list[str]:
@@ -121,13 +124,17 @@ def compiled_lines(r: subprocess.CompletedProcess) -> list[str]:
 
 
 FLAGS = ["--ext", "--non-strict", "--release", "--report-fallbacks"]
+# `pydantic.v1` stays Python. The training profile names the same excludes: a
+# winning set pass 3 measured with other excludes is not valid for the build,
+# which then compiles nothing.
+EXCLUDE = ["--exclude", "v1"]
 
 
 def training_profile(pycc: str, python: str, src: pathlib.Path, out: pathlib.Path) -> None:
     """`pycc profile`s the unchanged sources in `src` with the training input
     (`bench/pydantic_workload.py --train`, docs/design/compile-little.md, section
     4) into `out`."""
-    r = subprocess.run([pycc, "profile", str(src / "pydantic"), "-o", str(out), "--",
+    r = subprocess.run([pycc, "profile", str(src / "pydantic"), "-o", str(out), *EXCLUDE, "--",
                         python, str(WORKLOAD), str(src.resolve()), "5", "--train"],
                        capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
@@ -138,12 +145,13 @@ def training_profile(pycc: str, python: str, src: pathlib.Path, out: pathlib.Pat
             print(line)
 
 
-def build(pycc: str, py: pathlib.Path, select: list[str]) -> subprocess.CompletedProcess:
+def build(pycc: str, py: pathlib.Path, select: list[str],
+          env: dict[str, str]) -> subprocess.CompletedProcess:
     """Builds one module as its own extension (`--separate`)."""
     out = py.parent / "__init__" if py.name == "__init__.py" else py.with_suffix("")
     r = subprocess.run([pycc, "build", str(py), "-o", str(out), *FLAGS, *select,
                         "--foreign-relative-imports"],
-                       capture_output=True, text=True, timeout=1800)
+                       capture_output=True, text=True, timeout=1800, env=env)
     if r.returncode != 0:
         print(f"{py}: BUILD FAILED: {(r.stderr.strip().splitlines() or ['?'])[-1]}")
     return r
@@ -348,21 +356,27 @@ def main() -> int:
         mods = sorted(q for q in (tree / "pydantic").rglob("*.py") if "v1" not in q.parts)
         if a.modules:
             mods = [m for m in mods if any(o in str(m) for o in a.modules)]
+        # The interpreter the profile runs is the one the build targets: a
+        # winning set measured with another interpreter is not valid for the
+        # build, which would then compile nothing.
+        target = a.time or sys.executable
+        target = str(pathlib.Path(target).absolute()) if "/" in target else target
+        env = {**os.environ, "PYCC_PYTHON": os.environ.get("PYCC_PYTHON", target),
+               "PYCC_JOBS": str(a.jobs)}
         if a.select == "profile":
             profile = tmp / "pycc.profile.json"
-            training_profile(a.pycc, a.time or sys.executable, src, profile)
+            training_profile(a.pycc, target, src, profile)
             select = ["--profile", str(profile)]
         else:
             select = ["--select", "all"]
         if a.separate or a.modules:
             with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
-                results = list(ex.map(lambda q: build(a.pycc, q, select), mods))
+                results = list(ex.map(lambda q: build(a.pycc, q, select, env), mods))
         else:
             package = tree / "pydantic"
             r = subprocess.run([a.pycc, "build", str(package), "-o", str(package / "__init__"),
-                                *FLAGS, *select, "--exclude", "v1"], capture_output=True,
-                               text=True, timeout=3600,
-                               env=dict(os.environ, PYCC_JOBS=str(a.jobs)))
+                                *FLAGS, *select, *EXCLUDE], capture_output=True,
+                               text=True, timeout=3600, env=env)
             if r.returncode != 0:
                 sys.exit(f"the build failed:\n{r.stderr}")
             results = [r]
