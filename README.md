@@ -90,23 +90,22 @@ values that strict mode refuses, as a type checker does: a list whose elements c
 type (a `str` element replaced by an `int`), an `int | None` used as an `int` without a
 `None` test, a variable rebound to another type on some paths only.
 
-**Library code is still not faster than CPython** -- v0.8's goal, reshaped for v0.9 around
-typed native hot data, and still not met. v0.9 made libraries' own classes native in
-`--non-strict` (native closures, `*args`/`**kwargs`, `Generic[T]` classes CPython creates
-over compiled templates, Python subclasses of compiled classes whose overrides compiled code
-calls, call-site method caches), and the numbers moved less than the work suggests.
-pystache 0.6.8 runs 586k instructions per round of its own benchmark (783k before v0.9;
-CPython 3.13 505k) and 0.65x of CPython 3.15 by wall time; about 158k of CPython's 505k is regex and match work
-no compile of pystache removes, so 2x would need everything else under ~94k. mistune 3.3.4
-is slower than CPython (0.89x for `mistune.html`, 0.86x for the full parser), and so is
-its import now (0.98x; 1.04x against CPython 3.13). pydantic 2.14.2 built whole (1046 of
-1278 functions native; its own suite was last checked against 2.13.5): import 0.96x,
-model definition 0.80x, `model_json_schema()` 0.88x, round-trips 0.96x of CPython's speed
-(bench run 41427758082, ubuntu-24.04, medians of 15 interleaved runs; mistune and pystache
-of 11).
-Compiled code over CPython objects does each object operation at about the
-interpreter's cost; the speed is in typed code (the table above, diff-match-patch and pypng
-~9x and ~11x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/roadmap/v0.9.md).
+**Library code: faster where a profile shows it pays, at parity elsewhere.** Since v0.12 a
+non-strict `--ext` build compiles only the functions `pycc profile` measures as winners;
+the rest of the package runs as CPython bytecode ([compile-little](docs/design/compile-little.md)).
+At the v0.12.0 release (bench run 43192816730 at 5b7cc6c, ubuntu-24.04 / ubuntu-24.04-arm,
+medians of 15 interleaved runs for pydantic, 11 for the others): pydantic 2.14.2's
+`model_json_schema()` runs **1.20x / 1.23x** CPython's speed with 5 / 3 functions compiled,
+model definition 1.00x / 1.01x, round-trips 1.02x / 1.01x and the whole process 1.07x /
+1.07x, while its import is 0.99x / 0.99x (at parity, not faster). mistune 3.3.4's and
+pystache 0.6.8's imports and benchmarks run at CPython's speed (0.99x-1.01x), where whole-module builds ran their benchmarks at
+0.65x-0.89x.
+diff-match-patch's `diff_main` runs 14.98x / 16.18x faster. **pypng and tomli are slower
+than their whole-module builds** (bench run 41750538464, the last before the switch):
+pypng's five-filter read 2.02x / 1.95x (10.42x / 17.20x before) and tomli's `loads` 1.42x /
+1.31x (1.70x / 1.49x); bringing them back is a
+v0.13 target ([ROADMAP](docs/ROADMAP.md)). The numbers in the sections below that cite
+bench run 41427758082 are v0.11's whole-module builds.
 
 **Against Cython and mypyc on the same packages** (bench run 41427758082, ubuntu-24.04,
 medians of 11; pydantic of 15): each tool builds the packages' modules unchanged, and is
