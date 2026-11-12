@@ -312,6 +312,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `docs/roadmap/v0.1-v0.7.md`.
 
 ### Fixed
+- `pycc profile`'s pass 3 could stall forever on one callgrind run: on GitHub's arm64
+  runner, valgrind ran pypng's training workload past 45 minutes. Every callgrind run now
+  has a deadline (`docs/design/compile-little.md`, section 2.3): CPython's run 300 times
+  CPython's median wall time, each check's 4 times what CPython's callgrind run took,
+  never under 120 s. Past it the run is killed (on Linux with every process it started) and fails
+  with "callgrind did not finish within N s": under `--verify-signal auto` the pass (or
+  that check) then decides on wall time; under `instructions` it is an error. The
+  probe's 3 CPython runs, which set the deadline, now run under `instructions` too.
 - `bench/pydantic_check.py` compiled nothing: its training profile ran without the
   build's `--exclude v1`, so pass 3's winning set was not valid for the build, and the
   CI benchmark timed CPython against CPython. The profile now names the build's excludes,
