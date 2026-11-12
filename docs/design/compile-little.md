@@ -270,7 +270,9 @@ Every callgrind run has a deadline derived from what it measures
 time (the probe's 3 runs, made under `instructions` too), over three times the 60-90x
 slowdown above; each check's compiled copy gets 4 times what CPython's callgrind run took;
 neither less than 120 s, which valgrind's and the interpreter's start alone can take. A run
-past its deadline is killed with every process it started (its own process group) and
+past its deadline, or whose output a process it started still holds open then, is killed
+(on Linux with every process it started: it runs in its own process group, and dies with
+pycc; elsewhere it stays in pycc's group, so Ctrl-C still reaches it) and
 counts as one callgrind cannot run: under `auto` a CPython run so killed sends the pass to
 wall time, a compiled copy's leaves its check to wall time. On GitHub's arm64 runner,
 callgrind ran pypng's training workload past 45 minutes and stalled the whole profile,

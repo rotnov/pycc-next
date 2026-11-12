@@ -316,7 +316,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   runner, valgrind ran pypng's training workload past 45 minutes. Every callgrind run now
   has a deadline (`docs/design/compile-little.md`, section 2.3): CPython's run 300 times
   CPython's median wall time, each check's 4 times what CPython's callgrind run took,
-  never under 120 s. Past it the run is killed with every process it started and fails
+  never under 120 s. Past it the run is killed (on Linux with every process it started) and fails
   with "callgrind did not finish within N s": under `--verify-signal auto` the pass (or
   that check) then decides on wall time; under `instructions` it is an error. The
   probe's 3 CPython runs, which set the deadline, now run under `instructions` too.

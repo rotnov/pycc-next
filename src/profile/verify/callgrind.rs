@@ -8,8 +8,8 @@
 //! So every run gets a deadline: CPython's, [`baseline_deadline`], from
 //! CPython's median wall time for the workload (the probe pass 3 makes
 //! anyway); each check's, [`check_deadline`], from how long CPython's own
-//! callgrind run took. A run past its deadline is killed with every process
-//! it started ([`output_within`]) and is an error, which `auto` turns into a
+//! callgrind run took. A run past its deadline is killed (on Linux, with every process
+//! it started: [`output_within`]) and is an error, which `auto` turns into a
 //! decision on wall time (`baseline`, `counted`).
 
 use super::super::Driver;
@@ -85,10 +85,12 @@ pub(super) fn instructions(
 }
 
 /// `command`'s output, as `Command::output` gives it, or `None` when it had
-/// not exited within `deadline`: then it is killed with every process it
-/// started. On Unix it runs in a process group of its own, which is killed
-/// whole; on Linux it also dies with this process, as its own group no longer
-/// receives the terminal's Ctrl-C.
+/// not exited and closed its output within `deadline`: then it is killed
+/// with every process it started that it can reach. On Linux it runs in a
+/// process group of its own, which is killed whole, and dies with this
+/// process, as its own group no longer receives the terminal's Ctrl-C;
+/// elsewhere it stays in this process's group (no parent-death signal would
+/// clean it up after a Ctrl-C), and only it is killed.
 pub(crate) fn output_within(command: &mut Command, deadline: Duration) -> std::io::Result<Option<Output>> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_group(command);
@@ -97,16 +99,21 @@ pub(crate) fn output_within(command: &mut Command, deadline: Duration) -> std::i
     let stderr = drain(child.stderr.take());
     let started = Instant::now();
     loop {
-        if let Some(status) = child.try_wait()? {
+        // The child is reaped only once its output is closed: a process it
+        // started can hold the pipes past its exit, and the unreaped child
+        // keeps its group's id naming the group until the deadline kills it.
+        if stdout.is_finished()
+            && stderr.is_finished()
+            && let Some(status) = child.try_wait()?
+        {
             let stdout = stdout.join().unwrap_or_default();
             let stderr = stderr.join().unwrap_or_default();
             return Ok(Some(Output { status, stdout, stderr }));
         }
         let elapsed = started.elapsed();
         if elapsed >= deadline {
-            // The group is killed before the child is reaped, so its id
-            // still names it. The readers are left: a process that left the
-            // group could hold the pipes open.
+            // The readers are left: a process outside the group could hold
+            // the pipes open.
             kill_tree(&mut child);
             let _ = child.wait();
             return Ok(None);
@@ -126,11 +133,10 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Ve
     })
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn own_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;
     command.process_group(0);
-    #[cfg(target_os = "linux")]
     {
         unsafe extern "C" {
             fn prctl(option: std::ffi::c_int, ...) -> std::ffi::c_int;
@@ -156,10 +162,10 @@ fn own_group(command: &mut Command) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn own_group(_: &mut Command) {}
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn kill_tree(child: &mut std::process::Child) {
     unsafe extern "C" {
         fn kill(pid: std::ffi::c_int, sig: std::ffi::c_int) -> std::ffi::c_int;
@@ -171,7 +177,7 @@ fn kill_tree(child: &mut std::process::Child) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn kill_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
