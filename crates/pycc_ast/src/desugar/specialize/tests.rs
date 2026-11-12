@@ -270,7 +270,7 @@ fn observed_plan(source: &str, observed: &[Seen<'_>]) -> (ModModule, Vec<Special
             (report.to_string(), types.iter().map(|(p, t)| (p.to_string(), *t)).collect::<Vec<_>>())
         })
     };
-    let (planned, _) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    let (planned, _) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false, &|_, _| false);
     (module, planned)
 }
 
@@ -504,7 +504,7 @@ def f(x: object, n: object, xs: object) -> object:
     let lookup = |name: &str| {
         (name == "f").then(|| ("f".to_string(), vec![("x".to_string(), "float"), ("n".to_string(), "int")]))
     };
-    let (planned, excluded) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    let (planned, excluded) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false, &|_, _| false);
     assert_eq!(planned.len(), 1);
     assert_eq!(planned[0].params, [("x".to_string(), "float")]);
     assert_eq!(
@@ -558,7 +558,7 @@ fn a_builtin_shadowed_by_any_binding_form_is_not_taken_for_the_builtin() {
         let mut module = parse(&source);
         let lookup =
             |name: &str| (name == "f").then(|| ("f".to_string(), vec![("x".to_string(), "str")]));
-        let (planned, _) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+        let (planned, _) = specialize_observed(&mut module, &lookup, &|_| false, &|_| false, &|_, _| false);
         assert_eq!(planned.len(), 1, "{body}");
         let native = module
             .body
@@ -574,7 +574,7 @@ fn a_builtin_shadowed_by_any_binding_form_is_not_taken_for_the_builtin() {
     let source = "def f(x: object, len: object) -> object:\n    for _ in range(2):\n        pass\n    return len(x)\n";
     let mut module = parse(source);
     let lookup = |name: &str| (name == "f").then(|| ("f".to_string(), vec![("x".to_string(), "str")]));
-    specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    specialize_observed(&mut module, &lookup, &|_| false, &|_| false, &|_, _| false);
     let Some(Stmt::FunctionDef(native)) = module.body.iter().find(|s| matches!(s, Stmt::FunctionDef(d) if d.name.as_str().starts_with(NATIVE_PREFIX))) else {
         panic!("the native copy")
     };
@@ -582,7 +582,7 @@ fn a_builtin_shadowed_by_any_binding_form_is_not_taken_for_the_builtin() {
     // The builtin itself keeps the native value.
     let source = "def f(x: object) -> object:\n    for _ in range(2):\n        pass\n    return len(x)\n";
     let mut module = parse(source);
-    specialize_observed(&mut module, &lookup, &|_| false, &|_| false);
+    specialize_observed(&mut module, &lookup, &|_| false, &|_| false, &|_, _| false);
     let Some(Stmt::FunctionDef(native)) = module.body.iter().find(|s| matches!(s, Stmt::FunctionDef(d) if d.name.as_str().starts_with(NATIVE_PREFIX))) else {
         panic!("the native copy")
     };

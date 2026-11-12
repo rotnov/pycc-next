@@ -40,56 +40,64 @@ def scale(xs, k):
 def keep_f(x):
     t = 0.0
     for _ in range(3):
-        t += x
+        if x == x:
+            t += 1.0
     return x
 
 
 def keep_i(x):
     t = 0
     for _ in range(3):
-        t += x
+        if x == x:
+            t += 1
     return x
 
 
 def keep_s(s):
     n = 0
     for _ in s:
-        n += 1
+        if s == s:
+            n += 1
     return s
 
 
 def seek(x, xs, d):
     n = 0
     for _ in range(2):
-        n += 1
+        if x == x:
+            n += 1
     return x in xs, d.get(x), d[x] if x in d else None, [x], (x, x)
 
 
 def hashed(x):
     t = 0.0
     for _ in range(2):
-        t += 1.0
+        if x == x:
+            t += 1.0
     return hash(x)
 
 
 def added(x, other):
     t = 0.0
     for _ in range(2):
-        t += 1.0
+        if x == x:
+            t += 1.0
     return x + other
 
 
 def measured(x, len):
     t = 0.0
     for _ in range(2):
-        t += 1.0
+        if x == x:
+            t += 1.0
     return len(x)
 
 
 def matched(x, v):
     t = 0.0
     for _ in range(2):
-        t += 1.0
+        if x == x:
+            t += 1.0
     match v:
         case len:
             return len(x)
@@ -103,7 +111,8 @@ class Echo(Exception):
 def caught(x, e):
     t = 0.0
     for _ in range(2):
-        t += 1.0
+        if x == x:
+            t += 1.0
     try:
         raise e
     except Echo as len:
@@ -113,50 +122,63 @@ def caught(x, e):
 def plus(x):
     t = 0
     for _ in range(2):
-        t += 1
+        if x == x:
+            t += 1
     return +x
 
 
 def same_i(n):
     t = 0
     for _ in range(2):
-        t += 1
+        if n == n:
+            t += 1
     return +n
 
 
 def stripped(s):
     t = 0
     for _ in range(2):
-        t += 1
+        t += len(s)
     return s.strip()
 
 
 def whole(s):
     t = 0
     for _ in range(2):
-        t += 1
+        t += len(s)
     return s[:]
 
 
 def tail(s):
     t = 0
     for _ in range(2):
-        t += 1
+        t += len(s)
     return s + ''
 
 
 def first(s):
     t = 0
     for _ in range(2):
-        t += 1
+        t += len(s)
     return s[0]
 
 
 def parts(s):
     t = 0
     for _ in range(2):
-        t += 1
+        t += len(s)
     return s.split()
+
+
+# tomli's scanner: `src` meets only the object `pos` and the object
+# `chars`, so a native copy would convert at every step.
+def skip(src, pos, chars):
+    try:
+        while src[pos] in chars:
+            pos += 1
+    except IndexError:
+        pass
+    return pos
 
 
 def last(n, xs):
@@ -192,6 +214,7 @@ for i in range(1200):
     m.tail('abc')
     m.first('abc')
     m.parts('abc')
+    m.skip('  x', 0, frozenset(' '))
 ";
 
 /// Calls on both paths: the observed exact types, other types, a `str`
@@ -259,6 +282,10 @@ print('except', m.caught(nan, m.Echo()) is nan, m.caught(2.5, m.Echo()))
 print('plus', [m.plus(nan)] == [nan], m.plus(nan) is nan, m.same_i(big) is big, m.plus(-2.5))
 print('self', m.stripped(text) is text, m.whole(text) is text, m.tail(text) is text, m.parts(text)[0] is text)
 print('item', [m.first(c) is c for c in [''.join(['a', '']), chr(233), chr(8364), 'xy']])
+show(m.skip, '  \tx', 0, frozenset(' \t'))
+show(m.skip, '   ', 1, frozenset(' '))
+show(m.skip, Loud('ab'), 0, frozenset('A'))
+show(m.skip, 'ab', 'x', frozenset('a'))
 # A parameter bound again in the body is not held to its observed type.
 show(m.last, 0, ['ok'])
 show(m.last, 0, [1, 2])
@@ -341,6 +368,8 @@ fn built(scratch: &Path) -> (std::path::PathBuf, std::path::PathBuf, String) {
         "pkg.m:first".as_ref(),
         "--compile".as_ref(),
         "pkg.m:parts".as_ref(),
+        "--compile".as_ref(),
+        "pkg.m:skip".as_ref(),
         "--types-profile".as_ref(),
         profile.as_os_str(),
     ]);
@@ -358,11 +387,21 @@ fn run(dir: &Path) -> String {
 fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     let scratch = ScratchDir::new("select_types").unwrap();
     let (built, plain, report) = built(&scratch);
-    // `count` is specialized for its two `str`s; `scale`'s list is no type
-    // a native body takes, its float is.
+    // `count` is specialized for its two `str`s. `scale`'s list is no type
+    // a native body takes, and its float only ever meets the list's object
+    // items, so it is not specialized either; nor is `skip`'s `str`, which
+    // meets only the object `pos` and `chars`.
     assert!(report.contains("compiled: pkg.m:count"), "{report}");
     assert!(report.contains("specialized: `count` runs natively when called with s: str, c: str"), "{report}");
-    assert!(report.contains("specialized: `scale` runs natively when called with k: float"), "{report}");
+    for (f, p, ty) in [("scale", "k", "float"), ("skip", "src", "str")] {
+        assert!(
+            report.contains(&format!(
+                "not specialized: `{f}`: parameter `{p}` (observed `{ty}`) meets no native operand in a loop"
+            )),
+            "{report}"
+        );
+        assert!(!report.contains(&format!("specialized: `{f}` runs natively")), "{report}");
+    }
     assert!(report.contains("specialized: `keep_f` runs natively when called with x: float"), "{report}");
     assert!(report.contains("specialized: `keep_s` runs natively when called with s: str"), "{report}");
     // `matched` is not compiled (the checker does not yet take a `case`
@@ -387,6 +426,7 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(out.contains("nan True True 2.5\nbig True 5\n"), "{out}");
     assert!(out.contains("str True x\nseek True n n True True True\n"), "{out}");
     assert!(out.contains("last 'ok'\nlast 2\nlast 0\n"), "{out}");
+    assert!(out.contains("skip 3\nskip 3\nskip 1\nskip TypeError string indices must be integers, not 'str'\n"), "{out}");
     assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\ncase True 7\nexcept True 2.5\nplus True True True -2.5\nself True True True True\n"), "{out}");
     // The module is the one the package's extension serves.
     let o = Command::new(python())

@@ -21,6 +21,11 @@
 //! specializations too is the program's own failure, which the caller (the
 //! fallback loop) handles as before. Attempts that do not depend on each
 //! other run in parallel ([`run_all`], v0.5 accept 4).
+//!
+//! An attempt that passes is not yet the answer when it has a profile's
+//! observed-type copies: a native parameter pays only where a loop computes
+//! with it, and one no loop of its copy does is left an object in the next
+//! attempt ([`idle`], docs/design/call-site-specialization.md).
 
 use crate::frontend::FrontendFailure;
 use pycc_ast::Specialized;
@@ -52,6 +57,10 @@ thread_local! {
     /// Why an observed parameter of a lift was not specialized, by the
     /// lift's report name, in the current attempt.
     static UNOBSERVED: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    /// The observed parameters no loop of their copy computed with
+    /// natively in an attempt that passed, by the lift's report name: the
+    /// next attempt leaves them objects ([`with_specialization`]).
+    static IDLE: RefCell<BTreeMap<String, BTreeSet<String>>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// Records the lifts of the selected functions with observed types, for
@@ -82,6 +91,7 @@ pub(crate) fn reset() {
     PLANNED.with(|planned| planned.borrow_mut().clear());
     PASSED.with(|passed| passed.borrow_mut().clear());
     UNOBSERVED.with(|unobserved| unobserved.borrow_mut().clear());
+    IDLE.with(|idle| idle.borrow_mut().clear());
 }
 
 /// Adds the specializations of the entry module `parsed`, when the current
@@ -92,6 +102,7 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
     }
     let only = ONLY.with(|only| only.borrow().clone());
     let keep = KEEP_BUILTINS.with(|keep| keep.borrow().clone());
+    let idle = IDLE.with(|idle| idle.borrow().clone());
     let planned = DROPPED.with(|dropped| {
         let dropped = dropped.borrow();
         let skip = |qualname: &str| {
@@ -107,6 +118,7 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
                 &|name| lifts.get(name).cloned(),
                 &skip,
                 &|qualname| keep.contains(qualname),
+                &|qualname, param| idle.get(qualname).is_some_and(|params| params.contains(param)),
             );
             UNOBSERVED.with(|cell| *cell.borrow_mut() = unobserved);
             planned
@@ -220,11 +232,12 @@ fn run_all<T: Send>(
         let here = wave.next();
         let dropped = DROPPED.with(|dropped| dropped.borrow().clone());
         let keep = KEEP_BUILTINS.with(|keep| keep.borrow().clone());
+        let idle = IDLE.with(|idle| idle.borrow().clone());
         let fallback = crate::fallback::Snapshot::take();
         crate::timing::span("frontend: attempt wave", || std::thread::scope(|scope| {
             let workers: Vec<_> = wave
                 .map(|job| {
-                    let (dropped, keep) = (dropped.clone(), keep.clone());
+                    let (dropped, keep, idle) = (dropped.clone(), keep.clone(), idle.clone());
                     let fallback = fallback.clone();
                     let moved = job.clone();
                     let worker = std::thread::Builder::new()
@@ -232,6 +245,7 @@ fn run_all<T: Send>(
                         .spawn_scoped(scope, move || {
                             DROPPED.with(|cell| *cell.borrow_mut() = dropped);
                             KEEP_BUILTINS.with(|cell| *cell.borrow_mut() = keep);
+                            IDLE.with(|cell| *cell.borrow_mut() = idle);
                             fallback.install();
                             run(moved, attempt)
                         });
@@ -265,10 +279,16 @@ fn run_all<T: Send>(
 /// `def` holds is pinned on every specialization that fails alone with it,
 /// all tried at once ([`alone`]); only when none does (it takes two of them
 /// together) is one found by halving ([`culprit`]).
+///
+/// An attempt that passes is lowered (`lower`) when it has a profile's
+/// specializations, and an observed parameter that no loop of its copy
+/// computes with natively ([`idle`]) is left an object in the next
+/// attempt, until every one left is used so.
 pub(crate) fn with_specialization<T: Send>(
     entry: &str,
     speculate: bool,
     attempt: impl Fn() -> Result<T, FrontendFailure> + Sync,
+    lower: impl Fn(&T) -> pycc_mir::MirModule,
 ) -> Result<T, FrontendFailure> {
     // The program's result without specializations, and its keys.
     let mut known: Option<(Result<T, FrontendFailure>, BTreeSet<Key>)> = None;
@@ -292,7 +312,17 @@ pub(crate) fn with_specialization<T: Send>(
         let failure = match result {
             Err(failure @ FrontendFailure::Compile { .. }) if !planned.is_empty() => failure,
             result => {
-                if result.is_ok() {
+                if let Ok(program) = &result {
+                    let found = idle(&planned, || lower(program));
+                    if !found.is_empty() {
+                        IDLE.with(|cell| {
+                            let mut cell = cell.borrow_mut();
+                            for (qualname, params) in found {
+                                cell.entry(qualname).or_default().extend(params);
+                            }
+                        });
+                        continue;
+                    }
                     PASSED.with(|passed| *passed.borrow_mut() = planned);
                 }
                 return result;
@@ -341,6 +371,43 @@ pub(crate) fn with_specialization<T: Send>(
             }
         }
     }
+}
+
+/// The specialized parameters of `planned`'s module-level copies
+/// (`Specialized::copy`) that no loop of the copy computes with natively
+/// (`pycc_mir::natively_used`), by report name, from the program `lower`
+/// gives; `lower` runs only when there is such a copy. A `bytearray`'s
+/// native form is its object, so it is never idle.
+fn idle(
+    planned: &[Specialized],
+    lower: impl FnOnce() -> pycc_mir::MirModule,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let judged: Vec<(&Specialized, &String, Vec<String>)> = planned
+        .iter()
+        .filter_map(|spec| {
+            let copy = spec.copy.as_ref()?;
+            let params: Vec<String> = spec
+                .params
+                .iter()
+                .filter(|(_, ty)| *ty != "bytearray")
+                .map(|(param, _)| param.clone())
+                .collect();
+            (!params.is_empty()).then_some((spec, copy, params))
+        })
+        .collect();
+    if judged.is_empty() {
+        return BTreeMap::new();
+    }
+    let mir = crate::timing::span("frontend: native uses", lower);
+    let mut found = BTreeMap::new();
+    for (spec, copy, params) in judged {
+        let used = pycc_mir::natively_used(&mir, copy, &params);
+        let unused: BTreeSet<String> = params.into_iter().filter(|param| !used.contains(param)).collect();
+        if !unused.is_empty() {
+            found.insert(spec.qualname.clone(), unused);
+        }
+    }
+    found
 }
 
 /// Whether the first round runs the program without specializations
