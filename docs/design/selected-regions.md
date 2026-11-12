@@ -238,12 +238,16 @@ Generic lifts are unchanged for every caller outside the region.
   member's module global still holds the compiled function the region was built from. The
   check is one load and compare of a per-region `intact` flag. A `PyDict_Watch` watcher on
   the module's dict clears the flag when any member's key is assigned or deleted (or the
-  dict is cleared), and nothing sets it again. A region whose flag is clear is entered
+  dict is cleared), and nothing sets it again. A `PyFunction_AddWatcher` watcher on each
+  member's function object clears it too, on `PyFunction_EVENT_MODIFY_CODE` (a replaced
+  `__code__`, as `tests/fixtures/direct_calls.py` exercises), `MODIFY_DEFAULTS`,
+  `MODIFY_KWDEFAULTS` and `DESTROY`, so every mutation the per-call cell check detects also
+  closes the region before the next entry. A region whose flag is clear is entered
   through the generic lifts only, so a member patched *before* a call (for example by
   `mock.patch` in a test's setup) behaves exactly as in CPython: no native copy runs and no
   conversion can fail. Only a rebinding made *while* a region call is running reaches the
-  `TypeError` path below, which is what section 6 and the DEVIATIONS row promise. If the
-  watcher cannot be installed (no free watcher id), the region is not formed and its
+  `TypeError` path below, which is what section 6 and the DEVIATIONS row promise. If
+  either watcher cannot be installed (no free watcher id), the region is not formed and its
   members stay generic lifts; `--report-fallbacks` says so.
 - **Inside.** No argument check is needed: a native argument is proven. An `object` argument
   passed to an `object` parameter needs none either.
@@ -334,7 +338,7 @@ number stops the sequence for a measurement and a revision of this plan.
 | PR | change | tests | expected effect |
 |---|---|---|---|
 | R1 | Regions: formation from the selected unit (4.1, without the position-flow callees), `--report-fallbacks` lines `region: m: a, b, c (entries: ...)`, and pass 3 measuring and pruning regions as units (4.7) | unit tests of formation on a fixture module: an edge through a rebound global, a method edge, two components, a self-recursive function; prune tests with a two-member region; `package_check` reports tomli's region | no change in instructions (no code is generated differently); the five packages' selections unchanged or each change explained |
-| R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native, region edges as checked direct calls, `TypeError` on a rebound member's mismatched result; position-flow callees join the region; two DEVIATIONS rows | `tests/select_regions.rs` against CPython: tomli-shaped scanners and tuple-returning parsers; entry with `bool`, an `int` subclass and a big `int`; `mock.patch` of a member before a call (the generic path runs, result matches CPython for both result types) and from inside one (the `TypeError` row); the `intact` flag cleared by assignment, deletion and `dict.clear()`; `RecursionError` depth; a rebound `pos` captured by a lambda or generator expression (late binding, 4.8); traceback function names; `is` of a returned position, matching the DEVIATIONS row | tomli `loads()` <= 2.66M per call locally (`u1`: 2.657M), wall >= 1.33x; `.text` growth reported (`u1`: +16%) |
+| R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native, region edges as checked direct calls, `TypeError` on a rebound member's mismatched result; position-flow callees join the region; two DEVIATIONS rows | `tests/select_regions.rs` against CPython: tomli-shaped scanners and tuple-returning parsers; entry with `bool`, an `int` subclass and a big `int`; `mock.patch` of a member before a call (the generic path runs, result matches CPython for both result types) and from inside one (the `TypeError` row); the `intact` flag cleared by assignment, deletion, `dict.clear()` and a replaced `__code__` or `__defaults__` before a call (CPython's result, no `TypeError`); `RecursionError` depth; a rebound `pos` captured by a lambda or generator expression (late binding, 4.8); traceback function names; `is` of a returned position, matching the DEVIATIONS row | tomli `loads()` <= 2.66M per call locally (`u1`: 2.657M), wall >= 1.33x; `.text` growth reported (`u1`: +16%) |
 | R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6) | `tests/tagged_words.rs` extended with native `int` operands, fast paths on and off, a `str` subclass receiver | about -80K: tomli <= 2.59M; `diff_bisect` (native `int` locals) not slower |
 | R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K: tomli <= 2.45M; `m0` (generic) lower too |
 | R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
