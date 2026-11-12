@@ -29,7 +29,8 @@
  * environment leaves them NULL too (the tests' way to run the helpers).
  *
  * The generated code reads the struct by byte offset; the layout is fixed
- * here and in `fast_ops.rs` (`STR_TYPE`, `INT_TYPE`, `CHARS`, `CLASSES`). The
+ * here and in `fast_ops.rs` (`STR_TYPE`, `INT_TYPE`, `CHARS`, `CLASSES`,
+ * `TUPLE_ITEMS_AT`). The
  * one-character strings are CPython's own cached latin-1 characters, each
  * held by a reference the struct keeps.
  */
@@ -41,6 +42,10 @@ typedef struct {
     /* `pycc_ext_obj_isinstance`'s built-in classes, by its selector, then
      * `set`, `frozenset`, `bytes`, `bytearray` and `NoneType`. */
     PyTypeObject *classes[12];
+    /* Where a `tuple`'s items start (`object_index.c`'s layout probe), for
+     * a tuple display the generated code fills in place
+     * (`pycc_codegen::object_tuple`); 0 when the probe failed. */
+    long long tuple_items_at;
 } PyccExtFast;
 
 static PyccExtFast pycc_ext_fast;
@@ -174,6 +179,9 @@ static void pycc_ext_fast_init(void)
     pycc_ext_fast.classes[9] = &PyBytes_Type;
     pycc_ext_fast.classes[10] = &PyByteArray_Type;
     pycc_ext_fast.classes[11] = Py_TYPE(Py_None);
+    if (pycc_ext_seq_layout > 0 || (pycc_ext_seq_layout == 0 && pycc_ext_seq_probe() > 0)) {
+        pycc_ext_fast.tuple_items_at = (long long)pycc_ext_tuple_items_at;
+    }
     pycc_ext_fast.str_type = &PyUnicode_Type;
     pycc_ext_fast.int_type = &PyLong_Type;
 }

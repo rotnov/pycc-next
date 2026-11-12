@@ -477,6 +477,57 @@ PyObject *pycc_ext_obj_sorted(PyObject *a)
     return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
+/* `sorted(a)` where `a` is the list a generator expression passed to
+ * `sorted` was materialized into (`pycc_ast`'s `FRESH_TARGET_PREFIX`),
+ * which only the call holds: CPython's `sorted` fills one list from the
+ * generator and sorts it, so this one is sorted in place and returned (the
+ * caller then releases its own reference to `a`). Any other case, and a
+ * rebound `sorted`, is `pycc_ext_obj_sorted`'s. */
+PyObject *pycc_ext_obj_sorted_fresh(PyObject *a)
+{
+    static int own;
+
+    if (a == NULL || !PyList_CheckExact(a) || Py_REFCNT(a) != 1
+        || !pycc_ext_builtin_is_own("sorted", NULL, &own)) {
+        return pycc_ext_obj_sorted(a);
+    }
+    pycc_ext_direct_builtin_count++;
+    if (PyList_Sort(a) < 0) {
+        return pycc_ext_stdlib_failed();
+    }
+    return Py_NewRef(a);
+}
+
+/* `tuple(a)` where `a` is a reference the call's own argument produced (a
+ * comprehension, a call): when only the call holds it and it is an exact
+ * list, its items move into the tuple and the list is left empty for the
+ * caller to release, which nothing can tell from copying them (no code runs
+ * between the two). Any other case, and a rebound `tuple`, is
+ * `pycc_ext_obj_tuple`'s. */
+PyObject *pycc_ext_obj_tuple_fresh(PyObject *a)
+{
+    static int own;
+    Py_ssize_t size;
+    PyObject *result;
+
+    if (a == NULL || !PyList_CheckExact(a) || Py_REFCNT(a) != 1
+        || !(pycc_ext_seq_layout > 0 || (pycc_ext_seq_layout == 0 && pycc_ext_seq_probe() > 0))
+        || !pycc_ext_builtin_is_own("tuple", (PyObject *)&PyTuple_Type, &own)) {
+        return pycc_ext_obj_tuple(a);
+    }
+    size = PYCC_SEQ_SIZE(a);
+    result = PyTuple_New(size);
+    if (result == NULL) {
+        return pycc_ext_stdlib_failed();
+    }
+    pycc_ext_direct_builtin_count++;
+    if (size > 0) {
+        memcpy(PYCC_TUPLE_ITEMS(result), PYCC_LIST_ITEMS(a), (size_t)size * sizeof(PyObject *));
+        PYCC_SEQ_SIZE(a) = 0;
+    }
+    return result;
+}
+
 PyObject *pycc_ext_obj_dict(PyObject *a)
 {
     return pycc_ext_stdlib_call("builtins", "dict", a, NULL);

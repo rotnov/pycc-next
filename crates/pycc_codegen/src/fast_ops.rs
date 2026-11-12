@@ -61,10 +61,11 @@ const CHAR_COUNT: u64 = 128;
 /// [`BYTEARRAY`]).
 const CLASSES: u64 = CHARS + CHAR_COUNT * 8;
 const CLASS_COUNT: u64 = 12;
-/// The selectors of `str`, `list`, `tuple`, `set` and `frozenset` in the
+/// The selectors of `str`, `list`, `dict`, `tuple`, `set` and `frozenset` in the
 /// classes.
 pub(crate) const STR: u64 = 1;
 pub(crate) const LIST: u64 = 4;
+pub(crate) const DICT: u64 = 5;
 pub(crate) const TUPLE: u64 = 6;
 pub(crate) const SET: u64 = 7;
 pub(crate) const FROZENSET: u64 = 8;
@@ -74,7 +75,9 @@ pub(crate) const BYTEARRAY: u64 = 10;
 const BYTES_LENGTH: u64 = 16;
 const BYTES_DATA: u64 = 32;
 const BYTEARRAY_START: u64 = 40;
-const FAST_SIZE: u64 = CLASSES + CLASS_COUNT * 8;
+/// Where a `tuple`'s items start, or 0 (`fast_ops.c`'s `tuple_items_at`).
+const TUPLE_ITEMS_AT: u64 = CLASSES + CLASS_COUNT * 8;
+const FAST_SIZE: u64 = TUPLE_ITEMS_AT + 8;
 
 /// The shim's `PyccAsciiMask pycc_ext_ascii_masks[]` (`fast_ops.c`): two
 /// ways per index of `MASK_WAYS`, each entry `MASK_SIZE` bytes: its set, its
@@ -210,6 +213,21 @@ impl<'a, 'ctx> Fast<'a, 'ctx> {
         let ptr = self.context.ptr_type(AddressSpace::default());
         self.load(ptr.into(), self.at(self.fast_global(), offset, name), true, name)
             .into_pointer_value()
+    }
+
+    /// The byte offset of a `tuple`'s first item, requiring the shim to
+    /// have confirmed it (`TUPLE_ITEMS_AT`; 0 with the fast paths off).
+    pub(crate) fn tuple_items_at(&self, name: &str) -> IntValue<'ctx> {
+        let at = self.at(self.fast_global(), TUPLE_ITEMS_AT, &format!("{name}_items_at_field"));
+        let offset = self
+            .load(self.context.i64_type().into(), at, true, &format!("{name}_items_at"))
+            .into_int_value();
+        let known = self
+            .builder
+            .build_int_compare(IntPredicate::NE, offset, self.i64(0), &format!("{name}_items_known"))
+            .expect("icmp");
+        self.require(known, &format!("{name}_items_known"));
+        offset
     }
 
     /// Requires `object` to be non-NULL and an instance of exactly one of

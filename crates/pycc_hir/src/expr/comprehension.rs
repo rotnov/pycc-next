@@ -263,8 +263,30 @@ pub(crate) fn rename_name_in_expr(expr: HirExpr, from: &str, to: &str) -> HirExp
 /// this crate's one and only upstream-crate seam), and `pycc_ast`'s own
 /// `expr_range`/`stmt_range` exist specifically to keep that boundary from
 /// leaking (see their doc comments).
+///
+/// A source name `pycc_ast::is_fresh_target` marks gets
+/// [`FRESH_COMP_VAR_PREFIX`] instead of `0comp_`: the source name is only a
+/// suffix of the result, behind a module key and an offset, so only a tag
+/// at the start says unambiguously where it came from.
 fn synthesize_comp_var_name(target_start: u32, source_name: &str) -> String {
-    COMP_PREFIX.with(|prefix| format!("0comp_{}{target_start}_{source_name}", prefix.borrow()))
+    let tag = if pycc_ast::is_fresh_target(source_name) {
+        FRESH_COMP_VAR_PREFIX
+    } else {
+        "0comp_"
+    };
+    COMP_PREFIX.with(|prefix| format!("{tag}{}{target_start}_{source_name}", prefix.borrow()))
+}
+
+/// The start of a comprehension variable synthesized from a target
+/// `pycc_ast::is_fresh_target` marks ([`is_fresh_comprehension_var`]).
+const FRESH_COMP_VAR_PREFIX: &str = "0fresh_";
+
+/// Whether the comprehension variable `var` comes from the first target of
+/// a generator expression `sorted` was passed, which the desugaring
+/// materialized into a list only `sorted` holds (`pycc_ast::is_fresh_target`).
+#[must_use]
+pub fn is_fresh_comprehension_var(var: &str) -> bool {
+    var.starts_with(FRESH_COMP_VAR_PREFIX) || pycc_ast::is_fresh_target(var)
 }
 
 thread_local! {

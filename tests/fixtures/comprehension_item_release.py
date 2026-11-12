@@ -1,6 +1,8 @@
-# A comprehension that unpacks its item (`for k, v in d.items()`) over an
-# dict's own `items()` releases each item before it advances, so the
-# iterator hands the same pair tuple out again
+# A comprehension that unpacks its item (`for k, v in d.items()`) over a
+# dict's own `items()` releases each item before it advances: two names
+# read only by position are bound straight from the dict
+# (`tests/fixtures/dict_pairs.py`), and any other unpacking target releases
+# the pair tuple, so the iterator hands it out again
 # (docs/design/compile-little.md, section 2.6). An item bound whole, and
 # every other iterable's item, lives until the next one is bound, as in
 # CPython: these cases print when each item is finalized.
@@ -118,6 +120,11 @@ def items_nested(d):
     return [(k, [(a, b) for a, b in v.items()]) for k, v in d.items()]
 
 
+def items_nested_target(d):
+    # Not two names: the pair tuple is unpacked, then released.
+    return [(a, v) for (a, *b), v in d.items()]
+
+
 def items_sorted(d):
     return tuple(sorted((k, v) for k, v in d.items()))
 
@@ -231,6 +238,8 @@ def main():
                   items_views, items_ordered):
             shown(f, dict(d))
     shown(items_nested, {"x": {"a": 1, "b": 2}, "y": {}, "z": {"c": 3}})
+    shown(items_nested_target, {(1, 2): 3, "xy": 4, (5,): 6})
+    shown(items_nested_target, {7: 8})
     for f in (items_whole_replaced, items_whole_named_like_a_temporary, items_whole_kept):
         whole_case(f)
     shown(items_grown, {"a": 1, "b": 2})

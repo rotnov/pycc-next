@@ -79,6 +79,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   With pydantic's three hottest schema functions compiled, the schema phase measures
   about 1.12x CPython locally (1.07x before); `ConfigWrapper.__getattr__` replays at
   14.2M instructions against 46.3M before.
+- More idiom lowerings in non-strict generic bodies (`docs/design/compile-little.md`,
+  section 2.6; `PYCC_NO_FAST_OPS=1` turns each off):
+  - A comprehension that unpacks its item into two names (`[f(k, v) for k, v in src]`)
+    binds them straight from the source. Over `d.items()` of an exact `dict` each step is
+    `PyDict_Next`, with no view, iterator or pair tuple, and the dict iterator's
+    `RuntimeError`s when the dict changes size or keys meanwhile; any other source is
+    iterated and each item unpacked as CPython unpacks it, so an item that is iterable but
+    not subscriptable (an iterator, a set) now unpacks, and one of the wrong length raises
+    CPython's `ValueError`. This replaces the early release of a dict's pair tuples.
+  - `sorted()` of a generator expression sorts the list the generator was materialized
+    into in place, and `tuple()` of a list nothing else holds moves its items into the
+    tuple.
+  - A tuple display with an object element is built by `PyTuple_New` with its items
+    stored in place.
+  pydantic's `_make_json_hashable` replays at 86.1M instructions (120.9M before; the
+  hand-written C, 53.3M) and `_deduplicate_schemas` at 97.3M (132.1M); with the three
+  section 1 functions compiled, the schema phase runs 425.2M instructions against
+  CPython's 558.4M (460.1M before) and measures about 1.18x CPython locally (1.14x before).
 - Generic bodies keep a scanner's `int` position and current one-character `str` as
   machine words (`docs/design/call-site-specialization.md`, "Tagged locals"): an `object` local
   rebound as `x = x ± y` or `c = s[i]` and read as a word (an index into an exact

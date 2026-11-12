@@ -109,7 +109,7 @@ fn flatten_generators(generators: &mut [Comprehension], results: &mut [&mut Expr
             continue;
         }
         let range = generators[index].range;
-        let var = unpack_target_name(fresh);
+        let var = unpack_target_name(fresh, names.len());
         let map: HashMap<String, Expr> = names
             .iter()
             .enumerate()
@@ -149,15 +149,49 @@ fn flatten_generators(generators: &mut [Comprehension], results: &mut [&mut Expr
 /// (`crate::reserved`), so no program can write it.
 pub const UNPACK_TARGET_PREFIX: &str = "_pycc_unpack_";
 
-/// A fresh name for a rewritten tuple target.
-fn unpack_target_name(fresh: &Fresh) -> String {
-    format!("{UNPACK_TARGET_PREFIX}{}", fresh.name().trim_start_matches("_pycc_"))
+/// A fresh name for a rewritten tuple target of `arity` names:
+/// `_pycc_unpack_<arity>_<n>` ([`unpack_target_arity`]).
+fn unpack_target_name(fresh: &Fresh, arity: usize) -> String {
+    format!("{UNPACK_TARGET_PREFIX}{arity}_{}", fresh.name().trim_start_matches("_pycc_"))
 }
 
-/// Whether `name` is the loop variable a tuple target was rewritten to.
+/// How many names the tuple target had that `name` was rewritten from, when
+/// `name` ends with such a rewritten name: a comprehension variable
+/// synthesized from one (`pycc_hir`'s `0comp_..._<source name>`) keeps it
+/// as its suffix. `None` for any other name.
+#[must_use]
+pub fn unpack_target_arity(name: &str) -> Option<usize> {
+    let rest = &name[name.rfind(UNPACK_TARGET_PREFIX)? + UNPACK_TARGET_PREFIX.len()..];
+    let (arity, n) = rest.split_once('_')?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    arity.parse().ok()
+}
+
+/// Whether `name` is the loop variable a tuple target was rewritten to
+/// (marked [`FRESH_TARGET_PREFIX`] or not).
 #[must_use]
 pub fn is_unpack_target(name: &str) -> bool {
-    name.starts_with(UNPACK_TARGET_PREFIX)
+    name.strip_prefix(FRESH_TARGET_PREFIX)
+        .unwrap_or(name)
+        .starts_with(UNPACK_TARGET_PREFIX)
+}
+
+/// The prefix the first target of a generator expression passed to
+/// `sorted` is renamed with when it is materialized ([`materialize_generator`]):
+/// the list the comprehension builds is then the only one `sorted` would
+/// have made, which it may sort in place ([`is_fresh_target`]). Reserved,
+/// like every `_pycc_` name.
+pub const FRESH_TARGET_PREFIX: &str = "_pycc_fresh_";
+
+/// Whether `name` is a target [`FRESH_TARGET_PREFIX`] marks. No program can
+/// write one (`crate::reserved`); a comprehension variable `pycc_hir`
+/// synthesizes from one says so in its own prefix
+/// (`pycc_hir::is_fresh_comprehension_var`).
+#[must_use]
+pub fn is_fresh_target(name: &str) -> bool {
+    name.starts_with(FRESH_TARGET_PREFIX)
 }
 
 /// Rewrites `expr`'s own tuple targets when it is a comprehension.
@@ -184,6 +218,11 @@ pub(super) fn flatten_tuple_targets(expr: &mut Expr, fresh: &Fresh) {
 
 /// The list comprehension a generator-expression argument of the consumer
 /// `consumer` becomes, or `None` when it stays as it is.
+///
+/// For `sorted`, the first target is marked [`FRESH_TARGET_PREFIX`] when it
+/// is a name nothing in the comprehension rebinds: CPython's `sorted` of a
+/// generator sorts the one list it fills from it, so that list may be
+/// sorted in place, where `sorted` of a list display must copy it.
 pub(super) fn materialize_generator(consumer: &str, arg: &Expr) -> Option<Expr> {
     let Expr::Generator(generator) = arg else {
         return None;
@@ -194,12 +233,57 @@ pub(super) fn materialize_generator(consumer: &str, arg: &Expr) -> Option<Expr> 
     if matches!(consumer, "any" | "all") {
         return None;
     }
+    let mut elt = generator.elt.clone();
+    let mut generators = generator.generators.clone();
+    if consumer == "sorted" {
+        mark_fresh(&mut generators, elt.as_mut());
+    }
     Some(Expr::ListComp(ExprListComp {
         node_index: Default::default(),
         range: generator.range,
-        elt: generator.elt.clone(),
-        generators: generator.generators.clone(),
+        elt,
+        generators,
     }))
+}
+
+/// Renames the first target of `generators` (a name) to its
+/// [`FRESH_TARGET_PREFIX`] name in every place it is visible, unless
+/// something there binds the name again.
+fn mark_fresh(generators: &mut [Comprehension], elt: &mut Expr) {
+    let Some(Expr::Name(target)) = generators.first().map(|g| &g.target) else {
+        return;
+    };
+    let name = target.id.to_string();
+    if name.starts_with(FRESH_TARGET_PREFIX) {
+        return;
+    }
+    let mut region_binders: Vec<String> = bound_inside(elt);
+    for (index, generator) in generators.iter().enumerate() {
+        for cond in &generator.ifs {
+            region_binders.extend(bound_inside(cond));
+        }
+        if index > 0 {
+            region_binders.extend(bound_inside(&generator.iter));
+            region_binders.extend(bound_inside(&generator.target));
+        }
+    }
+    if region_binders.contains(&name) {
+        return;
+    }
+    let range = ruff_text_size::Ranged::range(&generators[0].target);
+    let renamed = format!("{FRESH_TARGET_PREFIX}{name}");
+    let map: HashMap<String, Expr> = [(name, load(&renamed, range))].into_iter().collect();
+    let substitute = Substitute { map: &map };
+    generators[0].target = store(&renamed, range);
+    for (index, generator) in generators.iter_mut().enumerate() {
+        if index > 0 {
+            substitute.visit_expr(&mut generator.iter);
+        }
+        for cond in &mut generator.ifs {
+            substitute.visit_expr(cond);
+        }
+    }
+    substitute.visit_expr(elt);
 }
 
 /// The builtins (and `str.join`) whose generator argument is materialized.
