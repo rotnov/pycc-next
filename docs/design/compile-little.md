@@ -272,7 +272,7 @@ of a cold function costs more than its bytecode. So pass 3 checks all the candid
 together and their hot functions (each at least 0.5% and 50 calls on its own) alone, and
 if neither is faster, each region (the candidates connected by calls among them, most
 self time first) is checked the same way alone, then the regions that won are checked
-together once more; at most 8 builds, one of them reserved for that last check before any
+together once more; at most 8 builds (and 8 more to prune the winner, below), one of them reserved for that last check before any
 region is measured. The selection is always exactly one set that was measured as a whole
 and won, never a union of sets measured apart: the smallest winner, unless a larger one
 beats it as above (sets of one size: the one measured first, more self time, unless
@@ -284,9 +284,45 @@ selected its 8 hot functions in one local run and all 30 candidates in the next,
 measured "not faster" (358.6 ms against CPython's 381.7 ms, IQR 342.4-422.7). Each
 function more costs build time, size and risk, so a larger set must earn its place by
 more than noise. When the regions together cannot be built within the budget, or lose,
-the best single winner is kept (a region, a core, or nothing). A function the winner
-leaves out of a set it was measured in is rejected ("faster without it",
-`measured.without`). Pass 3 enforces this structurally:
+the best single winner is kept (a region, a core, or nothing).
+
+**Pruning.** A set wins as a whole, so it can carry members that make the workload
+slower, paid for by the others' gain. pydantic's 9-function hot core won at -4.32% of the
+training workload's instructions (1,573M in CPython), while each of four of its members
+added instructions compiled alone in the schema phase (`GenerateJsonSchema.mode` +8.7M,
+`GenerateJsonSchema._config` +8.8M, `create_schema_validator` +3.5M,
+`_deduplicate_schemas` +0.5M); its four winners alone saved 5.98%. So the winner is then
+pruned (`src/profile/verify/prune.rs`), in two steps:
+
+1. **Leave one out.** Each member, the one with the least self time first, is removed in
+   turn and the set without it measured as a whole against the winner. Measured so on
+   the whole training workload, removing `mode` ran -4.59%, `_config` -4.59% and
+   `create_schema_validator` -4.48%: each better than the winner, none by the 0.5% a
+   removal must save (below), while `_deduplicate_schemas` turned out to pay (-4.28%
+   without it).
+2. **The losers together.** The members whose removal did better at all (counted: fewer
+   instructions; on wall time: a lower median) are removed together and that set
+   measured once more.
+
+The selection becomes the set without the losers only when it beats the winner as a
+larger set must beat a smaller one (`prunes`): counted, it still wins (wall-time veto
+included) and runs at least 0.5% of the workload's instructions fewer than the winner; on
+wall time, its third quartile is under the winner's first quartile and its median saves
+5% of CPython's median more. Else a single removal that beats the winner so, the first
+measured, is selected; else the winner stays whole. A member that pays stays, however
+little, and the losers' removal must pay beyond the noise as a larger set's addition
+must. At most 8 builds more (`MAX_PRUNE_BUILDS`): up to 7 removals, least self time
+first, and the group, so a winner of up to 7 members has every member tried and a
+larger one leaves its members with the most self time, the best evidence that they pay,
+untried; the members of a carried winning set are never tried. Each pruned set is
+measured as a whole, so the selection is still one set measured as a whole that won, and
+a removal that does not pay is never selected. Pass 3 prints each removal with both
+sets' instructions (or wall times), whether it did better, and which members were
+dropped.
+
+A function the winner leaves out of a set it was measured in is rejected ("faster
+without it", `measured.without`, with the selection's instructions in
+`measured.without_instructions` when counted). Pass 3 enforces this structurally:
 - **Every build is checked against its request.** The functions a check's build compiled
   (its `compiled:` report) must equal the set it was asked for, compared as sets. A
   missing member is refused and the rest built again. An extra (for example from a copied

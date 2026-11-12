@@ -45,6 +45,7 @@ fn slower() -> Measured {
         cpython_instructions: None,
         refused: None,
         without: None,
+        without_instructions: None,
     }
 }
 
@@ -374,7 +375,7 @@ fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
     let (candidates, regions, core) = regions_of(&["a", "b", "c"]);
     let mut asked = Vec::new();
     let mut run = fake(60, &mut asked);
-    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 6, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 6, 0, &mut run).unwrap();
     drop(run);
     let asked = asked;
     // All (lost), its core (lost), region a and its core, region b (its
@@ -399,7 +400,7 @@ fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
     // With a budget that leaves no build for the union, still one region.
     let mut asked = Vec::new();
     let mut run = fake(60, &mut asked);
-    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 5, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 5, 0, &mut run).unwrap();
     drop(run);
     assert_eq!(builds, 4);
     assert_eq!(compiled(&verdicts), a);
@@ -407,7 +408,7 @@ fn the_selection_is_always_a_set_measured_as_a_whole_that_won() {
     // measured as a whole.
     let mut asked = Vec::new();
     let mut run = fake(10, &mut asked);
-    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 6, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 6, 0, &mut run).unwrap();
     drop(run);
     assert_eq!(compiled(&verdicts), union);
     assert!(asked.contains(&union));
@@ -420,7 +421,7 @@ fn the_faster_of_the_whole_set_and_its_core_is_selected() {
     let (candidates, regions, core) = regions_of(&["a", "b"]);
     let mut asked = Vec::new();
     let mut run = fake(0, &mut asked);
-    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, 0, &mut run).unwrap();
     drop(run);
     // All: 60 ms; the core: 70 ms.
     assert_eq!(builds, 2);
@@ -439,7 +440,7 @@ fn the_faster_of_the_whole_set_and_its_core_is_selected() {
             })
         })
     };
-    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, 0, &mut run).unwrap();
     assert_eq!(compiled(&verdicts), core);
     assert_eq!(verdicts[&k("a_cold")].without, Some([69, 70, 71]));
     assert_eq!(verdicts[&k("a_cold")].compiled_ns, [84, 85, 86]);
@@ -460,11 +461,12 @@ fn an_earlier_winning_set_is_in_every_set_measured_and_stays_when_nothing_wins()
         cpython_instructions: None,
         refused: None,
         without: None,
+        without_instructions: None,
     };
     let base: BTreeMap<FunctionKey, Measured> = [(k("x"), earlier.clone())].into_iter().collect();
     let mut asked = Vec::new();
     let mut run = fake(0, &mut asked);
-    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, 0, &mut run).unwrap();
     drop(run);
     assert!(asked.iter().all(|set| set.contains(&k("x"))), "{asked:?}");
     let mut all: BTreeSet<FunctionKey> = candidates.iter().cloned().collect();
@@ -480,7 +482,7 @@ fn an_earlier_winning_set_is_in_every_set_measured_and_stays_when_nothing_wins()
             instructions: None,
         }))
     };
-    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, &mut slower).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, 0, &mut slower).unwrap();
     assert_eq!(compiled(&verdicts), [k("x")].into_iter().collect());
     assert_eq!(verdicts[&k("x")], earlier);
     assert!(!verdicts[&k("a_hot")].compiled);
@@ -500,6 +502,7 @@ fn a_carried_set_with_a_refused_member_is_invalid_whole() {
         cpython_instructions: None,
         refused: None,
         without: None,
+        without_instructions: None,
     };
     let base: BTreeMap<FunctionKey, Measured> = [(k("a"), won.clone()), (k("b"), won)].into_iter().collect();
     let candidates = vec![k("c")];
@@ -511,7 +514,7 @@ fn a_carried_set_with_a_refused_member_is_invalid_whole() {
         }
         Ok(Ok(Check { cpython: [90, 100, 110], compiled: [119, 120, 121], instructions: None }))
     };
-    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &base, 8, 0, &mut run).unwrap();
     assert!(compiled(&verdicts).is_empty(), "{verdicts:?}");
     assert_eq!(verdicts[&k("b")].refused.as_deref(), Some("refused"));
 }
@@ -533,7 +536,7 @@ fn a_build_that_compiles_more_than_asked_refuses_the_measurement() {
         asked += 1;
         Ok(Err(refusals(set, report)))
     };
-    let (verdicts, builds) = decide(&candidates, &regions, &BTreeSet::new(), &BTreeMap::new(), 8, &mut run).unwrap();
+    let (verdicts, builds) = decide(&candidates, &regions, &BTreeSet::new(), &BTreeMap::new(), 8, 0, &mut run).unwrap();
     assert_eq!(builds, 1);
     assert!(compiled(&verdicts).is_empty(), "{verdicts:?}");
 }
@@ -577,6 +580,7 @@ fn the_selection_is_always_one_valid_measured_winner_and_the_build_compiles_it()
             cpython_instructions: None,
             refused: None,
             without: None,
+            without_instructions: None,
         };
         let won = Measured { compiled_ns: [won.compiled_ns[0] - 1, won.compiled_ns[0], won.compiled_ns[0] + 1], ..won };
         let base: BTreeMap<FunctionKey, Measured> = if carried {
@@ -585,6 +589,7 @@ fn the_selection_is_always_one_valid_measured_winner_and_the_build_compiles_it()
             BTreeMap::new()
         };
         let budget = 1 + rng.below(9) as usize;
+        let prune = rng.below(4) as usize;
         // Every set timed, whether it won; every function refused.
         let mut timed: Vec<(BTreeSet<FunctionKey>, bool)> = Vec::new();
         let mut refused: BTreeSet<FunctionKey> = BTreeSet::new();
@@ -609,8 +614,8 @@ fn the_selection_is_always_one_valid_measured_winner_and_the_build_compiles_it()
             timed.push((set.clone(), ms < 90));
             Ok(Ok(Check { cpython: [90, 100, 110], compiled: [ms - 1, ms, ms + 1], instructions: None }))
         };
-        let (verdicts, builds) = decide(&candidates, &regions, &core, &base, budget, &mut run).unwrap();
-        assert!(builds <= budget, "case {case}");
+        let (verdicts, builds) = decide(&candidates, &regions, &core, &base, budget, prune, &mut run).unwrap();
+        assert!(builds <= budget + prune, "case {case}");
         let selected = compiled(&verdicts);
         let base_set: BTreeSet<FunctionKey> = base.keys().cloned().collect();
         let valid = |set: &BTreeSet<FunctionKey>| set.is_disjoint(&refused);
@@ -717,7 +722,7 @@ fn overlapping_winners_select_the_smaller_set_every_run() {
             let compiled = if set.len() == 1 { alone_ns } else { region_ns };
             Ok(Ok(Check { cpython: [4800, 4890, 4950], compiled, instructions: None }))
         };
-        let (verdicts, builds) = decide(&region, std::slice::from_ref(&region), &core, &BTreeMap::new(), 8, &mut run).unwrap();
+        let (verdicts, builds) = decide(&region, std::slice::from_ref(&region), &core, &BTreeMap::new(), 8, 0, &mut run).unwrap();
         assert_eq!(builds, 2);
         compiled(&verdicts)
     };
@@ -744,7 +749,7 @@ fn overlapping_winners_select_the_smaller_set_every_run() {
         };
         Ok(Ok(Check { cpython: [90, 100, 110], compiled: [ms - 6, ms, ms + 6], instructions: None }))
     };
-    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, MAX_PRUNE_BUILDS, &mut run).unwrap();
     assert_eq!(compiled(&verdicts), [k("b_hot")].into_iter().collect());
 }
 
@@ -776,7 +781,7 @@ fn counted_checks_select_the_same_set_whatever_the_wall_times() {
                 }))
             };
             let (verdicts, _) =
-                decide(&region, std::slice::from_ref(&region), &core, &BTreeMap::new(), 8, &mut run).unwrap();
+                decide(&region, std::slice::from_ref(&region), &core, &BTreeMap::new(), 8, MAX_PRUNE_BUILDS, &mut run).unwrap();
             picks.insert(compiled(&verdicts));
         }
         assert_eq!(picks.len(), 1, "{picks:?}");
@@ -809,7 +814,7 @@ fn counted_a_set_slower_in_wall_time_is_rejected() {
             instructions: Some(Instructions { cpython: 1_000_000, compiled }),
         }))
     };
-    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, &mut run).unwrap();
+    let (verdicts, _) = decide(&candidates, &regions, &core, &BTreeMap::new(), 8, MAX_PRUNE_BUILDS, &mut run).unwrap();
     assert_eq!(compiled(&verdicts), core);
     assert_eq!(verdicts[&k("a_hot")].instructions, Some(-100_000));
     assert_eq!(verdicts[&k("a_hot")].cpython_instructions, Some(1_000_000));

@@ -28,6 +28,20 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- `pycc profile`'s pass 3 prunes its winning set (`docs/design/compile-little.md`,
+  section 2.3): each member, least self time first, is removed in turn and the set
+  without it measured as a whole against the winner, then the members whose removal did
+  better at all are removed together and that set measured once more. The selection
+  drops them only when the set without them beats the winner as a larger set must beat a
+  smaller one (counted: 0.5% of the workload's instructions fewer, with the wall-time
+  veto; on wall time: apart beyond the noise and 5% of CPython's median faster); else a
+  single removal that does; else the winner stays whole. At most 8 builds more
+  (`MAX_PRUNE_BUILDS`: 7 removals and the group); pass 3 prints each removal and which
+  members were dropped, and a dropped function's rejection names both sets'
+  instructions. On pydantic's training workload no single removal saves 0.5%, but
+  `GenerateJsonSchema.mode`, `GenerateJsonSchema._config` and `create_schema_validator`
+  together save 0.88%: the selection goes from 9 functions at -4.31% of the
+  instructions to 6 at -5.19% (pass 3: 11 builds, 296 s).
 - A profile's observed type specializes a parameter only where a loop of the function
   computes with its native value (`docs/design/call-site-specialization.md`): an
   operation whose other operand is an object converts on every iteration, which the

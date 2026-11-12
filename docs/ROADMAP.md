@@ -147,6 +147,15 @@ Accept (carried over from v0.11, not met there):
    tomli's ten is specialized now, and pass 3 keeps its 19 hot functions at -14.5% of
    the workload's instructions; `diff_bisect` keeps `text1: str, text2: str`
    (the design's call-site-specialization record).
+   **Status (pass 3 prunes its winner):** pass 3 removes each member of the winning set
+   in turn, then the members whose removal did better together, and keeps a removal only
+   when it beats the winner by the bar a larger set must clear (the design's section
+   2.3). pydantic's training profile now selects 6 functions at -5.19% of the training
+   workload's instructions instead of 9 at -4.31% (`mode`, `_config` and
+   `create_schema_validator` dropped); locally the schema phase runs 462M instructions
+   against CPython's 560M (9 functions: 479M), and 31 interleaved fresh-process rounds put
+   schema at 1.16x CPython (9 functions: 0.99x). The schema bar (>= 1.15x) awaits
+   `bench.yml` on both runners.
 
    Every step reports wall time, instructions, I1 misses and branch mispredictions, and the
    extension's size (the design's section 3). The three suites fail no test that passes

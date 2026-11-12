@@ -107,6 +107,10 @@ pub(crate) struct Measured {
     /// the selection winning without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) without: Option<[u64; 3]>,
+    /// The selected set's instructions (as `instructions`), when `without`
+    /// is recorded and both checks were counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) without_instructions: Option<i64>,
 }
 
 impl Measured {
@@ -122,6 +126,7 @@ impl Measured {
             cpython_instructions: None,
             refused: Some(reason),
             without: None,
+            without_instructions: None,
         }
     }
 
@@ -131,6 +136,17 @@ impl Measured {
             return format!("not compiled: {reason}");
         }
         let ms = |ns: u64| ns as f64 / 1e6;
+        if let (Some(_), Some(left_out), Some(with), Some(cpython)) =
+            (self.without, self.without_instructions, self.instructions, self.cpython_instructions)
+        {
+            let percent = |delta: i64| delta as f64 * 100.0 / cpython.max(1) as f64;
+            return format!(
+                "faster without it: the workload ran {:+.2}% instructions with a measured set of candidates that leaves it out compiled, against {:+.2}% with it and {} other functions",
+                percent(left_out),
+                percent(with),
+                self.with - 1,
+            );
+        }
         if let Some(without) = self.without {
             return format!(
                 "faster without it: the workload took {:.1} ms with a measured set of candidates that leaves it out compiled, against {:.1} ms with it and {} other functions",
