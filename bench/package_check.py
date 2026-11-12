@@ -339,7 +339,8 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
         include += [arg for e in pkg.excludes for arg in ("--exclude", e)]
         r = subprocess.run([a.pycc, "profile", str(target), "-o", str(profile), *include, "--",
                             sys.executable, str(train), str(plain)], cwd=cwd,
-                           capture_output=True, text=True, timeout=900)
+                           # Pass 3 may take up to MAX_PRUNE_BUILDS extra builds.
+                           capture_output=True, text=True, timeout=2700)
         if r.returncode != 0:
             print(r.stdout + r.stderr)
             print(f"FAIL: pycc profile of {pkg.name}'s test suite failed")
