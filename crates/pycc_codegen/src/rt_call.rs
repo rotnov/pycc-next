@@ -179,9 +179,12 @@ pub(super) fn emit_rt_call<'ctx>(
     } else {
         ty_to_basic_type(context, sig.ret.clone()).fn_type(&param_types, false)
     };
-    let function = module.get_function(sig.symbol).unwrap_or_else(|| {
+    // `tuple()` of a list only the call holds, `sorted()` of a generator
+    // expression's list: their own helpers (`object_tuple::fresh_symbol`).
+    let symbol = crate::object_tuple::fresh_symbol(call).unwrap_or(sig.symbol);
+    let function = module.get_function(symbol).unwrap_or_else(|| {
         module.add_function(
-            sig.symbol,
+            symbol,
             fn_type,
             Some(inkwell::module::Linkage::External),
         )

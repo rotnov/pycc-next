@@ -414,8 +414,9 @@ pub(crate) fn host_glibc_version() -> Option<String> {
 /// masks they computed (`src/ext/module/fast_ops.c`), and how many dict
 /// misses went straight to a handler (`src/ext/module/object_index.c`), how
 /// many `tuple()`/`list()`/`sorted()` calls skipped the call through the builtin
-/// (`src/ext/module/object_stdlib.c`) and how many comprehensions released
-/// their items early (`src/ext/module/object_protocols.c`).
+/// (`src/ext/module/object_stdlib.c`), and how many steps of a two-name
+/// comprehension read an exact dict's entries straight
+/// (`src/ext/module/object_pairs.c`).
 pub(crate) const RUNTIME_COUNTERS: [&str; 19] = [
     "pycc_rt_str_live_objects",
     "pycc_rt_list_live_objects",
@@ -435,5 +436,5 @@ pub(crate) const RUNTIME_COUNTERS: [&str; 19] = [
     "pycc_ext_ascii_mask_fill_count",
     "pycc_ext_lazy_misses",
     "pycc_ext_direct_builtins",
-    "pycc_ext_item_recycles",
+    "pycc_ext_dict_pair_steps",
 ];

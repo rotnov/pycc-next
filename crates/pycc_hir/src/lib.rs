@@ -100,6 +100,8 @@ pub use program::{
 /// The callee of a nested function used as a value (`pycc_ast::desugar`).
 pub use pycc_ast::CLOSURE_MARKER;
 pub use pycc_ast::function_qualname;
+pub use expr::comprehension::is_fresh_comprehension_var;
+pub use pycc_ast::unpack_target_arity;
 pub use pycc_ast::namespace;
 pub use return_coverage::{block_always_returns, block_never_completes, loop_never_ends_normally};
 pub use stmt::del::{deleted_names, mentioned_names};

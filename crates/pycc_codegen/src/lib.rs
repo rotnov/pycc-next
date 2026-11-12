@@ -123,6 +123,8 @@ mod object_box;
 mod object_coerce;
 mod tuple_rebox;
 mod object_comprehension;
+mod object_pairs;
+mod object_tuple;
 mod native_operand;
 mod object_rc;
 mod str_inline;
