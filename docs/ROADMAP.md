@@ -47,7 +47,12 @@ Accept (carried over from v0.12, not met there):
    pypng's two reads and tomli's `loads` at least as fast relative to CPython as in bench
    run 41750538464 at 0f97b93 (pypng five filters 10.42x / 17.20x, PngSuite 3.10x /
    3.69x; tomli 1.70x / 1.49x). v0.12: pypng 2.02x / 1.95x and 1.24x / 1.20x, tomli
-   1.42x / 1.31x.
+   1.42x / 1.31x. The plan: [selected-regions](design/selected-regions.md), native calls
+   inside a region of selected functions, PRs R1-R6. Measured locally: a hand-written region
+   takes `loads()` from 2.808M to 2.657M instructions (old build 2.427M, CPython 4.082M).
+   With native `int` operands in the `str` word paths and character-class tests that make no
+   character object, it is projected at about 2.37-2.41M: accept 2 is met only with all
+   three, by a few percent.
 3. **Hold v0.12's met targets** in `bench.yml` on both runners: pydantic
    `model_json_schema()` >= 1.15x (v0.12: 1.20x / 1.23x), model definition >= 1.0x
    (1.00x / 1.01x), whole process >= 1.0x (1.07x / 1.07x); mistune's and pystache's
