@@ -265,6 +265,17 @@ CPython's 14212 ms. Under `auto`, a single check whose compiled copy callgrind c
 decided on its own wall times the same way. `--verify-signal instructions` makes counting
 an error when it fails, `wall` never counts.
 
+Every callgrind run has a deadline derived from what it measures
+(`src/profile/verify/callgrind.rs`): CPython's run gets 300 times CPython's median wall
+time (the probe's 3 runs, made under `instructions` too), over three times the 60-90x
+slowdown above; each check's compiled copy gets 4 times what CPython's callgrind run took;
+neither less than 120 s, which valgrind's and the interpreter's start alone can take. A run
+past its deadline is killed with every process it started (its own process group) and
+counts as one callgrind cannot run: under `auto` a CPython run so killed sends the pass to
+wall time, a compiled copy's leaves its check to wall time. On GitHub's arm64 runner,
+callgrind ran pypng's training workload past 45 minutes and stalled the whole profile,
+where the pass decided on wall time had taken 17 s.
+
 A region pulls its cold functions in only when that pays. Measured on diff-match-patch's
 diff_main (best of 3), CPython took 4.89 s, `diff_bisect` alone compiled 1.75 s (2.8x),
 its whole region compiled 1.88 s (2.6x) and `--select all` 2.11 s (2.3x): a generic lift

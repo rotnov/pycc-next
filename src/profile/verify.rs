@@ -44,10 +44,11 @@
 
 use super::{Driver, FunctionKey, Measured, Profile};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+mod callgrind;
 mod copy;
 mod prune;
 pub(crate) use copy::copy_package;
@@ -249,22 +250,30 @@ pub(super) fn verify(
     Ok(())
 }
 
+/// CPython's count of the training workload's instructions, for the whole
+/// pass, and the deadline of each check's callgrind run.
+#[derive(Debug, Clone, Copy)]
+struct Baseline {
+    instructions: u64,
+    deadline: Duration,
+}
+
 /// CPython's instructions for the training workload, once for the whole
 /// pass, when its checks count them ([`Signal`]): under `auto`, when the
 /// median of [`PROBE_RUNS`] CPython runs is short enough
-/// ([`counts_instructions`]) and callgrind runs the workload; else `None`,
+/// ([`counts_instructions`]) and callgrind runs the workload within its
+/// deadline ([`callgrind::baseline_deadline`] of that median); else `None`,
 /// and the checks are decided on wall time.
-fn baseline(cx: &Context<'_>) -> Result<Option<u64>, String> {
+fn baseline(cx: &Context<'_>) -> Result<Option<Baseline>, String> {
     let signal = cx.options.signal;
     if signal == Signal::Wall {
         return Ok(None);
     }
     let out = cx.scratch.join("baseline.json");
+    // Under `instructions` too: the median sets the callgrind run's deadline.
     let mut wall = Vec::new();
-    if signal == Signal::Auto {
-        for _ in 0..PROBE_RUNS {
-            wall.push(time(cx.driver, &out, cx.workload)?);
-        }
+    for _ in 0..PROBE_RUNS {
+        wall.push(time(cx.driver, &out, cx.workload)?);
     }
     let median = quartiles(&wall)[1];
     if !counts_instructions(signal, median) {
@@ -274,10 +283,16 @@ fn baseline(cx: &Context<'_>) -> Result<Option<u64>, String> {
         );
         return Ok(None);
     }
-    match instructions(cx.driver, &out, cx.workload) {
-        Ok(n) => {
-            eprintln!("pycc profile: pass 3 decides on instruction counts: CPython runs the workload in {n} instructions");
-            Ok(Some(n))
+    match callgrind::instructions(cx.driver, &out, cx.workload, callgrind::baseline_deadline(median)) {
+        Ok((n, took)) => {
+            eprintln!(
+                "pycc profile: pass 3 decides on instruction counts: CPython runs the workload in {n} instructions ({:.1} s under callgrind)",
+                took.as_secs_f64()
+            );
+            Ok(Some(Baseline {
+                instructions: n,
+                deadline: callgrind::check_deadline(took),
+            }))
         }
         Err(why) if signal == Signal::Auto => {
             let why = why.lines().next().unwrap_or_default();
@@ -291,9 +306,9 @@ fn baseline(cx: &Context<'_>) -> Result<Option<u64>, String> {
 /// A check's instructions from CPython's count and the compiled copy's
 /// callgrind run (`None` when the pass does not count). Under `auto`, a
 /// compiled copy callgrind cannot run (a deadline its slowdown misses, its
-/// memory) leaves the check to its wall times, as a CPython run that cannot
-/// be counted leaves the whole pass ([`baseline`]); under `instructions` it
-/// is an error.
+/// memory, its callgrind run's own deadline) leaves the check to its wall
+/// times, as a CPython run that cannot be counted leaves the whole pass
+/// ([`baseline`]); under `instructions` it is an error.
 pub(super) fn counted(
     signal: Signal,
     run: Option<(u64, Result<u64, String>)>,
@@ -637,9 +652,10 @@ impl<'r, 's> Pass<'r, 's> {
 
 /// Builds exactly `set` into a copy of the package and times the workload
 /// against it and against the sources, and, given CPython's instruction
-/// count (`baseline`), counts the compiled copy's; or, when the build leaves
+/// count and the deadline of the compiled copy's callgrind run (`baseline`),
+/// counts the compiled copy's; or, when the build leaves
 /// a function of `set` bytecode, those functions and why, untimed.
-fn check(set: &BTreeSet<FunctionKey>, cx: &Context<'_>, builds: usize, baseline: Option<u64>) -> Outcome {
+fn check(set: &BTreeSet<FunctionKey>, cx: &Context<'_>, builds: usize, baseline: Option<Baseline>) -> Outcome {
     let dir = cx.scratch.join(format!("verify{builds}"));
     let copy = copy_package(cx.driver.pkg, &dir.join("tree"), &cx.options.include)?;
     let refused = build(&copy, set, cx)?;
@@ -676,7 +692,10 @@ fn check(set: &BTreeSet<FunctionKey>, cx: &Context<'_>, builds: usize, baseline:
     }
     let instructions = counted(
         cx.options.signal,
-        baseline.map(|cpython| (cpython, instructions(&compiled, &out, cx.workload))),
+        baseline.map(|b| {
+            let run = callgrind::instructions(&compiled, &out, cx.workload, b.deadline);
+            (b.instructions, run.map(|(n, _)| n))
+        }),
     )?;
     let c = Check {
         cpython: quartiles(&plain),
@@ -752,27 +771,6 @@ fn unpatchable(stderr: &[u8]) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-/// One run of the workload under callgrind: its instruction count.
-fn instructions(driver: &Driver<'_>, out: &Path, workload: &[OsString]) -> Result<u64, String> {
-    let file = format!("--callgrind-out-file={}", out.with_extension("cg").display());
-    let wrapper: [&OsStr; 3] = ["valgrind".as_ref(), "--tool=callgrind".as_ref(), file.as_ref()];
-    let output = driver
-        .command("time", out, &[], workload, &wrapper)
-        .env("PYCC_REQUIRE_PATCH", "1")
-        .output()
-        .map_err(|e| format!("counting instructions needs valgrind: {e}"))?;
-    let _ = std::fs::remove_file(out.with_extension("cg"));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() {
-        unpatchable(&output.stderr)?;
-        return Err(format!("the profile's time pass under callgrind failed ({}):\n{stderr}", output.status));
-    }
-    stderr
-        .lines()
-        .find_map(|line| line.split_once("Collected :").and_then(|(_, n)| n.trim().parse().ok()))
-        .ok_or_else(|| "callgrind reported no instruction count".to_string())
 }
 
 /// `pycc build COPY --ext --non-strict --release --select none --compile
