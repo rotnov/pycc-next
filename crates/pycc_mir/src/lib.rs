@@ -38,6 +38,8 @@ pub use obj_compare::{ObjBuiltinClass, ObjIsInstanceClass};
 /// The prefix of a native specialization's name: `pycc_ast::NATIVE_PREFIX`,
 /// which this crate does not depend on (the driver checks they agree).
 pub const NATIVE_PREFIX: &str = "_pycc_native_";
+mod native_uses;
+pub use native_uses::natively_used;
 mod receiver_exact;
 mod set_ops;
 pub use set_ops::{SetElementOps, SetEqOp, SetHashOp};
