@@ -1,9 +1,12 @@
 # `tuple(a)`, `list(a)` and `sorted(a)` of an object run what the builtins
 # run without the call through them (docs/design/compile-little.md, section
-# 2.6). Each still copies its argument, also when that is a list only the
-# call itself holds: these cases print what would show a list reused
-# (identity, aliasing, what a comparison sees through `gc`, the order a
-# failed sort leaves the elements' finalizers in).
+# 2.6). `sorted()` of a list display or comprehension still copies it, as
+# CPython does, and so does `list()` of any list: these cases print what
+# would show a list reused (identity, aliasing, what a comparison sees
+# through `gc`, the order a failed sort leaves the elements' finalizers
+# in). Only `sorted()` of a generator expression sorts its own list in
+# place, and `tuple()` of a list nothing else holds moves its items, as
+# neither can be seen (`tests/fixtures/dict_pairs.py`).
 import gc
 class Tracked(list):
     pass

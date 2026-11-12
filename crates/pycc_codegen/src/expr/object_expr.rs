@@ -217,6 +217,10 @@ pub(crate) fn emit_obj_subscript_expr<'ctx>(
     let MirExpr::ObjSubscript { base, index } = expr else {
         unreachable!()
     };
+    // A half of a two-name comprehension target (`object_pairs`).
+    if let Some(half) = crate::object_pairs::pair_read(context, builder, rt, locals, base, index) {
+        return half;
+    }
     let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
     let held_base = object_release::hold(context, module, rt, base, &base_scalar);
     if let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, index) {

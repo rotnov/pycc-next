@@ -187,6 +187,7 @@ pub(super) fn emit_list<'ctx>(
 /// Emits a tuple, set or dict display with an object element (non-strict
 /// mode, #3) as the CPython container, exactly as [`emit_list`] emits a list:
 /// `pycc_ext_obj_build_display` consumes every packed element on every path.
+/// A tuple is filled in place where it can be (`object_tuple`).
 pub(super) fn emit_display<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -195,6 +196,9 @@ pub(super) fn emit_display<'ctx>(
     kind: pycc_mir::ObjDisplayKind,
     elements: &[Scalar<'ctx>],
 ) -> Scalar<'ctx> {
+    if kind == pycc_mir::ObjDisplayKind::Tuple && !elements.is_empty() {
+        return crate::object_tuple::emit_tuple_display(context, builder, module, rt, elements);
+    }
     let edge = ForeignFailEdge::for_current(builder);
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i64_type = context.i64_type();

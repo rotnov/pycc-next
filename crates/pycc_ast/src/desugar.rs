@@ -111,7 +111,7 @@ mod wildcard;
 
 use ruff_python_ast::{Expr, ModModule, Stmt};
 
-pub use comps::{UNPACK_TARGET_PREFIX, is_unpack_target};
+pub use comps::{FRESH_TARGET_PREFIX, UNPACK_TARGET_PREFIX, is_fresh_target, is_unpack_target, unpack_target_arity};
 pub use closures::qualname::function_qualname;
 pub use dataclasses::start_program;
 pub use aliases::module_lambda_aliases;

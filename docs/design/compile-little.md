@@ -475,27 +475,56 @@ Other idioms join this table only with a measured win on a profiled function.
 
 - `tuple(a)`, `list(a)` and `sorted(a)` run `PySequence_Tuple`, `PySequence_List` and
   `PyList_Sort` directly when the builtin read on their first call is CPython's own, and
-  call the builtin otherwise. Each still makes the builtin's copy. Reusing a list only the
-  call holds (sorting it in place) was built and withdrawn: while `sorted` sorts its copy
-  the argument stays whole, which code run by a comparison can see (`gc.get_referrers`),
-  and which a failed sort leaves in its own order for its elements' finalizers. Restricted
-  to lists whose sort runs no Python code, it saved 2M of `_make_json_hashable`'s 118M
-  instructions, too little for the extra case.
-- A comprehension that unpacks its item (`for k, v in d.items()`) over a dict's own
-  `items()` releases each item before it advances, kept or filtered out, so the iterator
-  hands the same pair tuple out again, as it does in CPython, where the pair is gone once
-  unpacked. Only that iterator: advancing it runs no Python code of its own. An item bound
-  whole (`for pair in d.items()`), and every other iterable's item, lives until the next
-  one is bound. The desugaring that rewrites the tuple target marks it
-  (`pycc_ast::is_unpack_target`) and the comprehension carries the mark (`unpacks`); a
-  comprehension assigned by a statement of its own (`xs = [... for k, v in ...]`) does
-  not carry it yet and keeps each item.
+  call the builtin otherwise. `list(a)` always copies, and so does `sorted()` of a list
+  display, a comprehension or a variable: while `sorted` sorts its copy the argument stays
+  whole, which code run by a comparison can see (`gc.get_referrers`), and which a failed
+  sort leaves in its own order for its elements' finalizers.
+- `sorted()` of a generator expression sorts the list the generator was materialized into
+  in place (`pycc_ext_obj_sorted_fresh`): CPython's own `sorted` fills a new list from the
+  generator and sorts that, so no other list exists to be seen. The desugaring that
+  materializes the generator renames its first target with a reserved prefix
+  (`pycc_ast::is_fresh_target`), and the comprehension variable synthesized from it starts
+  with a tag of its own (`pycc_hir::is_fresh_comprehension_var`), so a program's own name
+  can never pass for the mark; at run time the list must also be exact, held once and the
+  builtin CPython's own, or the call copies as before.
+- `tuple(a)` of a list nothing else holds (a comprehension, `sorted(...)`, a call: not a
+  variable) moves the list's items into the new tuple (`pycc_ext_obj_tuple_fresh`), at the
+  item offset the layout probe confirmed; anything else goes through `PySequence_Tuple`.
+- A tuple display with an object element (`(k, f(v))`) is built by `PyTuple_New` and
+  stores straight into the item slots (`object_tuple.rs`), where the limited API's
+  `PyTuple_SET_ITEM` is missing; without a confirmed layout it goes through
+  `pycc_ext_obj_build_display` as before.
+- A comprehension that unpacks its item into two names read only by position
+  (`[f(k, v) for k, v in src]`) binds the two names straight from the source
+  (`object_pairs.rs`, `object_pairs.c`): no item variable and no subscript of it. Over
+  `d.items()` of an exact dict each step is `PyDict_Next`, with no view, iterator or pair
+  tuple, and the checks of the dict's items iterator: a size changed since the loop began
+  raises `RuntimeError: dictionary changed size during iteration` at the next step, and an
+  item beyond the count it began with `RuntimeError: dictionary keys changed during
+  iteration`. Any other source (a dict subclass, a mapping, an iterator, a list of pairs)
+  is iterated, and each item unpacked as `UNPACK_SEQUENCE` unpacks it, with CPython's
+  messages, and dropped at once, as CPython drops it. Either way the names hold the only
+  references the loop keeps, so a value the loop drops from the dict is finalized where
+  CPython finalizes it. The desugaring that rewrites the tuple target marks it with its
+  arity (`pycc_ast::unpack_target_arity`) and the comprehension carries the mark
+  (`unpacks`); a comprehension assigned by a statement of its own
+  (`xs = [... for k, v in ...]`) does not carry it yet and reads its item by subscript.
   Whatever the iterable, the exhausted iterator is released before the last item, and an
   exception out of the element or the condition releases the iterator, the result and
   then the item, as CPython's unwinding does (`tests/fixtures/comprehension_unwinding.py`).
 
-The `PyDict_Next` loop, the items moved into the tuple, the indexed list loop and the
-inlined generator consumers are not implemented.
+On `_make_json_hashable`'s replay (section 10) these take 120.9M instructions to 86.1M
+(C: 53.3M) and `_deduplicate_schemas`'s from 132.1M to 97.3M (C: 62.8M). What is left of
+`_make_json_hashable`'s gap to the C is mostly the compiled body itself, 21.7M
+instructions against the C body's 7.4M, which no lowering in this table removes: entering
+and leaving its frame, the recursive call through the module global, the inline type
+tests and the exception checks. Then come the list appended to unsized (`PyList_Append`,
+`pycc_ext_obj_collect` and the reallocations, about 6M, where the C sizes the list from
+the dict) and the out-of-line step of the pair loop (4.7M around `PyDict_Next`'s 2.6M,
+which the C calls directly).
+
+The `for` statement over `d.items()`, `d.values()` and `d.keys()`, the indexed list loop
+and the inlined generator consumers are not implemented.
 
 ### 2.7 Exceptions as control flow
 
@@ -773,7 +802,7 @@ request that makes it unnecessary.
 | 6b | Delete `--select module`; CI's `--instructions` gate and `package_check` move to profile mode | as PR 8; the non-strict test suite converted to `--select all` passes. **Done.** The `--instructions` gate builds with `--select all`, not the profile: pass 3 picks winners by wall time on the runner, so a profile build's set, and its counts, may change from run to run, which a gate on counts cannot allow. The `--ext` branches of the fallback loop (item 7) went with the flag; the runtime and codegen parts of items 6-9 and 20, now reached by no non-strict build, are PR 6. No build makes item 19's guessed specializations any more; their tests check that the functions compile and match CPython, and the code is deleted with item 19. With the whole-module bodies gone, the `--select all` counts measure generic bodies, which execute more instructions than CPython on the sources for tomli (`loads()`), pypng (`read()`) and pystache: every indexing, addition and comparison is a C API call where CPython's specializing interpreter has an inline path. Pass 3 keeps such sets out of a profile build; making generic bodies beat the interpreter is section 2.5's work |
 | 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95) |
 | 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34). **Partly done, target missed**: the dict-miss lowering alone; replay 0.9-1.3 ms and 14.2M instructions (before: 3.8 ms, 46.3M; CPython 2.1 ms, 37.5M; C: 8.5M) |
-| 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally. **Partly done, targets missed**: the direct `tuple`/`list`/`sorted` and the early item release alone; `_make_json_hashable` 9.3 ms and 120M instructions (before: 11.0 ms, 133M), `_deduplicate_schemas` 9.2 ms and 131M (before: 11.8 ms, 144M); schema about 1.12x with the three section 1 functions compiled (see below) |
+| 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally. **Partly done, targets missed**: the direct `tuple`/`list`/`sorted` and the early item release alone; `_make_json_hashable` 9.3 ms and 120M instructions (before: 11.0 ms, 133M), `_deduplicate_schemas` 9.2 ms and 131M (before: 11.8 ms, 144M); schema about 1.12x with the three section 1 functions compiled (see below). Then the two-name pair loop, `sorted()` of a generator in place, `tuple()` moving a list's items and tuple displays in place: `_make_json_hashable` 6.0-6.3 ms and 86.1M (before: 9.1-9.2 ms, 120.9M), `_deduplicate_schemas` 6.9-8.1 ms and 97.3M (before: 10.3-10.4 ms, 132.1M); schema 1.18x with the three functions compiled (425.2M instructions against 558.4M; before 1.14x, 460.1M), and 1.21x in `bench/pydantic_check.py`'s default profile build, whose pass 3 now keeps 5 functions (426.2M against 558.1M). The function targets are still missed: what is left is the compiled body's own cost, section 2.6 |
 | 11 | Size and layout (section 2.9); item 10's decision; item 18's re-measure; item 23 dead-helper sweep | pydantic `.so` <= 1.5 MB; import >= 1.0x with no regression of any phase. The I1 measurement in section 2.9 limits what this PR can win: the dead pending-exception tests are gone, and the other layout changes tried moved I1 misses by 8% at most |
 | 12 | CI confirmation: `bench.yml` on both runners, ROADMAP accept | every section 4 target on both runners, cited by run id |
 
@@ -793,14 +822,20 @@ instructions and about 0.02x; with it schema ran 1.14-1.18x):
   no position stores), schema measured 1.19x: frames cost 6M instructions;
 - a `PyDict_Next` loop for `for k, v in d.items()` would save an estimated 15-20M
   instructions, which puts schema at about 1.2x, within the noise of the measurement.
+  Built (section 2.6, with the in-place `sorted` of a generator restored), it and its
+  companions saved 35M: schema measured 1.18x with the three functions compiled.
 
 Section 1's hand-written C is the ceiling at 1.25x. **Target lowered to >= 1.15x (2026-11-12):** 1.2x sat within 0.05x of this ceiling,
 less than the run-to-run noise, so meeting it would have been a coin toss; 1.15x keeps a margin
 while still requiring the generic bodies to beat CPython clearly. Instruction savings convert to wall
 time poorly here: compiling `remap_json_schema`, `remap_json_ref` and `_sort_recursive` as
-well removed 20M more instructions and no wall time. `pycc profile` still selects nothing
-for pydantic (pass 3 kept 0 of 55 candidates: its whole-workload wall-time gate is noisier
-than the wins it has to see), so a default profile build of pydantic is CPython's speed.
+well removed 20M more instructions and no wall time. `pycc profile` then selected nothing
+for pydantic (pass 3 kept 0 of 55 candidates: its whole-workload wall-time gate was noisier
+than the wins it had to see), so a default profile build of pydantic was CPython's speed.
+Since pass 3 decides on instruction counts and prunes its winning set (section 2.3), and
+with the PR 10 lowerings, it keeps 5 of 56 (`_make_json_hashable`, `_deduplicate_schemas`,
+`_get_all_json_refs`, `_sort_recursive`, `remap_json_schema`), and the default build's
+schema phase measures 1.21x locally.
 
 **Order revised after PR 5.** With `--select module`, diff-match-patch's diff_main runs
 7.1x CPython. With its training profile, it ran 1.02x: nothing was selected. Two causes:
