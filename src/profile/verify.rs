@@ -18,7 +18,12 @@
 //!    among them), most self time first, alone and its hot functions
 //!    alone, the same way;
 //! 3. then the regions that won, together, once more: one build is
-//!    reserved for this check before any region is measured.
+//!    reserved for this check before any region is measured;
+//! 4. then the winner without each of its members in turn, least self time
+//!    first, and without those whose removal did better at all, together,
+//!    at most [`MAX_PRUNE_BUILDS`] builds more: a removal is kept only when
+//!    it beats the winner as a larger set must beat a smaller one
+//!    ([`prunes`], `prune.rs`).
 //!
 //! A check is decided by its instruction count when there is one, else by
 //! its wall times ([`verdict`]: [`Check::faster`], [`replaces`]). The
@@ -29,7 +34,7 @@
 //! together cannot be measured, or lose, the best single winner is kept.
 //!
 //! A win inside the noise adds size and risk for no gain, so it is not
-//! kept. At most [`MAX_BUILDS`] builds. A function a check does not find
+//! kept. At most [`MAX_BUILDS`] builds before pruning. A function a check does not find
 //! faster, or one no check could reach within the budget, is not selected;
 //! the selection rule rejects it from then on, in `--check` and in builds
 //! alike. A later `pycc profile` keeps every verdict, a win as well as a
@@ -43,14 +48,25 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+mod copy;
+mod prune;
+pub(crate) use copy::copy_package;
 mod verdict;
 pub(crate) use verdict::{
-    clear, counts_instructions, quartiles, replaces, Check, Instructions, Signal, EARLY_ROUNDS, MAX_ROUNDS, MIN_GAIN_PPM,
+    clear, counts_instructions, lighter, prunes, quartiles, replaces, Check, Instructions, Signal, EARLY_ROUNDS, MAX_ROUNDS, MIN_GAIN_PPM,
     PROBE_RUNS,
 };
 
 /// The most builds pass 3 makes.
 pub(crate) const MAX_BUILDS: usize = 8;
+
+/// The most builds pass 3's pruning step makes beyond [`MAX_BUILDS`]: one
+/// per member it tries to remove from the winning set, the one with the
+/// least self time first, and one reserved for the members removed
+/// together. So a set of up to this many members less one has every member
+/// tried, and a larger one leaves its members with the most self time
+/// untried.
+pub(crate) const MAX_PRUNE_BUILDS: usize = 8;
 
 /// Pass 3's settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,7 +213,15 @@ pub(super) fn verify(
         .map(|e| (e.module.clone(), e.qualname.clone(), e.firstlineno))
         .collect();
     let carried = candidates.iter().filter(|key| recorded.contains(*key)).count();
-    let candidates: Vec<FunctionKey> = candidates.iter().filter(|key| !recorded.contains(*key)).cloned().collect();
+    let mut candidates: Vec<FunctionKey> = candidates.iter().filter(|key| !recorded.contains(*key)).cloned().collect();
+    // Most self time first: the pruning step tries the members with the
+    // least evidence first.
+    let self_ns: BTreeMap<FunctionKey, u64> = profile
+        .functions
+        .iter()
+        .map(|e| ((e.module.clone(), e.qualname.clone(), e.firstlineno), e.self_ns))
+        .collect();
+    candidates.sort_by(|a, b| self_ns.get(b).cmp(&self_ns.get(a)).then_with(|| a.cmp(b)));
     if carried > 0 {
         eprintln!("pycc profile: pass 3: {carried} candidates keep the verdicts an earlier profile recorded");
     }
@@ -209,7 +233,7 @@ pub(super) fn verify(
     let baseline = baseline(cx)?;
     let regions = regions(profile, &candidates);
     let mut run = |set: &BTreeSet<FunctionKey>, builds: usize| check(set, cx, builds, baseline);
-    let (mut verdicts, builds) = decide(&candidates, &regions, core, &base, MAX_BUILDS, &mut run)?;
+    let (mut verdicts, builds) = decide(&candidates, &regions, core, &base, MAX_BUILDS, MAX_PRUNE_BUILDS, &mut run)?;
     let kept = verdicts.values().filter(|m| m.compiled).count();
     for e in &mut profile.functions {
         if let Some(m) = verdicts.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
@@ -297,6 +321,7 @@ fn measured(c: &Check, compiled: bool, with: usize) -> Measured {
         cpython_instructions: c.instructions.map(|i| i.cpython),
         refused: None,
         without: None,
+        without_instructions: None,
     }
 }
 
@@ -356,12 +381,21 @@ pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 
 /// invalidates every entry holding the refused function, the carried set
 /// included, and a build that compiles anything it was not asked for
 /// ([`refusals`]) is never timed.
+///
+/// The set so selected is then pruned ([`Pass::prune`]) within `prune`
+/// builds more: its members are removed one at a time, the one with the
+/// least self time first (`candidates` come most self time first), then
+/// those whose removal did better, together; a removal is kept only when
+/// the set without the members beats the winner ([`prunes`]). Every pruned
+/// set is measured as a whole too, so the invariant holds; at most
+/// `budget + prune` builds in all.
 pub(super) fn decide(
     candidates: &[FunctionKey],
     regions: &[Vec<FunctionKey>],
     core: &BTreeSet<FunctionKey>,
     base: &BTreeMap<FunctionKey, Measured>,
     budget: usize,
+    prune: usize,
     run: &mut Run<'_>,
 ) -> Result<(BTreeMap<FunctionKey, Measured>, usize), String> {
     let mut pass = Pass::new(run, base);
@@ -385,7 +419,9 @@ pub(super) fn decide(
             pass.measure(union, budget)?;
         }
     }
-    Ok(pass.finish())
+    let best = pass.best();
+    let selected = pass.prune(best, candidates, prune)?;
+    Ok(pass.finish(selected))
 }
 
 /// One set pass 3 measured, as a whole: the selection is one of these,
@@ -397,7 +433,8 @@ struct Measurement {
     /// timed.
     check: Option<Check>,
     /// Whether it can still be selected: it was timed and won, and no
-    /// member of it was refused since (a refusal makes it invalid whole).
+    /// member of it was refused since (a refusal makes it invalid whole),
+    /// nor is it a removal the pruning step measured and did not keep.
     valid: bool,
 }
 
@@ -546,31 +583,33 @@ impl<'r, 's> Pass<'r, 's> {
         Ok(None)
     }
 
-    /// The selection, settled: of the measurements still valid (each won as
-    /// a whole), taken smallest first (the first measured among sets of one
-    /// size), a set replaces the one selected so far only when it beats it
-    /// by more than noise ([`replaces`]). The selection is compiled, whole,
-    /// on its own check; every other function measured is not. One that the
-    /// selection left out of a set it was measured in
-    /// (the selection is part of that set), or whose own set won too,
-    /// records the selection's times (`without`). The verdicts and the
-    /// builds made.
-    fn finish(self) -> (BTreeMap<FunctionKey, Measured>, usize) {
-        let mut winners: Vec<(&Measurement, &Check)> = self
-            .entries
-            .iter()
-            .filter(|m| m.valid)
-            .filter_map(|m| m.check.as_ref().map(|c| (m, c)))
+    /// The best of the measurements still valid (each won as a whole):
+    /// taken smallest first (the first measured among sets of one size), a
+    /// set replaces the one selected so far only when it beats it by more
+    /// than noise ([`replaces`]). None when nothing won.
+    fn best(&self) -> Option<usize> {
+        let mut winners: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| self.entries[i].valid && self.entries[i].check.is_some())
             .collect();
         // Stable: among sets of one size, the first measured comes first.
-        winners.sort_by_key(|(m, _)| m.set.len());
-        let best = winners.into_iter().reduce(|best, next| {
-            if replaces(next.1, next.0.set.len(), best.1, best.0.set.len()) {
-                next
-            } else {
-                best
+        winners.sort_by_key(|&i| self.entries[i].set.len());
+        winners.into_iter().reduce(|best, next| {
+            let (b, n) = (&self.entries[best], &self.entries[next]);
+            match (n.check.as_ref(), b.check.as_ref()) {
+                (Some(nc), Some(bc)) if replaces(nc, n.set.len(), bc, b.set.len()) => next,
+                _ => best,
             }
-        });
+        })
+    }
+
+    /// The selection, settled: measurement `selected` is compiled, whole, on
+    /// its own check; every other function measured is not. One that the
+    /// selection left out of a set it was measured in (the selection is part
+    /// of that set), or whose own set won too, records the selection's times
+    /// (`without`, and `without_instructions` when both were counted). The
+    /// verdicts and the builds made.
+    fn finish(self, selected: Option<usize>) -> (BTreeMap<FunctionKey, Measured>, usize) {
+        let best = selected.and_then(|i| self.entries[i].check.as_ref().map(|c| (&self.entries[i], c)));
         let mut verdicts = self.verdicts;
         for (key, m) in &mut verdicts {
             if m.refused.is_some() {
@@ -584,6 +623,8 @@ impl<'r, 's> Pass<'r, 's> {
                     let within = self.last.get(key).is_some_and(|&i| set.set.is_subset(&self.entries[i].set));
                     if m.compiled || within {
                         m.without = Some(c.compiled);
+                        m.without_instructions =
+                            c.instructions.filter(|_| m.instructions.is_some()).map(|i| -i.saved());
                     }
                     m.compiled = false;
                 }
@@ -827,155 +868,6 @@ pub(crate) fn refusals(set: &BTreeSet<FunctionKey>, report: &str) -> BTreeMap<Fu
         })
         .chain(extras)
         .collect()
-}
-
-/// The files that mark a project's root directory.
-const PROJECT_MARKERS: [&str; 3] = ["pyproject.toml", "setup.cfg", "setup.py"];
-
-/// Whether `dir` is an installation directory (`site-packages`,
-/// `dist-packages`), which is never a project.
-fn installed_dir(dir: &Path) -> bool {
-    dir.file_name()
-        .is_some_and(|name| name == "site-packages" || name == "dist-packages")
-}
-
-/// Copies what pass 3 times `pkg` (a package or single module) in under
-/// `root`, and returns the copy of `pkg`, at the same path below the copy
-/// of its import root (the parent of its top-level package, or of the
-/// module):
-///
-/// - the project: the nearest directory at or above the import root that
-///   holds a `pyproject.toml`, `setup.cfg` or `setup.py`, searched up to
-///   the first `site-packages` or `dist-packages` directory, so the
-///   workload's tests, data and `pyproject.toml` are found at the same
-///   relative paths;
-/// - else (no marker, or the package is installed) the top-level package or
-///   the module alone;
-/// - and each of `include` (`--verify-include`), which must lie under the
-///   import root, at its own path.
-///
-/// Hidden entries, `__pycache__` and `root` itself are left out. An entry
-/// outside the package that cannot be read is skipped, with a note; one
-/// inside it is an error.
-pub(crate) fn copy_package(pkg: &Path, root: &Path, include: &[PathBuf]) -> Result<PathBuf, String> {
-    let mut base = pkg.parent().unwrap_or(Path::new("")).to_path_buf();
-    let mut top = pkg.to_path_buf();
-    while base.join("__init__.py").is_file() {
-        top = base.clone();
-        match base.parent() {
-            Some(parent) => base = parent.to_path_buf(),
-            None => break,
-        }
-    }
-    if base.as_os_str().is_empty() {
-        base = PathBuf::from(".");
-        top = Path::new(".").join(&top);
-    }
-    let base = crate::canonical::canonicalize(&base).map_err(|e| format!("{}: {e}", base.display()))?;
-    let top = crate::canonical::canonicalize(&top).map_err(|e| format!("{}: {e}", top.display()))?;
-    let pkg = crate::canonical::canonicalize(pkg).map_err(|e| format!("{}: {e}", pkg.display()))?;
-    std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
-    // Canonical, as the paths copied from are (a temporary directory is a
-    // link on macOS: `/var` is `/private/var`), so the path returned is the
-    // copy's own whatever form `root` was given in, relative included. Never
-    // a Windows verbatim path (`crate::canonical`): the workload's Python
-    // joins `/`-separated names to it, which a verbatim path refuses.
-    let skip = crate::canonical::canonicalize(root).map_err(|e| e.to_string())?;
-    let root = skip.as_path();
-    let installed = base.ancestors().any(installed_dir);
-    let project = if installed {
-        None
-    } else {
-        base.ancestors()
-            .take_while(|dir| !installed_dir(dir))
-            .find(|dir| PROJECT_MARKERS.iter().any(|marker| dir.join(marker).is_file()))
-            .map(Path::to_path_buf)
-    };
-    // The copy of the import root.
-    let below = |path: &Path, from: &Path| -> Result<PathBuf, String> {
-        path.strip_prefix(from)
-            .map(Path::to_path_buf)
-            .map_err(|_| format!("{} is not under {}", path.display(), from.display()))
-    };
-    let copy_base = match &project {
-        Some(project) => root.join(below(&base, project)?),
-        None => root.to_path_buf(),
-    };
-    let copy = Copy { package: &top, skip: &skip };
-    match &project {
-        Some(project) => copy.dir(project, root, false)?,
-        None => copy.entry(&top, &copy_base.join(below(&top, &base)?), true)?,
-    }
-    for path in include {
-        let path = crate::canonical::canonicalize(path).map_err(|e| format!("--verify-include {}: {e}", path.display()))?;
-        let rel = below(&path, &base).map_err(|_| {
-            format!("--verify-include {}: not under the package's import root {}", path.display(), base.display())
-        })?;
-        copy.entry(&path, &copy_base.join(rel), false)?;
-    }
-    Ok(copy_base.join(below(&pkg, &base)?))
-}
-
-/// One copy of [`copy_package`]: the package's own directory or module
-/// (whose entries must all be read), and the destination to leave out.
-struct Copy<'a> {
-    package: &'a Path,
-    skip: &'a Path,
-}
-
-impl Copy<'_> {
-    /// Copies the file or directory `from` to `to`; `inside` when `from` is
-    /// part of the package.
-    fn entry(&self, from: &Path, to: &Path, inside: bool) -> Result<(), String> {
-        let inside = inside || from.starts_with(self.package);
-        // A link is not followed (it may leave the project, or loop).
-        let meta = match std::fs::symlink_metadata(from) {
-            Ok(meta) => meta,
-            Err(e) => return self.unreadable(from, inside, e),
-        };
-        if meta.is_dir() {
-            if from == self.skip {
-                return Ok(());
-            }
-            return self.dir(from, to, inside);
-        }
-        if meta.is_file() {
-            if let Some(parent) = to.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            if let Err(e) = std::fs::copy(from, to) {
-                return self.unreadable(from, inside, e);
-            }
-        }
-        Ok(())
-    }
-
-    fn dir(&self, from: &Path, to: &Path, inside: bool) -> Result<(), String> {
-        let entries = match std::fs::read_dir(from) {
-            Ok(entries) => entries,
-            Err(e) => return self.unreadable(from, inside, e),
-        };
-        std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
-        for entry in entries {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let name = entry.file_name();
-            if name.to_string_lossy().starts_with('.') || name == "__pycache__" {
-                continue;
-            }
-            self.entry(&entry.path(), &to.join(&name), inside)?;
-        }
-        Ok(())
-    }
-
-    /// An entry `from` that cannot be read: an error inside the package,
-    /// else skipped with a note.
-    fn unreadable(&self, from: &Path, inside: bool, e: std::io::Error) -> Result<(), String> {
-        if inside {
-            return Err(format!("pass 3 cannot copy {}: {e}", from.display()));
-        }
-        eprintln!("pycc profile: pass 3: {} left out of the copy: {e}", from.display());
-        Ok(())
-    }
 }
 
 #[cfg(test)]

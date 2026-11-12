@@ -163,6 +163,36 @@ pub(crate) fn clear(plain: &[u64], built: &[u64]) -> bool {
 /// replaces the one measured first (more self time) the same way.
 pub(crate) fn replaces(challenger: &Check, larger: usize, incumbent: &Check, smaller: usize) -> bool {
     debug_assert!(larger >= smaller);
+    beats(challenger, incumbent)
+}
+
+/// Whether the set left when members are removed from a winning set
+/// `current`, checked `pruned`, replaces it. A removal must earn its place
+/// as a larger set must ([`replaces`]), so a member that saves anything
+/// beyond the noise stays: the pruned set wins on its own
+/// ([`Check::faster`], with its wall-time veto when counted) and, both
+/// counted, saves at least [`MIN_GAIN_PPM`] of the workload's instructions
+/// more than `current`; else its compiled third quartile is under
+/// `current`'s first and its median saves [`WALL_MARGIN_PPM`] of CPython's
+/// median more.
+pub(crate) fn prunes(pruned: &Check, current: &Check) -> bool {
+    pruned.faster() && beats(pruned, current)
+}
+
+/// Whether `pruned`, a winning set with a member removed, did better than
+/// the set with it, `current`, by any amount: counted, fewer instructions;
+/// else a lower median. Not a verdict ([`prunes`] is): it only names the
+/// members the pruning step then removes together.
+pub(crate) fn lighter(pruned: &Check, current: &Check) -> bool {
+    match (pruned.instructions, current.instructions) {
+        (Some(p), Some(c)) => p.saved() > c.saved(),
+        _ => pruned.compiled[1] < current.compiled[1],
+    }
+}
+
+/// Whether `challenger` beats `incumbent` beyond the noise: the rule
+/// [`replaces`] and [`prunes`] share.
+fn beats(challenger: &Check, incumbent: &Check) -> bool {
     match (challenger.instructions, incumbent.instructions) {
         (Some(c), Some(i)) => c.enough(c.saved() - i.saved()),
         _ => {

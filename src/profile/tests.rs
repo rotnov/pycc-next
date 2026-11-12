@@ -344,6 +344,7 @@ fn a_verified_profile_selects_only_its_measured_winners() {
         cpython_instructions: None,
         refused: None,
         without: None,
+        without_instructions: None,
     };
     let mut a = entry("m", "a", 1, "", 100, 300);
     a.measured = Some(measured(false));
@@ -393,6 +394,7 @@ fn the_build_selects_exactly_the_set_pass_3_measured_as_the_winner() {
         cpython_instructions: None,
         refused: None,
         without: None,
+        without_instructions: None,
     };
     let mut a = entry("m", "a", 1, "", 100, 25_000);
     a.callees.insert("m:c:3".into(), 1000);

@@ -75,6 +75,31 @@ fn on_wall_time_a_larger_set_must_also_save_five_percent_of_cpython_s_time_more(
     assert!(!replaces(&dmp(2237, 2535, 2575), 30, &dmp(2596, 2710, 2747), 1));
 }
 
+/// A removal from a winning set is kept by the rule a larger set must meet:
+/// counted, the pruned set saves 0.5% of the workload's instructions more
+/// and still wins (its wall-time veto included); on wall time it is faster
+/// beyond the noise of both by 5% of CPython's median.
+#[test]
+fn a_removal_must_save_as_much_more_as_a_larger_set_must() {
+    let current = counted([60, 70, 80], 952_000);
+    // pydantic's `mode`: compiled it adds 0.55% of the workload.
+    assert!(prunes(&counted([60, 70, 80], 946_500), &current));
+    assert!(prunes(&counted([60, 70, 80], 947_000), &current));
+    // Removing a loser worth less than 0.5%, or a winner: kept.
+    assert!(!prunes(&counted([60, 70, 80], 947_001), &current));
+    assert!(!prunes(&counted([60, 70, 80], 955_000), &current));
+    // Fewer instructions but slower than CPython beyond the noise: vetoed.
+    assert!(!prunes(&counted([111, 120, 130], 900_000), &current));
+    // On wall time: apart from the current set and 5 ms (5% of 100) faster.
+    let wall = |q1, median, q3| Check { cpython: [90, 100, 110], compiled: [q1, median, q3], instructions: None };
+    let current = wall(75, 80, 85);
+    assert!(prunes(&wall(65, 70, 74), &current));
+    assert!(!prunes(&wall(65, 70, 75), &current));
+    assert!(!prunes(&wall(72, 76, 74), &current));
+    // Faster than the current set but not than CPython: never a win.
+    assert!(!prunes(&wall(60, 95, 74), &wall(95, 100, 105)));
+}
+
 /// `auto` counts instructions for a workload CPython runs in at most a
 /// second; the other signals do what they say.
 #[test]
