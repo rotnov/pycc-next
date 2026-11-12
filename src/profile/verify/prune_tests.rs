@@ -357,19 +357,44 @@ fn a_region_is_pruned_whole() {
 }
 
 /// A set pass 3 measures is built as its own selected unit: its hot
-/// functions are measured alone even when they call a cold candidate.
+/// functions are measured alone even when they call a cold candidate, and
+/// the winner is pruned by its own regions. `hot` and `hot2` both call
+/// `cold_callee`, so all three form one region of the candidates; the
+/// winner `{hot, hot2}` holds no edge, so each is a unit of its own and
+/// pruning drops `hot2`, which costs 0.64% of the workload. Under the
+/// candidates' region the two would be one unit, and nothing pruned.
 #[test]
 fn a_set_forms_its_own_regions() {
-    let candidates: Vec<FunctionKey> = ["hot", "cold_callee", "cold_other"].map(k).to_vec();
-    let core = set(&["hot"]);
-    let costs = [("hot", -300), ("cold_callee", 0), ("cold_other", 0)];
-    let units = |set: &BTreeSet<FunctionKey>| regions_of(&[("hot", "cold_callee")], set);
+    let candidates: Vec<FunctionKey> = ["hot", "hot2", "cold_callee"].map(k).to_vec();
+    let core = set(&["hot", "hot2"]);
+    let costs = [("hot", -300), ("hot2", 100), ("cold_callee", 0)];
+    let edges = [("hot", "cold_callee"), ("hot2", "cold_callee")];
+    let units = |set: &BTreeSet<FunctionKey>| regions_of(&edges, set);
     let mut asked = Vec::new();
     let mut run = counted(&costs, &mut asked);
-    let (verdicts, _) =
-        decide(&candidates, std::slice::from_ref(&candidates), &units, &core, &BTreeMap::new(), 8, 0, &mut run).unwrap();
+    let (verdicts, _) = decide(
+        &candidates,
+        std::slice::from_ref(&candidates),
+        &units,
+        &core,
+        &BTreeMap::new(),
+        8,
+        MAX_PRUNE_BUILDS,
+        &mut run,
+    )
+    .unwrap();
     drop(run);
-    assert_eq!(asked, [set(&["hot", "cold_callee", "cold_other"]), set(&["hot"])]);
+    assert_eq!(regions_of(&edges, &set(&["hot", "hot2", "cold_callee"])).len(), 1);
+    assert!(regions_of(&edges, &core).is_empty());
+    assert_eq!(
+        asked,
+        [
+            set(&["hot", "hot2", "cold_callee"]),
+            core.clone(),
+            set(&["hot"]),
+            set(&["hot2"]),
+        ],
+        "the whole set, the hot ones alone, then each removed on its own"
+    );
     assert_eq!(compiled(&verdicts), set(&["hot"]));
-    assert!(regions_of(&[("hot", "cold_callee")], &set(&["hot", "cold_other"])).is_empty());
 }

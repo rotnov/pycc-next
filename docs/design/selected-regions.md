@@ -172,7 +172,10 @@ is eligible (section 2.1), and every result that flows into the native local com
 Members called from outside the region (bytecode, Python callers, other regions) are the
 region's **entries**. Pass 2's `callees` counts tell which calls into a member come from
 outside. Static edges alone cannot tell this, because a module's bytecode can call any member.
-So every member stays an entry: each keeps its generic lift.
+So every member stays an entry: each keeps its generic lift. The counts are approximate (a
+member's total and each caller's count are medians taken separately across pass 2's runs), so
+the report's entries are a guide, not a guarantee: the entry guard (R5) must not rely on a
+member being no entry, nor on a region reporting `entries: none`.
 
 ### 4.2 Types: annotations, observations and proofs
 

@@ -31,10 +31,12 @@ def uses_patched(x):
 
 patched = functools.lru_cache(patched)
 
+@functools.cache
 def decorated_callee(x):
     return x
 
-decorated_callee = functools.cache(decorated_callee)
+def calls_decorated(x):
+    return decorated_callee(x)
 
 def shadowing(skip):
     return skip(1)
@@ -90,7 +92,8 @@ fn key(source: &str, qualname: &str) -> Key {
     let (owner, member) = qualname.rsplit_once('.').unwrap_or(("", qualname));
     let indent = if owner.is_empty() { "" } else { "    " };
     let needle = format!("\n{indent}def {member}(");
-    let at = source.find(&needle).expect("the function is in the fixture") + 1;
+    // Found in the source after a newline, so a first-line `def` is found.
+    let at = format!("\n{source}").find(&needle).expect("the function is in the fixture");
     // A decorated `def` starts at its decorator's line.
     let line = line_of(source, at as u32) as u32;
     let decorated = source[..at].trim_end().lines().last().is_some_and(|l| l.trim_start().starts_with('@'));
@@ -169,11 +172,112 @@ fn a_method_edge_follows_the_receiver() {
         [vec!["Parser.parse", "Parser.value", "helper"]],
         "`self.value(...)` and the module global `helper`"
     );
-    // A rebound receiver, another object, a decorated callee.
+    // A rebound receiver, another object, a static method.
     for caller in ["Parser.rebinds", "Parser.other"] {
         assert!(regions_of(MODULE, &select(&[caller, "Parser.value"])).is_empty(), "{caller}");
     }
     assert!(regions_of(MODULE, &select(&["Parser.calls_static", "Parser.static"])).is_empty());
+}
+
+#[test]
+fn a_decorated_callee_is_no_edge() {
+    assert!(
+        regions_of(MODULE, &select(&["calls_decorated", "decorated_callee"])).is_empty(),
+        "the module binds `decorated_callee` to what `functools.cache` returns"
+    );
+}
+
+/// The key of `qualname`, whose `def` is the first line of `source` that
+/// contains `needle`.
+fn key_at(source: &str, qualname: &str, needle: &str) -> Key {
+    let at = source.find(needle).expect("the needle is in the source");
+    (qualname.to_string(), line_of(source, at as u32) as u32)
+}
+
+#[test]
+fn an_implicit_static_or_class_method_has_no_receiver() {
+    for method in ["__new__", "__init_subclass__", "__class_getitem__"] {
+        let source = format!(
+            "class Node:\n    def {method}(cls, o, n):\n        cls.setup(o, n)\n        return o\n\n    \
+             def setup(self, n):\n        return n\n\n    def make(self, o, n):\n        return self.setup(n)\n"
+        );
+        let caller = key(&source, &format!("Node.{method}"));
+        let setup = key(&source, "Node.setup");
+        assert!(
+            regions_of(&source, &[caller, setup.clone()].into()).is_empty(),
+            "`cls` of {method} is no instance"
+        );
+        // An instance method's `self.setup(...)` is an edge.
+        assert_eq!(regions_of(&source, &[key(&source, "Node.make"), setup].into()).len(), 1, "{method}");
+    }
+}
+
+#[test]
+fn a_method_edge_stays_within_its_own_class_statement() {
+    // Two top-level classes of one name.
+    let source = "class C:\n    def a(self):\n        return self.b()\n\nclass C:\n    def b(self):\n        return 1\n";
+    let selected: BTreeSet<Key> = [key(source, "C.a"), key(source, "C.b")].into();
+    assert!(regions_of(source, &selected).is_empty(), "two top-level `class C`");
+    // A class in a block and a top-level one of the same name.
+    let source = "import os\nif os.sep:\n    class C:\n        def a(self):\n            return self.b()\n\n\
+                  class C:\n    def b(self):\n        return 1\n";
+    let selected: BTreeSet<Key> = [key_at(source, "C.a", "def a("), key_at(source, "C.b", "def b(")].into();
+    assert!(regions_of(source, &selected).is_empty(), "`class C` in a block");
+    // Two nested classes of one name in one class.
+    let source = "class Outer:\n    class Inner:\n        def b(self):\n            return 1\n\n    \
+                  class Inner:\n        def a(self):\n            return self.b()\n";
+    let selected: BTreeSet<Key> =
+        [key_at(source, "Outer.Inner.a", "def a("), key_at(source, "Outer.Inner.b", "def b(")].into();
+    assert!(regions_of(source, &selected).is_empty(), "two nested `class Inner`");
+    // A nested class bound once is that class.
+    let source = "class Outer:\n    class Inner:\n        def b(self):\n            return 1\n\n        \
+                  def a(self):\n            return self.b()\n";
+    let selected: BTreeSet<Key> =
+        [key_at(source, "Outer.Inner.a", "def a("), key_at(source, "Outer.Inner.b", "def b(")].into();
+    assert_eq!(regions_of(source, &selected).len(), 1, "one nested `class Inner`");
+}
+
+#[test]
+fn a_walrus_in_a_default_binds_in_the_enclosing_scope() {
+    // In the caller's scope: `f` is the caller's local.
+    let source = "def other():\n    return 1\n\ndef f():\n    return 2\n\n\
+                  def caller():\n    g = lambda x=(f := other): x\n    return f()\n\n\
+                  def caller_def():\n    def g(x=(f := other)):\n        return x\n    return f()\n";
+    for caller in ["caller", "caller_def"] {
+        let selected: BTreeSet<Key> = [key(source, caller), key(source, "f")].into();
+        assert!(regions_of(source, &selected).is_empty(), "{caller}: `f` is local");
+    }
+    // At module scope: `f` is rebound.
+    let source = "def f():\n    return 2\n\ndef g(a=(f := len)):\n    return a\n\n\
+                  def caller():\n    return f()\n";
+    let selected: BTreeSet<Key> = [key(source, "caller"), key(source, "f")].into();
+    assert!(regions_of(source, &selected).is_empty(), "`f` is rebound by `g`'s default");
+}
+
+#[test]
+fn what_a_nested_scope_evaluates_outside_its_body_is_the_compiled_bodys() {
+    let source = "def deco(x):\n    return x\n\ndef base():\n    return object\n\n\
+                  def dflt():\n    return 0\n\n\
+                  def decorates():\n    @deco\n    def g():\n        return 1\n    return g\n\n\
+                  def calls_in_decorator():\n    @(deco(1) and deco)\n    def g():\n        return 1\n    return g\n\n\
+                  def calls_in_default():\n    def g(x=dflt()):\n        return x\n    return g\n\n\
+                  def calls_in_lambda_default():\n    return lambda x=dflt(): x\n\n\
+                  def calls_in_base():\n    class K(base()):\n        pass\n    return K\n\n\
+                  def calls_in_body():\n    def g():\n        return dflt()\n    return g\n";
+    for (caller, callee) in [
+        ("calls_in_decorator", "deco"),
+        ("calls_in_default", "dflt"),
+        ("calls_in_lambda_default", "dflt"),
+        ("calls_in_base", "base"),
+    ] {
+        let selected: BTreeSet<Key> = [key(source, caller), key(source, callee)].into();
+        assert_eq!(regions_of(source, &selected).len(), 1, "{caller} -> {callee}");
+    }
+    // A decorator that is no call, and a call in the nested body, are no edges.
+    for (caller, callee) in [("decorates", "deco"), ("calls_in_body", "dflt")] {
+        let selected: BTreeSet<Key> = [key(source, caller), key(source, callee)].into();
+        assert!(regions_of(source, &selected).is_empty(), "{caller} -> {callee}");
+    }
 }
 
 #[test]

@@ -13,7 +13,9 @@ use std::collections::BTreeSet;
 /// The names `body` binds in the scope it runs in, without descending into
 /// nested function, lambda, class or comprehension scopes (a nested `def`
 /// or `class` binds its own name here, and a walrus in a comprehension its
-/// target, PEP 572). Names declared `global` are
+/// target, PEP 572; so does a walrus in the decorators or parameter
+/// defaults of a nested `def` or lambda, or in a nested class's decorators,
+/// bases or keywords, all of which run in this scope). Names declared `global` are
 /// included: from the module's point of view they are bound too.
 pub fn bound_names(body: &[Stmt]) -> BTreeSet<String> {
     let mut collector = Binder::default();
@@ -119,10 +121,18 @@ impl<'a> Visitor<'a> for WalrusTargets<'_> {
                 }
                 self.visit_expr(&named.value);
             }
-            Expr::Lambda(_) => {}
+            // A lambda's defaults run in the comprehension; its body is
+            // its own scope.
+            Expr::Lambda(lambda) => {
+                if let Some(parameters) = &lambda.parameters {
+                    self.visit_parameters(parameters);
+                }
+            }
             _ => visitor::walk_expr(self, expr),
         }
     }
+
+    fn visit_annotation(&mut self, _expr: &'a Expr) {}
 }
 
 /// Collects bindings of one scope.
@@ -139,15 +149,21 @@ impl<'a> Visitor<'a> for Binder {
         match stmt {
             Stmt::FunctionDef(def) => {
                 self.names.insert(def.name.as_str().to_string());
-                // Decorators and defaults run in this scope; the body does not.
+                // Decorators and defaults run in this scope; the body does
+                // not, nor do the annotations (evaluated lazily, PEP 649).
                 for decorator in &def.decorator_list {
                     self.visit_decorator(decorator);
                 }
+                self.visit_parameters(&def.parameters);
             }
             Stmt::ClassDef(class) => {
                 self.names.insert(class.name.as_str().to_string());
+                // Decorators, bases and keywords run in this scope.
                 for decorator in &class.decorator_list {
                     self.visit_decorator(decorator);
+                }
+                if let Some(arguments) = &class.arguments {
+                    self.visit_arguments(arguments);
                 }
             }
             Stmt::Global(global) => {
@@ -180,7 +196,12 @@ impl<'a> Visitor<'a> for Binder {
                     self.names.insert(name.id.as_str().to_string());
                 }
             }
-            Expr::Lambda(_) => {}
+            // A lambda's defaults run in this scope; its body is its own.
+            Expr::Lambda(lambda) => {
+                if let Some(parameters) = &lambda.parameters {
+                    self.visit_parameters(parameters);
+                }
+            }
             // A comprehension is a scope of its own, but a walrus in it
             // binds in the scope that contains it (PEP 572), nested
             // comprehensions included.
