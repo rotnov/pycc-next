@@ -333,6 +333,22 @@ a removal that does not pay is never selected. Pass 3 prints each removal with b
 sets' instructions (or wall times), whether it did better, and which members were
 dropped.
 
+**Regions as units** ([selected-regions.md](selected-regions.md), sections 4.1 and 4.7).
+The candidates that call each other by a name no code rebinds (a module global bound
+only by its `def`, or `self.m(...)` of the caller's own class) form a region of the
+selected unit (`src/fallback/regions.rs`). Each set pass 3 measures is built as its own
+selected unit, so it is a union of its own regions and single functions; pruning removes
+a whole region of the winner's unit at a time, never one member of it
+(`src/profile/verify/units.rs`: the removals and the group above count units, not
+members), and the winner's key stays its members. Pass 3 prints the winner's regions
+(`region ... is pruned as one`), and a build's `--report-fallbacks` lists the regions of
+what it compiled (`region: MODULE: A, B (entries: A)`; an entry is a member pass 2
+counted called from outside its region, or every member without a profile). Regions are
+not formed over all the candidates first: a first version did, and made every hot core
+take its regions' cold members along. tomli's selection then grew from 19 functions to
+29 and pypng's from 8 to 19, as pruning could no longer drop one costly member of a
+region (selected-regions.md, section 5.2).
+
 A function the winner leaves out of a set it was measured in is rejected ("faster
 without it", `measured.without`, with the selection's instructions in
 `measured.without_instructions` when counted). Pass 3 enforces this structurally:
@@ -628,7 +644,9 @@ Across these calls arguments and results stay objects, so a position
 one selected function returns cannot be proven an `int` in its caller. tomli's profile
 build runs 2.808M instructions per `loads()` against the whole-module build's 2.427M. The
 plan for native calls inside a region, with its measured bound (a hand-written region:
-2.657M), is [selected-regions.md](selected-regions.md).
+2.657M), is [selected-regions.md](selected-regions.md). Its first part (R1) is done:
+regions are formed from the selected unit and pass 3 measures and prunes them as units
+(section 2.3); no code is generated differently yet.
 
 ### 2.9 Size and layout
 
@@ -825,7 +843,7 @@ request that makes it unnecessary.
 | 6 | Delete non-strict module-body compilation (items 6, 7, 8 slot sync, 9, 20), which since 6b no non-strict `--ext` build reaches. The `--ext` oracle tests whose fixture runs its program at import run it before the patch, as bytecode (section 2.4), so since 6b they check the build and the embedded code but not the compiled bodies; each is converted to call the program after the import, as `tests/attr_cache.rs` does since 6b | as PR 5; LOC removed reported |
 | 8 | Call-site specialization (section 2.5): exact-type guards inline, helpers cold, per-site attribute records (item 13), profile-observed types (item 19, then delete `specialize.rs`), `isinstance` exact path. **The concept checkpoint** (moved ahead of PR 7) | profile mode on diff-match-patch's diff_main >= 6x (`--select module`: 7.1x); pydantic schema >= 1.05x; schema I1 misses <= 1.1x CPython's; `ConfigWrapper.__getattr__` replay <= 1.75 ms. If either of the first two is missed, stop and report |
 | 6b | Delete `--select module`; CI's `--instructions` gate and `package_check` move to profile mode | as PR 8; the non-strict test suite converted to `--select all` passes. **Done.** The `--instructions` gate builds with `--select all`, not the profile: pass 3 picks winners by wall time on the runner, so a profile build's set, and its counts, may change from run to run, which a gate on counts cannot allow. The `--ext` branches of the fallback loop (item 7) went with the flag; the runtime and codegen parts of items 6-9 and 20, now reached by no non-strict build, are PR 6. No build makes item 19's guessed specializations any more; their tests check that the functions compile and match CPython, and the code is deleted with item 19. With the whole-module bodies gone, the `--select all` counts measure generic bodies, which execute more instructions than CPython on the sources for tomli (`loads()`), pypng (`read()`) and pystache: every indexing, addition and comparison is a C API call where CPython's specializing interpreter has an inline path. Pass 3 keeps such sets out of a profile build; making generic bodies beat the interpreter is section 2.5's work |
-| 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay. The first part (direct calls between generic bodies) is done; native arguments and results inside a region are planned in [selected-regions.md](selected-regions.md), PRs R1-R6 | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95); for R1-R6, tomli's numbers in selected-regions.md section 5 |
+| 7 | Direct calls (section 2.8) inside the selected region (section 2.3), replacing non-strict sibling interfaces (item 21), only if a measurement shows they pay. The first part (direct calls between generic bodies) is done; native arguments and results inside a region are planned in [selected-regions.md](selected-regions.md), PRs R1-R6 (R1, regions formed and pruned as units, is done) | `_make_json_hashable` replay <= 7.0 ms (8.9 today), `_deduplicate_schemas` <= 8.0 ms (9.95); for R1-R6, tomli's numbers in selected-regions.md section 5 |
 | 9 | Exceptions as control flow (section 2.7) | `ConfigWrapper.__getattr__` replay <= 0.8 ms (C: 0.34). **Partly done, target missed**: the dict-miss lowering alone; replay 0.9-1.3 ms and 14.2M instructions (before: 3.8 ms, 46.3M; CPython 2.1 ms, 37.5M; C: 8.5M) |
 | 10 | Idiom lowering (section 2.6) | `_make_json_hashable` <= 4.5 ms (C: 2.9), `_deduplicate_schemas` <= 5.0 ms (C: 3.3); schema >= 1.2x locally. **Partly done, targets missed**: the direct `tuple`/`list`/`sorted` and the early item release alone; `_make_json_hashable` 9.3 ms and 120M instructions (before: 11.0 ms, 133M), `_deduplicate_schemas` 9.2 ms and 131M (before: 11.8 ms, 144M); schema about 1.12x with the three section 1 functions compiled (see below). Then the two-name pair loop, `sorted()` of a generator in place, `tuple()` moving a list's items and tuple displays in place: `_make_json_hashable` 6.0-6.3 ms and 86.1M (before: 9.1-9.2 ms, 120.9M), `_deduplicate_schemas` 6.9-8.1 ms and 97.3M (before: 10.3-10.4 ms, 132.1M); schema 1.18x with the three functions compiled (425.2M instructions against 558.4M; before 1.14x, 460.1M), and 1.21x in `bench/pydantic_check.py`'s default profile build, whose pass 3 now keeps 5 functions (426.2M against 558.1M). The function targets are still missed: what is left is the compiled body's own cost, section 2.6 |
 | 11 | Size and layout (section 2.9); item 10's decision; item 18's re-measure; item 23 dead-helper sweep | pydantic `.so` <= 1.5 MB; import >= 1.0x with no regression of any phase. The I1 measurement in section 2.9 limits what this PR can win: the dead pending-exception tests are gone, and the other layout changes tried moved I1 misses by 8% at most |

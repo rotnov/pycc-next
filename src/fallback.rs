@@ -59,6 +59,8 @@ mod package_bases;
 pub(crate) use package_bases::overridden_in_package;
 mod render;
 mod report;
+mod regions;
+pub(crate) use regions::regions_of;
 mod selected;
 
 pub(crate) use lift::LIFT_PREFIX;

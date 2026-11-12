@@ -236,6 +236,67 @@ fn a_selected_function_the_patch_cannot_find_is_never_dropped_silently() {
     );
 }
 
+/// `--report-fallbacks` lists the regions of what a build compiled
+/// (docs/design/selected-regions.md, section 4.1): selected functions that call
+/// each other by a name no code rebinds, by a module global or by `self`.
+/// Without a profile every member is an entry.
+#[test]
+fn the_report_lists_the_regions_of_what_compiled() {
+    let scratch = ScratchDir::new("select_fn").unwrap();
+    let source = "\
+def skip(s, i):
+    while i < len(s) and s[i] == ' ':
+        i += 1
+    return i
+
+
+def parse(s):
+    return s[skip(s, 0):]
+
+
+class P:
+    def a(self, n):
+        return self.b(n) + 1
+
+    def b(self, n):
+        return n * 2
+
+
+def alone(x):
+    return x + 1
+
+
+def rebound(x):
+    return x
+
+
+def calls_rebound(x):
+    return rebound(x)
+
+
+rebound = alone
+";
+    let dir = scratch.join("regions");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.py"), source).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(dir.join("m.py"))
+        .arg("-o")
+        .arg(dir.join("m"))
+        .args(["--ext", "--non-strict", "--report-fallbacks", "--select", "all"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    let stderr = String::from_utf8_lossy(&o.stderr).replace('\r', "");
+    let regions: Vec<&str> = stderr.lines().filter(|l| l.starts_with("region: ")).collect();
+    assert_eq!(
+        regions,
+        ["region: m: skip, parse (entries: skip, parse)", "region: m: P.a, P.b (entries: P.a, P.b)"],
+        "{stderr}"
+    );
+}
+
 #[test]
 fn without_a_profile_nothing_is_selected_and_no_extension_is_built() {
     let scratch = ScratchDir::new("select_fn").unwrap();

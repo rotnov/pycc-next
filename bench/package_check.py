@@ -393,11 +393,11 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             return False
         if single or a.separate:
             for line in b.stderr.splitlines():
-                if line.startswith(("specialized:", "not specialized:")):
+                if line.startswith(("specialized:", "not specialized:", "region:")):
                     print(f"  {mod}: {line}")
     if not (single or a.separate):
         for line in dict.fromkeys(results[0][0].stderr.splitlines()):
-            if line.startswith(("specialized:", "not specialized:")):
+            if line.startswith(("specialized:", "not specialized:", "region:")):
                 print(f"  {line}")
     # Only now: a module's dotted name is found from the `__init__.py`
     # files beside and above it.

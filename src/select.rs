@@ -35,6 +35,16 @@ pub(crate) type Key = (String, u32);
 /// type in (nearly) every sampled call, each with it ([`profile::Entry::observed_types`]).
 pub(crate) type Types = Vec<(String, String)>;
 
+/// What a profile counted of a selected function's calls: all of them, and
+/// those each selected function of its module made to it. A region's member
+/// is an *entry* when calls come from outside the region
+/// (docs/design/selected-regions.md, section 4.1).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Calls {
+    pub(crate) total: u64,
+    pub(crate) from: BTreeMap<Key, u64>,
+}
+
 /// The selected functions of every module (by dotted name), and the notes
 /// the build prints about them.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -43,6 +53,9 @@ pub(crate) struct Selection {
     /// Per module, the observed types of its selected functions that have
     /// any.
     pub(crate) types: BTreeMap<String, BTreeMap<Key, Types>>,
+    /// Per module, what the profile counted of its selected functions'
+    /// calls, when a profile gives them.
+    pub(crate) calls: BTreeMap<String, BTreeMap<Key, Calls>>,
     pub(crate) notes: Vec<String>,
 }
 
@@ -173,8 +186,14 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
         (SelectMode::Profile, Some(path), _) | (_, _, Some(path)) => Some(profile::Profile::read(path)?),
         _ => None,
     };
+    if let Some(profile) = &typed {
+        out.calls = calls(profile, sources, &chosen);
+    }
     for (module, qualname, line) in chosen {
-        let types = typed.as_ref().map_or_else(Vec::new, |p| observed(p, sources, &module, &qualname, line));
+        let types = typed
+            .as_ref()
+            .and_then(|p| entry_of(p, sources, &module, &qualname, line))
+            .map_or_else(Vec::new, profile::Entry::observed_types);
         if !types.is_empty() {
             out.types.entry(module.clone()).or_default().insert((qualname.clone(), line), types);
         }
@@ -183,17 +202,54 @@ pub(crate) fn decide(request: &Request<'_>, sources: &[Function]) -> Result<Sele
     Ok(out)
 }
 
-/// The types `profile` observed for the function `module:qualname` at
-/// `line` of `sources`, while its entry has that function's current source.
-fn observed(profile: &profile::Profile, sources: &[Function], module: &str, qualname: &str, line: u32) -> Types {
-    let Some(f) = sources.iter().find(|f| f.module == module && f.qualname == qualname && f.firstlineno == line) else {
-        return Vec::new();
-    };
+/// The entry of `profile` for the function `module:qualname` at `line` of
+/// `sources`, while it has that function's current source.
+fn entry_of<'p>(
+    profile: &'p profile::Profile,
+    sources: &[Function],
+    module: &str,
+    qualname: &str,
+    line: u32,
+) -> Option<&'p profile::Entry> {
+    let f = sources.iter().find(|f| f.module == module && f.qualname == qualname && f.firstlineno == line)?;
     profile
         .functions
         .iter()
         .find(|e| e.module == module && e.qualname == qualname && e.sha256 == f.sha256)
-        .map_or_else(Vec::new, profile::Entry::observed_types)
+}
+
+/// What `profile` counted of the calls of each function of `chosen`: all of
+/// them, and those from each function of `chosen` in its module. A function
+/// with no current entry has none.
+fn calls(
+    profile: &profile::Profile,
+    sources: &[Function],
+    chosen: &BTreeSet<(String, String, u32)>,
+) -> BTreeMap<String, BTreeMap<Key, Calls>> {
+    let entries: Vec<(&(String, String, u32), &profile::Entry)> = chosen
+        .iter()
+        .filter_map(|key| Some((key, entry_of(profile, sources, &key.0, &key.1, key.2)?)))
+        .collect();
+    let mut out: BTreeMap<String, BTreeMap<Key, Calls>> = BTreeMap::new();
+    for ((module, qualname, line), entry) in &entries {
+        let callee = entry.callee_key();
+        let from = entries
+            .iter()
+            .filter(|((m, _, _), _)| m == module)
+            .filter_map(|((_, q, l), caller)| {
+                let n = *caller.callees.get(&callee)?;
+                (n > 0).then(|| ((q.clone(), *l), n))
+            })
+            .collect();
+        out.entry(module.clone()).or_default().insert(
+            (qualname.clone(), *line),
+            Calls {
+                total: entry.calls,
+                from,
+            },
+        );
+    }
+    out
 }
 
 /// What `[tool.pycc]` of the `pyproject.toml` beside `path` (a module, or a
@@ -341,11 +397,22 @@ fn package_root(path: &Path) -> PathBuf {
 /// The observed types of this build's module's selected functions.
 static MODULE_TYPES: OnceLock<BTreeMap<Key, Types>> = OnceLock::new();
 
-/// Records this build's module's selection, and its functions' observed
-/// types.
-pub(crate) fn set_module(selected: BTreeSet<Key>, types: BTreeMap<Key, Types>) {
+/// What the profile counted of this build's module's selected functions'
+/// calls.
+static MODULE_CALLS: OnceLock<BTreeMap<Key, Calls>> = OnceLock::new();
+
+/// Records this build's module's selection, its functions' observed types
+/// and their counted calls.
+pub(crate) fn set_module(selected: BTreeSet<Key>, types: BTreeMap<Key, Types>, calls: BTreeMap<Key, Calls>) {
     let _ = MODULE.set(selected);
     let _ = MODULE_TYPES.set(types);
+    let _ = MODULE_CALLS.set(calls);
+}
+
+/// What the profile counted of this build's module's selected functions'
+/// calls; empty without a profile.
+pub(crate) fn module_calls() -> Option<&'static BTreeMap<Key, Calls>> {
+    MODULE_CALLS.get()
 }
 
 /// The observed types of this build's module's selected functions.
@@ -389,8 +456,13 @@ pub(crate) fn import_name(path: &Path) -> String {
 
 /// A member's selection as the package build passes it (`--select-functions
 /// FILE`): one `firstlineno qualname` per line, then, for a function with
-/// observed types, ` param:type` for each.
-pub(crate) fn to_text(selected: &BTreeSet<Key>, types: &BTreeMap<Key, Types>) -> String {
+/// observed types, ` param:type` for each, and for one with counted calls,
+/// ` calls=TOTAL` and ` from=LINE,QUALNAME,COUNT` for each selected caller.
+pub(crate) fn to_text(
+    selected: &BTreeSet<Key>,
+    types: &BTreeMap<Key, Types>,
+    calls: &BTreeMap<Key, Calls>,
+) -> String {
     selected
         .iter()
         .map(|key| {
@@ -401,30 +473,59 @@ pub(crate) fn to_text(selected: &BTreeSet<Key>, types: &BTreeMap<Key, Types>) ->
                 .flatten()
                 .map(|(param, ty)| format!(" {param}:{ty}"))
                 .collect();
-            format!("{line} {qualname}{typed}\n")
+            let counted: String = calls.get(key).map_or_else(String::new, |c| {
+                let from: String = c
+                    .from
+                    .iter()
+                    .map(|((q, l), n)| format!(" from={l},{q},{n}"))
+                    .collect();
+                format!(" calls={}{from}", c.total)
+            });
+            format!("{line} {qualname}{typed}{counted}\n")
         })
         .collect()
 }
 
+/// A member's selection, as [`from_text`] reads it.
+pub(crate) type Read = (BTreeSet<Key>, BTreeMap<Key, Types>, BTreeMap<Key, Calls>);
+
 /// Reads [`to_text`]'s form.
-pub(crate) fn from_text(text: &str) -> Result<(BTreeSet<Key>, BTreeMap<Key, Types>), String> {
+pub(crate) fn from_text(text: &str) -> Result<Read, String> {
     let mut selected = BTreeSet::new();
     let mut types = BTreeMap::new();
+    let mut calls: BTreeMap<Key, Calls> = BTreeMap::new();
     for line in text.lines().filter(|line| !line.is_empty()) {
         let bad = || format!("bad selection line `{line}`");
         let mut words = line.split(' ');
         let number = words.next().and_then(|n| n.parse().ok()).ok_or_else(bad)?;
         let qualname = words.next().filter(|q| !q.is_empty()).ok_or_else(bad)?;
         let key = (qualname.to_string(), number);
-        let typed: Types = words
-            .map(|word| word.split_once(':').map(|(p, t)| (p.to_string(), t.to_string())).ok_or_else(bad))
-            .collect::<Result<_, _>>()?;
+        let mut typed: Types = Vec::new();
+        for word in words {
+            if let Some(total) = word.strip_prefix("calls=") {
+                calls.entry(key.clone()).or_default().total = total.parse().map_err(|_| bad())?;
+            } else if let Some(from) = word.strip_prefix("from=") {
+                let mut parts = from.split(',');
+                let (Some(l), Some(q), Some(n), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else {
+                    return Err(bad());
+                };
+                let caller = (q.to_string(), l.parse().map_err(|_| bad())?);
+                calls
+                    .entry(key.clone())
+                    .or_default()
+                    .from
+                    .insert(caller, n.parse().map_err(|_| bad())?);
+            } else {
+                let (p, t) = word.split_once(':').ok_or_else(bad)?;
+                typed.push((p.to_string(), t.to_string()));
+            }
+        }
         if !typed.is_empty() {
             types.insert(key.clone(), typed);
         }
         selected.insert(key);
     }
-    Ok((selected, types))
+    Ok((selected, types, calls))
 }
 
 #[cfg(test)]

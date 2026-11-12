@@ -1,6 +1,6 @@
 # Native calls inside a selected region
 
-Status: planned. Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+Status: R1 done, R4 measured and parked, R2, R3, R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
 part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
@@ -172,7 +172,10 @@ is eligible (section 2.1), and every result that flows into the native local com
 Members called from outside the region (bytecode, Python callers, other regions) are the
 region's **entries**. Pass 2's `callees` counts tell which calls into a member come from
 outside. Static edges alone cannot tell this, because a module's bytecode can call any member.
-So every member stays an entry: each keeps its generic lift.
+So every member stays an entry: each keeps its generic lift. The counts are approximate (a
+member's total and each caller's count are medians taken separately across pass 2's runs), so
+the report's entries are a guide, not a guarantee: the entry guard (R5) must not rely on a
+member being no entry, nor on a region reporting `entries: none`.
 
 ### 4.2 Types: annotations, observations and proofs
 
@@ -303,8 +306,11 @@ helps `m0` as well.
 A typed region's members do not compile alone the way they do together: removing one changes
 its neighbors' signatures. So:
 
-- a check's set is a union of whole regions and single functions;
-- pruning (`src/profile/verify/prune.rs`) removes a whole region at a time, never one member;
+- a check's set is a union of whole regions and single functions: the regions of its own
+  selected unit, since each check builds exactly its set (a hot core does not take along
+  the cold members of the regions the larger set formed: 5.2);
+- pruning (`src/profile/verify/prune.rs`) removes a whole region of the winner at a time,
+  never one member;
 - a region's position-flow callees (4.1) are part of it and are never pruned alone;
 - the winner's key stays its members, so builds compile exactly the measured set.
 
@@ -340,12 +346,63 @@ number stops the sequence for a measurement and a revision of this plan.
 | R1 | Regions: formation from the selected unit (4.1, without the position-flow callees), `--report-fallbacks` lines `region: m: a, b, c (entries: ...)`, and pass 3 measuring and pruning regions as units (4.7) | unit tests of formation on a fixture module: an edge through a rebound global, a method edge, two components, a self-recursive function; prune tests with a two-member region; `package_check` reports tomli's region | no change in instructions (no code is generated differently); the five packages' selections unchanged or each change explained |
 | R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native, region edges as checked direct calls, `TypeError` on a rebound member's mismatched result; position-flow callees join the region; two DEVIATIONS rows | `tests/select_regions.rs` against CPython: tomli-shaped scanners and tuple-returning parsers; entry with `bool`, an `int` subclass and a big `int`; `mock.patch` of a member before a call (the generic path runs, result matches CPython for both result types) and from inside one (the `TypeError` row); the `intact` flag cleared by assignment, deletion, `dict.clear()` and a replaced `__code__` or `__defaults__` before a call (CPython's result, no `TypeError`); `RecursionError` depth; a rebound `pos` captured by a lambda or generator expression (late binding, 4.8); traceback function names; `is` of a returned position, matching the DEVIATIONS row | tomli `loads()` <= 2.66M per call locally (`u1`: 2.657M), wall >= 1.33x; `.text` growth reported (`u1`: +16%) |
 | R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6) | `tests/tagged_words.rs` extended with native `int` operands, fast paths on and off, a `str` subclass receiver | about -80K: tomli <= 2.59M; `diff_bisect` (native `int` locals) not slower |
-| R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K: tomli <= 2.45M; `m0` (generic) lower too |
+| R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K estimated (tomli <= 2.45M); a prototype on `m0` measured **-85K**, under the 120K of section 6: parked until R2 lands (5.1) |
 | R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
 | R6 | CI confirmation in `bench.yml` on both runners | | accept 2's tomli numbers (1.70x / 1.49x) met, or the gap measured and this plan revised |
 
 R3 and R4 do not depend on R1 and R2 and may land first if a measurement says so. Their
 acceptance numbers then apply to `m0`, measured again.
+
+### 5.1 Status
+
+- **R4, measured first.** The ASCII-mask test of `s[i] in frozenset` (4.5) was prototyped
+  on generic bodies (`m0`, never merged) and saved **85K instructions per `loads()`**, half
+  of the 170K section 3 estimated from the IR, and under the 120K section 6 sets as the
+  point to stop. The test itself got cheap; what remains is each `skip_chars` call's fixed
+  cost, about 155 instructions a call (with `skip_until`, about 647 calls per `loads()`), which the
+  scanners' 2-3 iterations a call cannot amortize. That cost is the generic wrapper,
+  argument binding and boxed results that R2's native calls inside a region remove. The
+  saving stacks with R2, since the per-test cost stays inside a region, so R4 is parked
+  until R2 lands and is then measured again on top of it.
+- **R1, done.** Regions are formed from the selected unit (4.1, without position-flow
+  callees: `src/fallback/regions.rs`), a build's `--report-fallbacks` lists them, and
+  pass 3 prunes them as units (4.7, `src/profile/verify/units.rs`). No code is generated
+  differently. Measured below (5.2).
+
+### 5.2 R1's measurements
+
+Taken locally on CPython 3.15.0b4, x86-64, as section 3's.
+
+- **No code generated differently.** tomli built with section 3's `m0` selection by main
+  and by R1: `_parser`'s `.text` is byte for byte the same, `.rodata` differs only in the
+  build directory's name, and both run 2,821,441 instructions per `loads()`.
+- **Selections.** `bench/package_check.py` (tomli, pystache, pypng, mistune) and
+  `bench/pydantic_check.py`, each with its training profile, by main and by R1:
+
+  | package | regions of the winner (`--report-fallbacks`) | selection |
+  |---|---|---|
+  | tomli | `loads`, `skip_chars`, `skip_until`, `skip_comment`, `skip_comments_and_array_ws`, `create_dict_rule`, `key_value_rule`, `parse_key_value_pair`, `parse_key`, `parse_key_part`, `parse_array`, `parse_inline_table`, `parse_value` (entries: `loads`, `skip_chars`, `skip_until`, `parse_key`) | unchanged, 19 functions; `loads()` 2.80M instructions per call either way |
+  | pypng | `Reader.undo_filter`, `Reader._deinterlace`, `Reader._bytes_to_values` (entries: all three) | unchanged, 8 functions; `read()` 13.75M either way |
+  | pystache, mistune | none (pass 3 keeps no set) | unchanged, none |
+  | pydantic | `_DefinitionsRemapping.remap_json_schema`; `GenerateJsonSchema._sort_recursive` (self-recursive); `_deduplicate_schemas`, `_make_json_hashable` | unchanged, 5 functions, -7.26% of the training workload's instructions either way |
+
+  One of three pydantic runs by R1 kept 33 functions instead: the 9-function set both
+  main and R1 build lost pass 3's wall-time veto in that run (274.3 ms against
+  CPython's 249.5 ms, at -6.36% instructions), so pass 3 took the next set. Two further
+  runs by main and one by R1 passed the same set and pruned it to the same 5 functions;
+  the veto is noise main is exposed to as much.
+  The entries are the members pass 2 counted called from outside the region: tomli's
+  other parser functions (`parse_literal_str`, `parse_basic_str`, ...) call `skip_chars`,
+  `skip_until` and `parse_key` directly, so those are entries as well as `loads`.
+- **The rule as first built.** A first version formed the regions over all of pass 3's
+  candidates and made every set it measured whole under them: a hot core took its
+  regions' cold members along. tomli's selection grew from 19 functions to 29 (the whole
+  22-member region of the candidates, -48K instructions per `loads()` with generic bodies,
+  +14% `.text`) and pypng's from 8 to 19 (+20K per `read()`), as pruning could no longer
+  remove one costly member of a region. (Its pydantic run also kept 33 functions, but
+  because its 12-function core lost the wall-time veto, as above.) Since each check builds exactly its set,
+  its own selected unit's regions are the ones that matter (4.7), and pruning removes
+  those of the winner.
 
 ## 6. Risks
 

@@ -270,3 +270,24 @@ fn a_walrus_in_a_comprehension_binds_in_the_containing_scope() {
     // comprehension's own targets, nor a walrus inside a lambda.
     assert_eq!(bound, ["u", "v", "y"]);
 }
+
+#[test]
+fn a_walrus_in_what_a_nested_scope_evaluates_outside_binds_here() {
+    let module = parse(
+        "@deco(d := 1)\n\
+         def g(a=(f := h), *, b=(k := 2)) -> int:\n    \
+             inner = 1\n\
+         class C((base := object), metaclass=(meta := type)):\n    \
+             attr = 1\n\
+         lam = lambda x=(dflt := 4): (body := x)\n\
+         [lambda y=(cdflt := 5): (cbody := y) for t in ts]\n",
+    );
+    let bound: Vec<String> = bound_names(&module.body).into_iter().collect();
+    // Decorators, defaults (of a `def` or a lambda, in a comprehension
+    // too), bases and keywords run in this scope; bodies do not. As
+    // CPython's symtable says.
+    assert_eq!(
+        bound,
+        ["C", "base", "cdflt", "d", "dflt", "f", "g", "k", "lam", "meta"]
+    );
+}

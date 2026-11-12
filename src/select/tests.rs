@@ -181,10 +181,27 @@ fn a_members_selection_round_trips_through_its_file() {
     let set: BTreeSet<Key> = [("C.m".to_string(), 3), ("f".to_string(), 10)].into();
     let types: BTreeMap<Key, Types> =
         [(("f".to_string(), 10), vec![("s".to_string(), "str".to_string()), ("n".to_string(), "int".to_string())])].into();
-    assert_eq!(from_text(&to_text(&set, &types)).unwrap(), (set.clone(), types));
-    assert_eq!(from_text(&to_text(&set, &BTreeMap::new())).unwrap(), (set, BTreeMap::new()));
+    let calls: BTreeMap<Key, Calls> = [(
+        ("f".to_string(), 10),
+        Calls {
+            total: 40,
+            from: [(("C.m".to_string(), 3), 12), (("f".to_string(), 10), 7)].into(),
+        },
+    )]
+    .into();
+    assert_eq!(
+        from_text(&to_text(&set, &types, &calls)).unwrap(),
+        (set.clone(), types, calls)
+    );
+    assert_eq!(
+        from_text(&to_text(&set, &BTreeMap::new(), &BTreeMap::new())).unwrap(),
+        (set, BTreeMap::new(), BTreeMap::new())
+    );
     assert!(from_text("").unwrap().0.is_empty());
     assert!(from_text("3 f s\n").is_err());
+    assert!(from_text("3 f calls=x\n").is_err());
+    assert!(from_text("3 f from=1,g\n").is_err());
+    assert!(from_text("3 f from=1,g,2,3\n").is_err());
     assert!(from_text("x f\n").is_err());
     assert!(from_text("3\n").is_err());
 }
@@ -207,4 +224,57 @@ fn the_project_table_names_a_profile_and_overrides() {
     assert!(Project::read(&entry).unwrap_err().contains("list of strings"));
     std::fs::write(dir.join("pyproject.toml"), "[tool.pycc]\nprofile = 1\n").unwrap();
     assert!(Project::read(&entry).unwrap_err().contains("must be a string"));
+}
+
+/// A selected function carries what its profile entry counted of its calls:
+/// all of them, and those each selected function of its module made, so the
+/// build can tell a region's entries (selected-regions.md, section 4.1).
+#[test]
+fn a_selected_function_carries_its_counted_calls() {
+    let dir = pycc_scratch::ScratchDir::new("select_test").unwrap();
+    let path = dir.join("p.json");
+    let entry = |qualname: &str, line: u32, calls: u64, callees: &[(&str, u64)]| profile::Entry {
+        module: "m".into(),
+        qualname: qualname.into(),
+        firstlineno: line,
+        sha256: format!("m:{qualname}"),
+        calls,
+        self_ns: 500,
+        callees: callees.iter().map(|(k, n)| (k.to_string(), *n)).collect(),
+        arg_types: Default::default(),
+        handled: 0,
+        sampled: true,
+        measured: None,
+    };
+    let p = profile::Profile {
+        version: profile::VERSION,
+        python: "3.15".into(),
+        workload: "w.py".into(),
+        runs: 1,
+        total_ns: 1000,
+        functions: vec![
+            entry("loads", 1, 2, &[("m:skip:5", 30), ("*", 4)]),
+            entry("skip", 5, 50, &[("m:skip:5", 3)]),
+            entry("cold", 9, 7, &[("m:skip:5", 17)]),
+        ],
+        sampled: true,
+        verified: false,
+        winner: None,
+    };
+    std::fs::write(&path, p.to_json()).unwrap();
+    let sources = [function("m", "loads", 1, true), function("m", "skip", 5, true), function("m", "cold", 9, true)];
+    let compile = ["m:loads".to_string(), "m:skip".to_string()];
+    let mut req = request(SelectMode::None, &compile, &[]);
+    assert!(decide(&req, &sources).unwrap().calls.is_empty());
+    req.types_profile = Some(&path);
+    let calls = &decide(&req, &sources).unwrap().calls["m"];
+    assert_eq!(calls[&("loads".to_string(), 1)], Calls { total: 2, from: BTreeMap::new() });
+    // `cold` is not selected: its 17 calls are not among `from`.
+    assert_eq!(
+        calls[&("skip".to_string(), 5)],
+        Calls {
+            total: 50,
+            from: [(("loads".to_string(), 1), 30), (("skip".to_string(), 5), 3)].into(),
+        }
+    );
 }

@@ -173,6 +173,17 @@ pub(super) fn with_selection<T, E>(
         for (qualname, reason) in &dropped {
             eprintln!("not compiled: {module}:{qualname}: {reason}");
         }
+        // The regions of what compiled (selected-regions.md, section 4.1).
+        let none = BTreeMap::new();
+        let calls = crate::select::module_calls().unwrap_or(&none);
+        for members in plan.regions(&units) {
+            let keys: Vec<crate::select::Key> = members
+                .iter()
+                .filter_map(|unit| plan.lift(*unit))
+                .map(|lift| (lift.qualname.clone(), line_of(&plan.source, lift.range.start) as u32))
+                .collect();
+            eprintln!("{}", super::regions::report_line(&module, &keys, calls));
+        }
     }
     value
 }
