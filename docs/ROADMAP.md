@@ -68,7 +68,8 @@ Accept (carried over from v0.11, not met there):
    ([design](design/compile-little.md), [#78](https://github.com/rotnov/pycc-next/issues/78)).
    The targets are ratios of CPython time to pycc time, as medians of `bench.yml` on both
    runners:
-   - pydantic `model_json_schema()` >= 1.2x;
+   - pydantic `model_json_schema()` >= 1.15x (lowered from 1.2x on 2026-11-12: section 1's
+     hand-written C, the measured ceiling, is 1.25x, so 1.2x left no margin for noise);
    - model definition >= 1.0x;
    - whole process >= 1.0x;
    - pydantic import stays >= 1.0x;
