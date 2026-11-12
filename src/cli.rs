@@ -20,9 +20,10 @@ pub enum OutputFormat {
     Json,
 }
 
-/// D-128's interop flags (#1224), shared by `build`, `run` and `check`.
-/// `docs/CLI_SPEC.md`'s `pycc.toml` `[interop]` section is the canonical
-/// statement of how they combine with the manifest.
+// D-128's interop flags (#1224), shared by `build`, `run` and `check`.
+// `docs/CLI_SPEC.md`'s `pycc.toml` `[interop]` section is the canonical
+// statement of how they combine with the manifest. A plain comment for the
+// reason `ModeFlags` gives.
 #[derive(Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct InteropFlags {
     /// The interop policy for CPython-backed imports, overriding
@@ -37,7 +38,9 @@ pub struct InteropFlags {
     pub pure: bool,
 }
 
-/// Non-strict mode (#3), shared by `build`, `run`, `check` and `lock`.
+// Non-strict mode (#3), shared by `build`, `run`, `check` and `lock`. A
+// plain comment, not a doc comment: clap would take a flattened `Args`
+// struct's doc comment as the subcommand's description (`pycc --help`).
 #[derive(Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ModeFlags {
     /// Compile untyped or partially typed code: a missing public annotation
@@ -54,9 +57,9 @@ pub struct ModeFlags {
     pub report_fallbacks: bool,
 }
 
-/// Which functions a non-strict `--ext` build compiles
-/// (docs/design/compile-little.md, section 2): the module itself stays
-/// CPython bytecode.
+// Which functions a non-strict `--ext` build compiles
+// (docs/design/compile-little.md, section 2): the module itself stays
+// CPython bytecode. A plain comment for the reason `ModeFlags` gives.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SelectFlags {
     /// Which functions are compiled: `profile` (the default), the selection
@@ -122,6 +125,12 @@ impl InteropFlags {
     }
 }
 
+// The `///` doc comments below are what `pycc --help` and `pycc <command>
+// --help` print, so they are written for the user: no issue numbers,
+// decision ids or repository paths (`tests/cli_help.rs` checks this).
+// Implementation notes stay in `//` comments.
+
+/// Compile typed Python to native code.
 #[derive(Parser)]
 #[command(name = "pycc")]
 pub struct Cli {
@@ -131,64 +140,60 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Compile a Python program to a native executable or a CPython extension module
     Build {
+        /// The entry Python file, or a package directory with `--ext`
         path: PathBuf,
-        #[arg(short = 'o')]
+        /// The output path: the executable, or with `--ext` the extension
+        /// module without its suffix
+        #[arg(short = 'o', value_name = "OUT")]
         out: PathBuf,
-        /// Cross-compile for a different Tier-1 target triple (e.g.
-        /// x86_64-apple-darwin). Omit to build for the host's own default
-        /// target -- the common case.
+        /// Cross-compile for another supported target triple (e.g.
+        /// x86_64-apple-darwin). Omit to build for the host.
         #[arg(long)]
         target: Option<String>,
         /// Enable LLVM optimization (O3-equivalent whole-module pipeline).
-        /// True cross-file LTO has no effect yet -- pycc compiles exactly
-        /// one module per invocation until v0.4's multi-file support lands
-        /// (D-094). Omit to use `pycc.toml`'s neighboring `[build] opt =
-        /// "release"` default when one is present, or plain debug output
-        /// otherwise.
+        /// Omit to use a neighboring `pycc.toml`'s `[build] opt = "release"`
+        /// when one is present, or plain debug output otherwise.
         #[arg(long)]
         release: bool,
-        /// Build a hosted CPython extension module (D-244) instead of a
-        /// native executable: every public module-level function, every
-        /// public `@staticmethod` and `@classmethod` of a public class, and
-        /// every public instance method of a public class that some
-        /// *published, constructible* class's method resolution order
-        /// reaches, becomes
-        /// a callable of one stable-ABI artifact that a CPython interpreter
-        /// imports -- a method as `mod.Class.method`, an instance method on
-        /// an instance the host builds with `mod.Class(...)`. Each class's
-        /// method table is resolved through the class's namespace, so an
-        /// inherited method is reachable on the derived class while any
-        /// binding the derived class makes for that name -- another method,
-        /// a `@property`, an `@abstractmethod` -- shadows it, publishing the
-        /// derived binding or nothing. `-o` names
-        /// that artifact; `docs/CLI_SPEC.md:23-63` is
-        /// the canonical statement of how its suffix and module name are
-        /// derived. `docs/RUNTIME.md`'s `ext` boundary section is the
-        /// canonical admissibility matrix for what the boundary carries;
-        /// any signature outside it is a `C0003` capability gap.
+        /// Build a CPython extension module (stable ABI) instead of a native
+        /// executable.
         ///
-        /// The interop policy governs only the embedded mode, so `--ext`
-        /// is rejected together with `--interop-policy` or `--pure` (D-244
-        /// rule 3).
+        /// Every public module-level function, every public `@staticmethod`
+        /// and `@classmethod` of a public class, and every public instance
+        /// method a public, constructible class reaches through its method
+        /// resolution order becomes a callable of the module: a method as
+        /// `mod.Class.method`, an instance method on an instance built with
+        /// `mod.Class(...)`. A signature the extension boundary cannot carry
+        /// is a `C0003` error. Cannot be combined with `--interop-policy` or
+        /// `--pure`.
+        // D-244. `-o` names the artifact; its suffix and module name are
+        // derived as `docs/CLI_SPEC.md` states. `docs/RUNTIME.md`'s `ext`
+        // boundary section is the canonical admissibility matrix. Each
+        // class's method table is resolved through the class's namespace, so
+        // a derived class's own binding of a name shadows the inherited
+        // method. The interop policy governs only the embedded mode, so
+        // `--ext` rejects `--interop-policy` and `--pure` (D-244 rule 3).
         #[arg(long, conflicts_with_all = ["interop_policy", "pure"])]
         ext: bool,
-        /// Bind the entry module's relative `from .x import a` statements
-        /// as CPython objects of the package the `--ext` artifact is
-        /// imported under, resolved when it is imported, instead of as
-        /// project modules (D-222's opt-in, #1366). Applies to the entry
-        /// module's relative from-imports, at top level or nested in a
-        /// module-level `if`/`try` block (#1383), and since #1382 to its
-        /// absolute imports rooted at its own top-level package (the
-        /// outermost directory above it that holds an `__init__.py`), in
-        /// every `import`/`from` shape; a dependency's imports stay project
-        /// imports (docs/CLI_SPEC.md). Requires `--ext`.
+        /// Bind the entry module's relative imports (`from .x import a`), and
+        /// its absolute imports rooted at its own top-level package, as
+        /// CPython objects of the package the extension is imported under,
+        /// resolved at import time, instead of compiling them in. Requires
+        /// `--ext`.
+        // D-222's opt-in (#1366): relative from-imports at top level or
+        // nested in a module-level `if`/`try` block (#1383), and since #1382
+        // absolute imports rooted at the entry module's top-level package
+        // (the outermost directory above it that holds an `__init__.py`), in
+        // every `import`/`from` shape; a dependency's imports stay project
+        // imports.
         #[arg(long, requires = "ext")]
         foreign_relative_imports: bool,
-        /// A package build (`PATH` a package directory, v0.8): a module or
-        /// subpackage, named relative to the package or with the package's
-        /// name first, kept in Python instead of compiled into the package's
-        /// extension. Repeatable. Requires `--ext`.
+        /// With a package directory as PATH: a module or subpackage, named
+        /// relative to the package or with the package's name first, kept in
+        /// Python instead of compiled into the package's extension.
+        /// Repeatable. Requires `--ext`.
         #[arg(long = "exclude", value_name = "MODULE", requires = "ext")]
         excludes: Vec<String>,
         /// Internal (the package build's member builds): compile `PATH` as
@@ -219,18 +224,19 @@ pub enum Command {
         /// script's three lines), used instead of probing again.
         #[arg(long, value_name = "PATH", hide = true, requires = "package_member")]
         ext_probe: Option<PathBuf>,
-        /// Link libpython into the executable from the embed interpreter's
-        /// static archive instead of bundling its shared library, and
-        /// export its C-API symbols so a standard-library extension loads
-        /// against them (D-251). Needs a CPython 3.14 whose `LIBPL` holds
-        /// `libpython3.14.a`; a missing, thin or non-archive file is
-        /// refused. A `pycc.lock` section is consumed as for a shared
-        /// build, checked against the interpreter's shared library, or its
-        /// archive when configured without one (#1272). Omit to use a neighboring
-        /// `pycc.toml`'s `[build]
-        /// static = true` when one is present, or the shared library
-        /// otherwise. Only an embedded build uses it: a native, `--pure`
-        /// or `--target` build ignores it, and `--ext` rejects it.
+        /// Link libpython statically into the executable instead of bundling
+        /// its shared library, exporting its C-API symbols so
+        /// standard-library extensions load against them.
+        ///
+        /// Needs a CPython 3.14 whose `LIBPL` holds `libpython3.14.a`. Omit
+        /// to use a neighboring `pycc.toml`'s `[build] static = true` when
+        /// one is present, or the shared library otherwise. Only a build
+        /// that embeds CPython uses it: a native, `--pure` or `--target`
+        /// build ignores it, and `--ext` rejects it.
+        // D-251. A missing, thin or non-archive file is refused. A
+        // `pycc.lock` section is consumed as for a shared build, checked
+        // against the interpreter's shared library, or its archive when
+        // configured without one (#1272).
         #[arg(long, conflicts_with = "ext")]
         static_libpython: bool,
         #[command(flatten)]
@@ -240,36 +246,38 @@ pub enum Command {
         #[command(flatten)]
         select: Box<SelectFlags>,
     },
+    /// Compile a Python program and run it
     Run {
+        /// The entry Python file
         path: PathBuf,
-        /// Every value after `--`, forwarded unchanged and in order as the
-        /// generated program's process arguments (CLI_SPEC.md's
-        /// `pycc run [PATH] [-- args]` contract, #23). `trailing_var_arg` +
-        /// `allow_hyphen_values` so a value that itself looks like a flag
-        /// (e.g. `-x`) is captured here instead of being rejected as an
-        /// unrecognized `pycc` option.
-        ///
-        /// `OsString`, not `String` (#824 item 2): unlike a `String`
-        /// positional, clap does not UTF-8-validate an `OsString` one, so a
-        /// non-UTF-8 forwarded value (e.g. a byte sequence a shell can
-        /// still pass through `$@`) is captured as an opaque byte sequence
-        /// and forwarded to the child process unchanged, the same
-        /// preserve-native-bytes treatment `PATH`/`OUT` already get via
-        /// `PathBuf` (#249), instead of being rejected with a CLI parse
-        /// error. `std::process::Command::args` accepts `OsStr`/`OsString`
-        /// directly, so nothing downstream needs to re-decode these.
-        ///
-        /// #824 item 1 asked whether `trailing_var_arg` should require an
-        /// explicit `--` before capturing anything. It still does not, but
-        /// since `run` gained its own flags (#1224) the capture has a
-        /// window: pycc flags (`--pure`, `--interop-policy`) are recognized
-        /// before `PATH` and between `PATH` and the first forwarded value;
-        /// the first forwarded value and everything after it are forwarded,
-        /// and `--` forwards a value that shares a pycc flag's name
-        /// (`pycc run app.py -- --pure`). A misspelled pycc flag after
-        /// `PATH` is therefore forwarded like any other hyphen value, and so
-        /// is every flag after it. `docs/CLI_SPEC.md`'s `run` contract is
-        /// the canonical statement.
+        /// Arguments passed to the program. pycc's own flags are read before
+        /// the first of them; use `--` to pass one that looks like a pycc
+        /// flag (`pycc run app.py -- --pure`).
+        // Every value after `--` is forwarded unchanged and in order as the
+        // generated program's process arguments (#23). `trailing_var_arg` +
+        // `allow_hyphen_values` so a value that itself looks like a flag
+        // (e.g. `-x`) is captured here instead of being rejected as an
+        // unrecognized `pycc` option.
+        //
+        // `OsString`, not `String` (#824 item 2): unlike a `String`
+        // positional, clap does not UTF-8-validate an `OsString` one, so a
+        // non-UTF-8 forwarded value (e.g. a byte sequence a shell can still
+        // pass through `$@`) is captured as an opaque byte sequence and
+        // forwarded to the child process unchanged, the same
+        // preserve-native-bytes treatment `PATH`/`OUT` already get via
+        // `PathBuf` (#249), instead of being rejected with a CLI parse
+        // error. `std::process::Command::args` accepts `OsStr`/`OsString`
+        // directly, so nothing downstream needs to re-decode these.
+        //
+        // #824 item 1 asked whether `trailing_var_arg` should require an
+        // explicit `--` before capturing anything. It still does not, but
+        // since `run` gained its own flags (#1224) the capture has a window:
+        // pycc flags (`--pure`, `--interop-policy`) are recognized before
+        // `PATH` and between `PATH` and the first forwarded value; the first
+        // forwarded value and everything after it are forwarded, and `--`
+        // forwards a value that shares a pycc flag's name. A misspelled pycc
+        // flag after `PATH` is therefore forwarded like any other hyphen
+        // value, and so is every flag after it.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
         #[command(flatten)]
@@ -277,9 +285,11 @@ pub enum Command {
         #[command(flatten)]
         mode: ModeFlags,
     },
+    /// Type-check Python files and report diagnostics, without building
     Check {
+        /// The Python files to check
         paths: Vec<PathBuf>,
-        /// CLI_SPEC.md's diagnostic-output contract: "human" (default) or "json".
+        /// How diagnostics are printed
         #[arg(long, value_enum, default_value = "human")]
         error_format: ErrorFormat,
         #[command(flatten)]
@@ -287,10 +297,10 @@ pub enum Command {
         #[command(flatten)]
         mode: ModeFlags,
     },
-    /// `pycc lock PATH [--check]`: records the CPython dependency closure
-    /// PATH's embedded build will carry into `pycc.lock` (the pycc.lock
-    /// decision entry, D-249; `docs/CLI_SPEC.md`'s `pycc.lock` section).
+    /// Record in pycc.lock the CPython dependencies an embedded build carries
+    // `pycc lock PATH [--check]`: the pycc.lock decision entry, D-249.
     Lock {
+        /// The entry Python file
         path: PathBuf,
         /// Exit 0 only if `pycc.lock` already holds what `pycc lock` would
         /// write; exit 1 otherwise. Writes nothing.
@@ -301,22 +311,24 @@ pub enum Command {
         #[command(flatten)]
         mode: ModeFlags,
     },
-    /// `pycc profile PKG -o OUT -- PYTHON SCRIPT [ARGS]`: runs SCRIPT with
-    /// PYTHON against PKG's sources, nothing compiled, and writes the profile
-    /// a non-strict `--ext` build selects the functions it compiles from
-    /// (docs/design/compile-little.md, section 2.2).
+    /// Profile a workload to choose the functions a non-strict --ext build compiles
+    // `pycc profile PKG -o OUT -- PYTHON SCRIPT [ARGS]`: runs SCRIPT with
+    // PYTHON against PKG's sources, nothing compiled, and writes the profile
+    // (docs/design/compile-little.md, section 2.2). "The verification" in
+    // the flags' help is the design's pass 3.
     Profile {
         /// The package directory (or single module) whose functions are
         /// profiled.
         path: PathBuf,
-        #[arg(short = 'o')]
+        /// The profile to write (or, with `--check`, to read)
+        #[arg(short = 'o', value_name = "OUT")]
         out: PathBuf,
         /// Profiled runs of the workload, each a fresh process; calls and
         /// self times are their medians.
         #[arg(long, default_value_t = 5)]
         runs: u32,
-        /// The selection rule's least share of the run's self time, whose
-        /// functions pass 2 records argument types for.
+        /// The selection rule's least share of the run's self time; argument
+        /// types are recorded for the functions it selects.
         #[arg(long, default_value_t = 0.005)]
         select_share: f64,
         /// The selection rule's fewest calls.
@@ -338,36 +350,38 @@ pub enum Command {
         /// catch an exception in its frame must be under this.
         #[arg(long, default_value_t = 0.5)]
         select_handled: f64,
-        /// Skip pass 3: keep the selection rule's candidates unmeasured.
+        /// Skip the verification: keep the selection rule's candidates
+        /// without timing them compiled.
         #[arg(long)]
         no_verify: bool,
-        /// Pass 3's most interleaved rounds per check (at most 15), each one
-        /// run of the workload in CPython and one with the candidates
-        /// compiled; a check stops after 5 once the two are apart.
+        /// The verification's most interleaved rounds per check (at most
+        /// 15), each one run of the workload in CPython and one with the
+        /// candidates compiled; a check stops after 5 once the two are apart.
         #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u32).range(1..=15))]
         verify_rounds: u32,
-        /// What decides pass 3's checks: the workload's instruction counts
-        /// under callgrind (`instructions`, needs valgrind), its wall time
-        /// (`wall`), or (`auto`) instruction counts when CPython runs the
-        /// workload in at most a second and callgrind can run it, else wall
-        /// time.
+        /// What decides the verification's checks: the workload's
+        /// instruction counts under callgrind (`instructions`, needs
+        /// valgrind), its wall time (`wall`), or (`auto`) instruction counts
+        /// when CPython runs the workload in at most a second and callgrind
+        /// can run it, else wall time.
         #[arg(long, value_enum, default_value_t = crate::profile::verify::Signal::Auto)]
         verify_signal: crate::profile::verify::Signal,
-        /// A file or directory pass 3's copy holds besides the project (its
-        /// tests, data), at the same path relative to the package's import
-        /// root; repeatable. The copy is of the project root (the nearest
-        /// directory above the package with a `pyproject.toml`, `setup.cfg`
-        /// or `setup.py`, never past `site-packages`), or of the package
-        /// alone when there is none or it is installed.
+        /// A file or directory the verification's copy of the project holds
+        /// besides the package (its tests, data), at the same path relative
+        /// to the package's import root; repeatable. The copy is of the
+        /// project root (the nearest directory above the package with a
+        /// `pyproject.toml`, `setup.cfg` or `setup.py`, never past
+        /// `site-packages`), or of the package alone when there is none or
+        /// it is installed.
         #[arg(long = "verify-include", value_name = "PATH")]
         verify_include: Vec<PathBuf>,
-        /// A module or subpackage of the package (as a package build's
-        /// `--exclude`) kept in Python: profiled, never a candidate, so the
-        /// set pass 3 measures is the set a build with the same `--exclude`
-        /// compiles. Repeatable.
+        /// A module or subpackage of the package (as `pycc build --exclude`)
+        /// kept in Python: profiled, never a candidate, so the set the
+        /// verification measures is the set a build with the same
+        /// `--exclude` compiles. Repeatable.
         #[arg(long = "exclude", value_name = "MODULE")]
         excludes: Vec<String>,
-        /// Run no workload: read the profile `-o` names against PKG's current
+        /// Run no workload: read the profile `-o` names against PATH's current
         /// sources and print its stale entries and what the selection rule
         /// takes from it (`-- PYTHON` indexes the sources).
         #[arg(long)]
@@ -376,19 +390,27 @@ pub enum Command {
         #[arg(last = true, required = true)]
         workload: Vec<OsString>,
     },
+    /// Run tests (not implemented yet)
     Test,
+    /// Explain a diagnostic code, with an example
     Explain {
+        /// The diagnostic code (e.g. T0021)
         code: String,
-        /// `pycc explain`'s own output-format flag (see `OutputFormat`'s
-        /// doc comment for why this isn't `--error-format`).
+        /// How the explanation is printed
+        // Deliberately not `--error-format`: see `OutputFormat`.
         #[arg(long, value_enum, default_value = "human")]
         format: OutputFormat,
     },
+    /// Create pycc.toml and src/main.py in the current directory
     Init {
+        /// The project name (default: the current directory's name)
         name: Option<String>,
     },
+    /// Remove build artifacts (not implemented yet)
     Clean,
+    /// Print the versions of pycc and of the rustc and LLVM it was built with
     Version {
+        /// Also list the supported targets
         #[arg(long)]
         verbose: bool,
     },
