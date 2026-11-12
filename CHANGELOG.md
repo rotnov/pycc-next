@@ -28,6 +28,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- A profile's observed type specializes a parameter only where a loop of the function
+  computes with its native value (`docs/design/call-site-specialization.md`): an
+  operation whose other operand is an object converts on every iteration, which the
+  generic body, with its inline exact-type paths, never does. tomli's ten observed-type
+  specializations each made the workload run more instructions (`skip_chars`, whose
+  `src: str` meets only the object `pos` and an object frozenset, 1,325 more per call),
+  so pass 3 kept none of its functions; none is specialized now, and pass 3 keeps its 19
+  hot functions at 14.5% fewer instructions than CPython. `--report-fallbacks` names each
+  parameter so left an object (`meets no native operand in a loop`).
 - `pycc profile`'s pass 3 decides its checks on the training workload's instruction
   counts under callgrind when it can (`--verify-signal auto|instructions|wall`, replacing
   `--verify-instructions`; `docs/design/compile-little.md`, section 2.3): fresh-process

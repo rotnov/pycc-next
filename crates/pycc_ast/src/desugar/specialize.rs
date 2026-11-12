@@ -99,6 +99,10 @@ pub struct Specialized {
     /// Whether the copy calls a builtin its original calls through
     /// [`FALLBACK_BUILTINS`] (module doc).
     pub restored_builtins: bool,
+    /// The copy's name, for a module-level copy [`specialize_observed`]
+    /// made, whose native parameters the driver checks a loop computes
+    /// with (`pycc_mir::natively_used`).
+    pub copy: Option<String>,
 }
 
 /// Adds the guarded specializations of `module`'s unannotated top-level
@@ -429,6 +433,7 @@ fn native_copy(
             range: def.range(),
             params: guessed,
             restored_builtins,
+            copy: None,
         },
     )
 }
@@ -449,13 +454,17 @@ pub type Observed = (String, Vec<(String, &'static str)>);
 /// of those `keep_builtins` names (by report name) keep calling builtins
 /// as their originals do. A parameter the body may bind again is not
 /// specialized, and a use of a specialized one reads its original object
-/// unless it provably cannot let the value out (`escapes`). Returns what was specialized,
+/// unless it provably cannot let the value out (`escapes`). A parameter
+/// `idle` names (by report name and parameter) is not specialized either:
+/// the driver found no loop of an earlier copy computing with its native
+/// value (`pycc_mir::natively_used`). Returns what was specialized,
 /// by report name, and why an observed parameter was not, by report name.
 pub fn specialize_observed(
     module: &mut ModModule,
     observed: &dyn Fn(&str) -> Option<Observed>,
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
+    idle: &dyn Fn(&str, &str) -> bool,
 ) -> (Vec<Specialized>, Vec<(String, String)>) {
     if ["type", "str", "int", "float", "bytearray"]
         .iter()
@@ -479,7 +488,7 @@ pub fn specialize_observed(
         let planned = observed(def.name.as_str())
             .filter(|(report, _)| !skip(report))
             .and_then(|(report, types)| {
-                plan_observed(&def, report, &types, keep_builtins, &shadowed, &mut excluded)
+                plan_observed(&def, report, &types, keep_builtins, idle, &shadowed, &mut excluded)
             });
         match planned {
             Some((clone, spec, objects)) => {
@@ -507,6 +516,7 @@ fn plan_observed(
     report: String,
     types: &[(String, &'static str)],
     keep_builtins: &dyn Fn(&str) -> bool,
+    idle: &dyn Fn(&str, &str) -> bool,
     shadowed: &std::collections::BTreeSet<&str>,
     excluded: &mut Vec<(String, String)>,
 ) -> Option<(StmtFunctionDef, Specialized, Vec<String>)> {
@@ -542,6 +552,19 @@ fn plan_observed(
             ));
             observed = None;
         }
+        if let Some(ty) = observed
+            && ty != "bytearray"
+            && idle(&report, param_name)
+        {
+            excluded.push((
+                report.clone(),
+                format!(
+                    "parameter `{param_name}` (observed `{ty}`) meets no native operand in a loop, \
+                     so converting it would cost more than it saves"
+                ),
+            ));
+            observed = None;
+        }
         let annotation = match observed {
             Some(ty) => {
                 guessed.push((param_name.to_string(), ty));
@@ -558,7 +581,8 @@ fn plan_observed(
     if guessed.is_empty() {
         return None;
     }
-    let (mut clone, spec) = native_copy(def, None, annotations, guessed, &[], keep_builtins, report);
+    let (mut clone, mut spec) = native_copy(def, None, annotations, guessed, &[], keep_builtins, report);
+    spec.copy = Some(clone.name.to_string());
     // A formal parameter or any binding in the body may shadow a builtin
     // as a module binding may.
     let mut shadowed = shadowed.clone();
@@ -673,6 +697,7 @@ fn plan_iterable(
             range: def.range(),
             params: specialized,
             restored_builtins: false,
+            copy: None,
         },
     ))
 }

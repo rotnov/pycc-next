@@ -461,9 +461,12 @@ pub(crate) fn resolve_frontend_with(
     let non_strict = crate::mode::non_strict_for(path);
     crate::specialize::reset();
     let typed = with_fallback(path, publishes, || {
-        crate::specialize::with_specialization(&display, non_strict, || {
-            resolve_linked(path, module_name, relative_imports, true)
-        })
+        crate::specialize::with_specialization(
+            &display,
+            non_strict,
+            || resolve_linked(path, module_name, relative_imports, true),
+            pycc_mir::build,
+        )
     })?;
     crate::specialize::report();
     Ok(typed)

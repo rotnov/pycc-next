@@ -235,13 +235,79 @@ function it copies (`specialize/escapes.rs`):
   fallback uses the same per-scope part of it (`pycc_ast::namespace::bound_anywhere` and
   `bound_names`);
   `--report-fallbacks` says `not specialized: ... may be bound again in the body`.
+- **A parameter is specialized only where a loop computes with its native value.** A
+  native parameter costs a conversion at every call (the guard's `pycc_ext_obj_unbox_str`
+  of a `str` is about 150 instructions), and the generic body it replaces already takes
+  an exact `int` or `str` operand's common case inline (the fast paths and tagged locals
+  above). It saves only where an operation repeated by a loop has nothing but native
+  operands: `text1[x1] == text2[y1]` with `x1` and `y1` native `int`s. An operation
+  whose other operand is an object converts on every iteration instead, which the
+  generic body never does. So once an attempt with the observed types type-checks, the
+  driver lowers it to MIR and looks, in each copy, for an operation inside a loop (a
+  `while` test or body, a `for` body, a comprehension) that reads the parameter natively
+  with only native operands beside it: arithmetic, a comparison, an index or slice, a
+  builtin's or a `str` method's argument, a comprehension's source, or the sequence a
+  `for` walks (`pycc_mir::natively_used`). A native local computed from it carries the
+  use back: pypng's `undo_filter_paeth` reads `filter_unit` once, in `ai =
+  -filter_unit`, and its loop then indexes with the native `ai`. A read that is boxed,
+  passed on, stored or meets an object operand (including one converted for the use,
+  `pycc_ext_obj_coerce` of an object index) does not count, nor does a read outside a
+  loop that feeds no such local. A parameter with
+  no such read is left an object and the module is checked again
+  (`crate::specialize::with_specialization`); a copy with no parameter left is not
+  made. `--report-fallbacks` says `not specialized: ... meets no native operand in a
+  loop`. A `bytearray`'s native form is its object, so it is always kept.
+
+  tomli is the case that found it. Its scanners take `src: str` and rebind `pos`, so
+  `pos` stays an object and every use of `src` meets it: in `skip_chars`, `while
+  src[pos] in chars` converted `pos` to a native index (`pycc_ext_obj_coerce`, through
+  `PyNumber_AsSsize_t`, about 190 instructions), made a native one-character string,
+  packed it into a new CPython `str` and searched the object `chars` with it (hashing
+  the new string) at every step, where the generic body reads the cached character and
+  one bit of the frozenset's ASCII mask. Specialized, `skip_chars` ran 1,325 more
+  instructions per call. Measured over pass 3's training workload (tomli's test suite
+  and 100 `loads()` of its benchmark document, callgrind, CPython 3.15.0b4), with
+  tomli's 36 candidates compiled and one function at a time specialized as the profile
+  observed:
+
+  | specialized | instructions | against none specialized |
+  |---|---|---|
+  | none | 860.8M | |
+  | `skip_chars` (`src: str`) | 976.7M | +115.9M |
+  | `parse_key` (`src`) | 874.7M | +13.9M |
+  | `parse_basic_str` (`src`) | 869.1M | +8.3M |
+  | `key_value_rule` (`src`) | 865.5M | +4.7M |
+  | `Flags.is_` (`flag: int`) | 865.2M | +4.4M |
+  | `parse_array` (`src`, `nest_lvl: int`) | 864.9M | +4.1M |
+  | `skip_comments_and_array_ws` (`src`) | 864.7M | +3.9M |
+  | `parse_inline_table` (`src`, `nest_lvl`) | 863.2M | +2.3M |
+  | `skip_until` (`src`, `expect: str`) | 862.3M | +1.5M |
+  | `Flags.set` (`flag`) | 861.2M | +0.4M |
+  | all ten | 1,025.6M | +164.8M |
+
+  CPython ran the same workload in 1,047.4M (in pass 3's own count, 1,022.5M against
+  1,039.4M with the 36 specialized and 1,037.9M with the 19 hot ones), so pass 3 kept
+  none of tomli's candidates. With the rule, none of the ten is specialized (each
+  parameter meets only `pos` or an object set), the 36 run 859.4M, and pass 3 keeps
+  the 19 hot ones at -14.5% of the workload's instructions (874.0M against 1,022.5M).
+  `diff_bisect` keeps `text1: str, text2: str`, whose loops index them with native
+  `int`s; its `deadline: int`, compared only with `time.time()`'s object, is no longer
+  specialized: `diff_main` of the speed test's first 2,000 characters ran 260.9M
+  instructions before and 260.1M after (CPython 1,029.7M). pypng's
+  `undo_filter_average` and `undo_filter_paeth` keep `filter_unit: int` (through `ai`);
+  `undo_filter_sub` (which passes it to `range()` once) and `undo_filter_up` (which
+  never reads it) no longer convert it: pass 3's count for pypng's 30 candidates went
+  from 4,219.3M to 4,218.3M (CPython 5,077.6M), and it keeps the same 7 hot functions.
+  Without the local's use carried back, the four lost their specialization and the 30
+  ran 4,239.4M.
 
 `tests/select_observed_types.rs` checks both paths against CPython: the observed `str`s;
 a list, a tuple, an `int` or `None`; `str` subclasses that change indexing or `len`; a
 NaN, a large `int` and a `str` that leave unchanged; `hash` of a NaN, a reflected
 `__radd__`, and a `len` bound by a parameter, a `case` capture or an `except ... as`; `+x`,
-`s.strip()`, `s[:]`, `s + ''` and `s.split()` against CPython's identities; and a rebound
-parameter.
+`s.strip()`, `s[:]`, `s + ''` and `s.split()` against CPython's identities; a rebound
+parameter; and parameters left objects because their loops meet only objects (tomli's
+`skip_chars`, and a `float` multiplied with a list's items).
 
 The guessed specializations of `specialize_untyped` (the `--select module` path) follow
 the same rules, through the same `keep_objects` (object parameters come after a method's
