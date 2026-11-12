@@ -280,6 +280,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `docs/roadmap/v0.1-v0.7.md`.
 
 ### Fixed
+- `bench/pydantic_check.py` compiled nothing: its training profile ran without the
+  build's `--exclude v1`, so pass 3's winning set was not valid for the build, and the
+  CI benchmark timed CPython against CPython. The profile now names the build's excludes,
+  the build targets the interpreter the profile ran (`PYCC_PYTHON`, unless set), and the
+  script imports again (its `Package` lacked `max_build_ratio`). The measured import
+  breakdown is in `docs/ROADMAP.md` (v0.12, accept 1).
 - Non-strict `--ext`: an object freed while an exception propagates through compiled code
   (a local of the frame it leaves, a missing key the handler held, the argument of a
   `sorted()` that failed) may run compiled code of its own, a `__del__` or a generator's

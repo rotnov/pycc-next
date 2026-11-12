@@ -58,6 +58,27 @@ Accept (carried over from v0.11, not met there):
    **Status 2026-11-06:** met locally (1.05x-1.07x), not yet confirmed on CI. The 1.2x
    stretch is withdrawn. Under the plan below, modules run as CPython bytecode, so the
    import is at parity by construction and has no path to 1.2x.
+   **Status 2026-11-12:** at parity, not above it. `bench/pydantic_check.py` had compiled
+   nothing since the plan below: its training profile ran without the build's
+   `--exclude v1`, so pass 3's winning set was invalid for the build. The last CI
+   benchmark (bench run 42562202490 at c82d1db8: 1.00x) timed CPython against CPython.
+   With the profile and the build on the same excludes and interpreter, the build
+   compiles 9 functions into a 1.38 MB extension (PBS CPython 3.15.0b4, 4-vCPU x86_64 VM;
+   medians of 21 interleaved runs, ms with the IQR): import 72.78 (70.95-74.52) against
+   CPython's 73.19 (69.76-75.08), 1.01x; definition 0.98x, schema 1.01x, round-trips 1.01x,
+   whole process 0.96x (IQRs overlapping in every row). Under callgrind (`PYTHONHASHSEED=0`)
+   the import phase runs 347.90M instructions against 347.30M (+0.17%): 0.25M of it binding
+   the extension's symbols in `ld.so`, 0.06M its own code. Its `dlopen` takes 165 µs (an
+   empty `.so` 69 µs; lazy binding saves 8 µs), and the import faults 59 more pages (2,485
+   against 2,426). Together about 0.5 ms, under 1% and inside the noise. No item of the
+   extension's cost can make the import faster than CPython's. What can: 43% of the
+   import phase's instructions are CPython compiling texts at run time, `compile()` of 737
+   forward references (605 of them `pydantic_core.core_schema`'s `TypedDict`s) and `exec`
+   or `eval` of 101 generated texts (53 of them `dataclasses` methods, 37 of those for
+   pydantic's own dataclasses). A prototype that hands `dataclasses` the build's code objects for
+   pydantic's own texts (a Python wrapper, 15 runs) took the import from 73.3 ms to 64.2 ms
+   (1.14x). That is the lever v0.12's lever 11 was, which the plan's PR 5 deleted on the
+   expectation that the import stays at parity without it.
 2. **pystache's import no slower than CPython's** in the CI benchmark job, on both
    runners, and no package check regresses. v0.11 (CPython 3.13): 0.97x / 0.94x; against
    3.15: 0.94x / 0.93x.
