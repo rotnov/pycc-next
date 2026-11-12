@@ -240,7 +240,9 @@ version: if a member changed, the Python version differs or a whole-package buil
 `--exclude` list does, the build selects nothing and asks for a new profile. A selected
 function whose parameters the profile saw holding one exact `int`, `float`, `str` or
 `bytearray` is compiled with a native copy typed with them, behind an exact-type guard
-(`specialized:` in `--report-fallbacks`). A function measured slower stays rejected while its source is unchanged
+(`specialized:` in `--report-fallbacks`). Selected functions that call each other by a
+name no code rebinds form a region (`region:` in `--report-fallbacks`), which the
+profile's third pass prunes as one. A function measured slower stays rejected while its source is unchanged
 (`--no-verify` skips this).
 `pycc profile pkg -o pycc.profile.json --check -- python3` reads a profile against the
 current sources: which entries are stale (their function's source changed) and what the

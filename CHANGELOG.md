@@ -4,6 +4,17 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- Regions of selected functions (`docs/design/selected-regions.md`, R1). The selected
+  functions of a module that call each other by a name no code rebinds (a module global
+  bound only by its `def`, or `self.m(...)` of the caller's own class) form a region, and
+  `--report-fallbacks` lists each as `region: MODULE: A, B, C (entries: ...)`, an entry
+  being a member the profile counted called from outside the region. `pycc profile`'s
+  pass 3 prunes a region of its winning set whole, never one member. No code is generated
+  differently: a build of the same functions runs the same instructions. This prepares
+  native calls inside a region (R2).
+
 ### Fixed
 
 - A profile-selected function's compiled body is specialized for a parameter's exact type

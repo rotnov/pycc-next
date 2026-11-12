@@ -6,32 +6,35 @@
 //! run fewer (-4.59%, -4.59%, -4.48%): each by less than the 0.5% a removal
 //! must save, together by more.
 //!
-//! So the winner is pruned in two steps. Each member, the one with the
-//! least self time first, is removed in turn and the set without it
-//! measured as a whole against the winner (leave one out); the members
-//! whose removal did better at all ([`lighter`]) are then removed together
-//! and that set measured once more. The selection becomes the set without
+//! So the winner is pruned in two steps. Each unit (a member, or a region
+//! of the selected unit with all its members, docs/design/selected-regions.md
+//! section 4.7), the one with the least self time first, is removed in turn
+//! and the set without it measured as a whole against the winner (leave one
+//! out); the units whose removal did better at all ([`lighter`]) are then
+//! removed together and that set measured once more. The selection becomes the set without
 //! them only when it beats the winner by the rule a larger set must meet to
 //! replace a smaller one ([`prunes`]); else a single removal that does, the
 //! first measured; else the winner as it was. A member that pays stays,
 //! and the selection is still exactly one set measured as a whole that won.
 
 use super::verdict::WALL_MARGIN_PPM;
-use super::{lighter, measured, prunes, Check, FunctionKey, Pass, MIN_GAIN_PPM};
+use super::{lighter, measured, prunes, units, Check, FunctionKey, Pass, Units, MIN_GAIN_PPM};
 use std::collections::BTreeSet;
 
 impl Pass<'_, '_> {
     /// Prunes measurement `best` within `budget` builds more: one build per
-    /// member tried (`order` comes most self time first, and is tried from
-    /// its end), one of the budget reserved for the members removed
-    /// together. The members of the carried set are never tried, and the
-    /// set is never pruned to nothing. The measurement selected, or None
+    /// unit tried (`order` comes most self time first, and units are tried
+    /// from its end), one of the budget reserved for the units removed
+    /// together. A region of the winner's selected unit (`units`) is
+    /// removed whole, never one member of it. The members of the carried
+    /// set are never tried, and the set is never pruned to nothing. The measurement selected, or None
     /// when nothing won. A refusal that invalidates the winner ends the
     /// step, and the best valid measurement is selected instead.
     pub(super) fn prune(
         &mut self,
         best: Option<usize>,
         order: &[FunctionKey],
+        units: &Units<'_>,
         budget: usize,
     ) -> Result<Option<usize>, String> {
         let Some(winner) = best else {
@@ -43,27 +46,26 @@ impl Pass<'_, '_> {
         let Some(kept) = self.entries[winner].check.clone() else {
             return Ok(best);
         };
-        // Least self time first: the least evidence that a member pays. The
-        // last member of its own is never tried: a set is not pruned to
+        // Least self time first: the least evidence that a unit pays. The
+        // last unit of its own is never tried: a set is not pruned to
         // nothing.
-        let tries: Vec<FunctionKey> = order
-            .iter()
-            .rev()
-            .filter(|key| with.contains(*key) && !base.contains(*key))
-            .cloned()
-            .collect();
+        let removable: BTreeSet<FunctionKey> = with.difference(&base).cloned().collect();
+        let regions = units(&with);
+        for region in &regions {
+            eprintln!("pycc profile: pass 3: region {} is pruned as one", units::names(region));
+        }
+        let tries: Vec<BTreeSet<FunctionKey>> = units::removals(order, &regions, &removable);
         if tries.len() < 2 || budget == 0 {
             return Ok(best);
         }
         // Leave one out, within all but the build reserved for the group.
-        let mut trials: Vec<(FunctionKey, usize)> = Vec::new();
+        let mut trials: Vec<(BTreeSet<FunctionKey>, usize)> = Vec::new();
         let reserved = limit.saturating_sub(1).max(self.builds + 1);
-        for key in &tries {
+        for unit in &tries {
             if self.builds >= reserved {
                 break;
             }
-            let mut without = with.clone();
-            without.remove(key);
+            let without: BTreeSet<FunctionKey> = with.difference(unit).cloned().collect();
             let trial = self.measure(without, reserved)?;
             if !self.entries[winner].valid {
                 return Ok(self.best());
@@ -79,8 +81,8 @@ impl Pass<'_, '_> {
                 } else {
                     "not better without it"
                 };
-                report(&format!("{}:{}", key.0, key.1), &pruned, &kept, verdict);
-                trials.push((key.clone(), trial));
+                report(&units::names(unit), &pruned, &kept, verdict);
+                trials.push((unit.clone(), trial));
             }
         }
         let won = |pass: &Self, i: usize| {
@@ -89,7 +91,7 @@ impl Pass<'_, '_> {
                 .as_ref()
                 .is_some_and(|c| prunes(c, &kept))
         };
-        let losers: Vec<FunctionKey> = trials
+        let losers: Vec<BTreeSet<FunctionKey>> = trials
             .iter()
             .filter(|(_, i)| {
                 self.entries[*i]
@@ -97,15 +99,12 @@ impl Pass<'_, '_> {
                     .as_ref()
                     .is_some_and(|c| lighter(c, &kept))
             })
-            .map(|(key, _)| key.clone())
+            .map(|(unit, _)| unit.clone())
             .collect();
-        let mut selected = None;
+        let mut selected: Option<(usize, BTreeSet<FunctionKey>)> = None;
         if losers.len() > 1 && losers.len() < tries.len() {
-            let group: BTreeSet<FunctionKey> = with
-                .iter()
-                .filter(|key| !losers.contains(key))
-                .cloned()
-                .collect();
+            let dropped: BTreeSet<FunctionKey> = losers.iter().flatten().cloned().collect();
+            let group: BTreeSet<FunctionKey> = with.difference(&dropped).cloned().collect();
             let trial = self.measure(group, limit)?;
             if !self.entries[winner].valid {
                 return Ok(self.best());
@@ -113,19 +112,15 @@ impl Pass<'_, '_> {
             if let Some(trial) = trial {
                 self.entries[trial].valid = false;
                 if let Some(pruned) = self.entries[trial].check.clone() {
-                    let names: Vec<String> = losers
-                        .iter()
-                        .map(|key| format!("{}:{}", key.0, key.1))
-                        .collect();
-                    let dropped = won(self, trial);
+                    let wins = won(self, trial);
                     report(
-                        &names.join(", "),
+                        &units::names(&dropped),
                         &pruned,
                         &kept,
-                        if dropped { "dropped together" } else { "kept" },
+                        if wins { "dropped together" } else { "kept" },
                     );
-                    if dropped {
-                        selected = Some((trial, losers.clone()));
+                    if wins {
+                        selected = Some((trial, dropped));
                     }
                 }
             }
@@ -134,7 +129,7 @@ impl Pass<'_, '_> {
             selected = trials
                 .iter()
                 .find(|(_, i)| won(self, *i))
-                .map(|(key, i)| (*i, vec![key.clone()]));
+                .map(|(unit, i)| (*i, unit.clone()));
         }
         let Some((trial, dropped)) = selected else {
             eprintln!("pycc profile: pass 3: no removal beats the winning set: it is kept whole");

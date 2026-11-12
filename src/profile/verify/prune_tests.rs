@@ -84,6 +84,7 @@ fn prune_core(
     let (verdicts, builds) = decide(
         &candidates,
         std::slice::from_ref(&candidates),
+        &no_regions,
         &hot,
         &BTreeMap::new(),
         8,
@@ -203,6 +204,7 @@ fn on_wall_time_a_removal_must_be_faster_beyond_the_noise() {
         let (verdicts, builds) = decide(
             &candidates,
             std::slice::from_ref(&candidates),
+            &no_regions,
             &core,
             &BTreeMap::new(),
             8,
@@ -251,6 +253,7 @@ fn pruning_keeps_the_carried_set_and_stops_on_a_refusal() {
     let (verdicts, _) = decide(
         &candidates,
         std::slice::from_ref(&candidates),
+        &no_regions,
         &core,
         &base,
         8,
@@ -276,6 +279,7 @@ fn pruning_keeps_the_carried_set_and_stops_on_a_refusal() {
     let (verdicts, _) = decide(
         &candidates,
         std::slice::from_ref(&candidates),
+        &no_regions,
         &core,
         &BTreeMap::new(),
         8,
@@ -288,4 +292,84 @@ fn pruning_keeps_the_carried_set_and_stops_on_a_refusal() {
         verdicts[&k("make_json_hashable")].refused.as_deref(),
         Some("refused")
     );
+}
+
+
+/// The regions of `set`'s selected unit when `edges` are its functions'
+/// calls among them: the connected components, as `units::static_regions`
+/// forms them from the sources.
+fn regions_of(edges: &[(&str, &str)], set: &BTreeSet<FunctionKey>) -> Vec<BTreeSet<FunctionKey>> {
+    let mut regions: Vec<BTreeSet<FunctionKey>> = Vec::new();
+    for (a, b) in edges {
+        let (a, b) = (k(a), k(b));
+        if !set.contains(&a) || !set.contains(&b) {
+            continue;
+        }
+        let pair: BTreeSet<FunctionKey> = [a, b].into();
+        let (joined, mut rest): (Vec<_>, Vec<_>) = regions.into_iter().partition(|r| !r.is_disjoint(&pair));
+        rest.push(joined.into_iter().flatten().chain(pair).collect());
+        regions = rest;
+    }
+    regions
+}
+
+/// A region of the winner's selected unit (selected-regions.md, section
+/// 4.7) is removed whole: `mode` and `_config` call each other, so no set
+/// measured holds one without the other. Their removal together saves
+/// 0.82%, enough alone; with `create_schema_validator`'s it is the
+/// selection. The regions are those of the winner itself.
+#[test]
+fn a_region_is_pruned_whole() {
+    let (candidates, core) = core();
+    let asked_regions = std::cell::RefCell::new(Vec::new());
+    let units = |set: &BTreeSet<FunctionKey>| {
+        asked_regions.borrow_mut().push(set.clone());
+        regions_of(&[("mode", "config")], set)
+    };
+    let mut asked = Vec::new();
+    let mut run = counted(&CORE, &mut asked);
+    let (verdicts, builds) = decide(
+        &candidates,
+        std::slice::from_ref(&candidates),
+        &units,
+        &core,
+        &BTreeMap::new(),
+        8,
+        MAX_PRUNE_BUILDS,
+        &mut run,
+    )
+    .unwrap();
+    drop(run);
+    assert_eq!(asked_regions.into_inner(), std::slice::from_ref(&core), "the winner's regions");
+    // The core; seven removals (of eight units), least self time first; the
+    // group.
+    assert_eq!(builds, 9);
+    for asked in &asked {
+        assert_eq!(asked.contains(&k("mode")), asked.contains(&k("config")), "{asked:?}");
+    }
+    assert_eq!(asked[6], &core - &set(&["mode", "config"]), "the region tried as one");
+    let kept = &core - &set(&["mode", "config", "create_schema_validator"]);
+    assert_eq!(asked[8], kept);
+    assert_eq!(compiled(&verdicts), kept);
+    for loser in ["mode", "config"] {
+        assert!(verdicts[&k(loser)].rejection().starts_with("faster without it"), "{loser}");
+    }
+}
+
+/// A set pass 3 measures is built as its own selected unit: its hot
+/// functions are measured alone even when they call a cold candidate.
+#[test]
+fn a_set_forms_its_own_regions() {
+    let candidates: Vec<FunctionKey> = ["hot", "cold_callee", "cold_other"].map(k).to_vec();
+    let core = set(&["hot"]);
+    let costs = [("hot", -300), ("cold_callee", 0), ("cold_other", 0)];
+    let units = |set: &BTreeSet<FunctionKey>| regions_of(&[("hot", "cold_callee")], set);
+    let mut asked = Vec::new();
+    let mut run = counted(&costs, &mut asked);
+    let (verdicts, _) =
+        decide(&candidates, std::slice::from_ref(&candidates), &units, &core, &BTreeMap::new(), 8, 0, &mut run).unwrap();
+    drop(run);
+    assert_eq!(asked, [set(&["hot", "cold_callee", "cold_other"]), set(&["hot"])]);
+    assert_eq!(compiled(&verdicts), set(&["hot"]));
+    assert!(regions_of(&[("hot", "cold_callee")], &set(&["hot", "cold_other"])).is_empty());
 }

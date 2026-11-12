@@ -23,7 +23,9 @@
 //!    first, and without those whose removal did better at all, together,
 //!    at most [`MAX_PRUNE_BUILDS`] builds more: a removal is kept only when
 //!    it beats the winner as a larger set must beat a smaller one
-//!    ([`prunes`], `prune.rs`).
+//!    ([`prunes`], `prune.rs`). A region of the winner's selected unit
+//!    (docs/design/selected-regions.md, sections 4.1 and 4.7) is removed
+//!    whole, never one member of it (`units.rs`).
 //!
 //! A check is decided by its instruction count when there is one, else by
 //! its wall times ([`verdict`]: [`Check::faster`], [`replaces`]). The
@@ -51,6 +53,7 @@ use std::time::{Duration, Instant};
 mod callgrind;
 mod copy;
 mod prune;
+mod units;
 pub(crate) use copy::copy_package;
 mod verdict;
 pub(crate) use verdict::{
@@ -234,7 +237,9 @@ pub(super) fn verify(
     let baseline = baseline(cx)?;
     let regions = regions(profile, &candidates);
     let mut run = |set: &BTreeSet<FunctionKey>, builds: usize| check(set, cx, builds, baseline);
-    let (mut verdicts, builds) = decide(&candidates, &regions, core, &base, MAX_BUILDS, MAX_PRUNE_BUILDS, &mut run)?;
+    let units = |set: &BTreeSet<FunctionKey>| units::static_regions(cx.driver.pkg, set);
+    let (mut verdicts, builds) =
+        decide(&candidates, &regions, &units, core, &base, MAX_BUILDS, MAX_PRUNE_BUILDS, &mut run)?;
     let kept = verdicts.values().filter(|m| m.compiled).count();
     for e in &mut profile.functions {
         if let Some(m) = verdicts.remove(&(e.module.clone(), e.qualname.clone(), e.firstlineno)) {
@@ -376,6 +381,16 @@ pub(super) type Outcome = Result<Result<Check, BTreeMap<FunctionKey, String>>, S
 /// is the number of the build.
 pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 'r;
 
+/// The regions of a set's selected unit (`units::static_regions`): what
+/// pruning removes whole.
+pub(super) type Units<'u> = dyn Fn(&BTreeSet<FunctionKey>) -> Vec<BTreeSet<FunctionKey>> + 'u;
+
+/// [`Units`] for sets whose functions do not call each other.
+#[cfg(test)]
+fn no_regions(_: &BTreeSet<FunctionKey>) -> Vec<BTreeSet<FunctionKey>> {
+    Vec::new()
+}
+
 /// Pass 3's decision over `candidates` (in `regions`, most self time
 /// first) within `budget` builds, each check made by `run`: a verdict for
 /// every candidate, and the builds made. `base` is the winning set an
@@ -398,15 +413,18 @@ pub(super) type Run<'r> = dyn FnMut(&BTreeSet<FunctionKey>, usize) -> Outcome + 
 /// ([`refusals`]) is never timed.
 ///
 /// The set so selected is then pruned ([`Pass::prune`]) within `prune`
-/// builds more: its members are removed one at a time, the one with the
-/// least self time first (`candidates` come most self time first), then
-/// those whose removal did better, together; a removal is kept only when
-/// the set without the members beats the winner ([`prunes`]). Every pruned
-/// set is measured as a whole too, so the invariant holds; at most
-/// `budget + prune` builds in all.
+/// builds more: its units (a region of its selected unit, `units`, or a
+/// function in none) are removed one at a time, the one with the least self
+/// time first (`candidates` come most self time first), then those whose
+/// removal did better, together; a removal is kept only when the set
+/// without the members beats the winner ([`prunes`]). Every pruned set is
+/// measured as a whole too, so the invariant holds; at most `budget +
+/// prune` builds in all.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn decide(
     candidates: &[FunctionKey],
     regions: &[Vec<FunctionKey>],
+    units: &Units<'_>,
     core: &BTreeSet<FunctionKey>,
     base: &BTreeMap<FunctionKey, Measured>,
     budget: usize,
@@ -435,7 +453,7 @@ pub(super) fn decide(
         }
     }
     let best = pass.best();
-    let selected = pass.prune(best, candidates, prune)?;
+    let selected = pass.prune(best, candidates, units, prune)?;
     Ok(pass.finish(selected))
 }
 
