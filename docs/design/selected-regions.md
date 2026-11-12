@@ -307,9 +307,15 @@ its neighbors' signatures. So:
 ### 4.8 Generators and closures
 
 Generators and coroutines are not eligible (section 2.1), so a region never contains one.
-A generator calls a member through the member's patched function, which is an entry. A
-generator expression or lambda inside a copy that reads a native local boxes the value into
-its cell when it is created, as strict code does. CPython reads the same value there.
+A generator calls a member through the member's patched function, which is an entry.
+
+A local (or parameter) that any nested scope captures, whether a lambda, a nested `def`, a
+generator expression or a comprehension, is never native in a copy: it stays a CPython object
+in the shared cell, exactly as in the generic lift. Boxing it only when the closure is created
+would break late binding: in `read = lambda: pos; pos += 1; return read()` CPython returns the
+incremented position. Excluding captured names costs nothing measured, since no tomli scanner
+captures `pos`. R2's tests include this late-binding case, after the existing checks in
+`tests/closure_soundness.rs`.
 
 ### 4.9 Not in this plan
 
@@ -328,7 +334,7 @@ number stops the sequence for a measurement and a revision of this plan.
 | PR | change | tests | expected effect |
 |---|---|---|---|
 | R1 | Regions: formation from the selected unit (4.1, without the position-flow callees), `--report-fallbacks` lines `region: m: a, b, c (entries: ...)`, and pass 3 measuring and pruning regions as units (4.7) | unit tests of formation on a fixture module: an edge through a rebound global, a method edge, two components, a self-recursive function; prune tests with a two-member region; `package_check` reports tomli's region | no change in instructions (no code is generated differently); the five packages' selections unchanged or each change explained |
-| R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native, region edges as checked direct calls, `TypeError` on a rebound member's mismatched result; position-flow callees join the region; two DEVIATIONS rows | `tests/select_regions.rs` against CPython: tomli-shaped scanners and tuple-returning parsers; entry with `bool`, an `int` subclass and a big `int`; `mock.patch` of a member before a call (the generic path runs, result matches CPython for both result types) and from inside one (the `TypeError` row); the `intact` flag cleared by assignment, deletion and `dict.clear()`; `RecursionError` depth; traceback function names; `is` of a returned position, matching the DEVIATIONS row | tomli `loads()` <= 2.66M per call locally (`u1`: 2.657M), wall >= 1.33x; `.text` growth reported (`u1`: +16%) |
+| R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native, region edges as checked direct calls, `TypeError` on a rebound member's mismatched result; position-flow callees join the region; two DEVIATIONS rows | `tests/select_regions.rs` against CPython: tomli-shaped scanners and tuple-returning parsers; entry with `bool`, an `int` subclass and a big `int`; `mock.patch` of a member before a call (the generic path runs, result matches CPython for both result types) and from inside one (the `TypeError` row); the `intact` flag cleared by assignment, deletion and `dict.clear()`; `RecursionError` depth; a rebound `pos` captured by a lambda or generator expression (late binding, 4.8); traceback function names; `is` of a returned position, matching the DEVIATIONS row | tomli `loads()` <= 2.66M per call locally (`u1`: 2.657M), wall >= 1.33x; `.text` growth reported (`u1`: +16%) |
 | R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6) | `tests/tagged_words.rs` extended with native `int` operands, fast paths on and off, a `str` subclass receiver | about -80K: tomli <= 2.59M; `diff_bisect` (native `int` locals) not slower |
 | R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K: tomli <= 2.45M; `m0` (generic) lower too |
 | R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
