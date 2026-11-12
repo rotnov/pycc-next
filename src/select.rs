@@ -32,7 +32,7 @@ pub(crate) enum SelectMode {
 pub(crate) type Key = (String, u32);
 
 /// A selected function's parameters a profile observed holding one exact
-/// type, each with it ([`profile::Entry::observed_types`]).
+/// type in (nearly) every sampled call, each with it ([`profile::Entry::observed_types`]).
 pub(crate) type Types = Vec<(String, String)>;
 
 /// The selected functions of every module (by dotted name), and the notes

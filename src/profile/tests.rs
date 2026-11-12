@@ -453,3 +453,43 @@ fn observed_types_are_a_parameters_one_native_exact_type() {
     e.sampled = false;
     assert!(e.observed_types().is_empty());
 }
+
+/// The observed types of an entry whose one parameter `p` held `types`.
+fn observed(types: &[(&str, u64)]) -> Vec<(String, String)> {
+    let mut e = entry("m", "f", 1, "s", 10, 10);
+    e.arg_types.insert("p".into(), types.iter().map(|(t, n)| (t.to_string(), *n)).collect());
+    e.observed_types()
+}
+
+/// A type that covers at least `DOMINANT_PERCENT` of the sampled calls is
+/// observed though a few calls passed another (pypng's `undo_filter_*`:
+/// 998 `bytearray`s, 2 `array.array`s); just below the threshold, nothing is.
+#[test]
+fn a_dominant_type_is_observed_at_the_threshold_and_not_below_it() {
+    assert_eq!(DOMINANT_PERCENT, 95);
+    let bytearray = vec![("p".to_string(), "bytearray".to_string())];
+    assert_eq!(observed(&[("bytearray", 998), ("array.array", 2)]), bytearray);
+    // Exactly 95%.
+    assert_eq!(observed(&[("bytearray", 950), ("array.array", 50)]), bytearray);
+    assert_eq!(observed(&[("bytearray", 19), ("array.array", 1)]), bytearray);
+    // Just below: 94.9%, and 18 of 19.
+    assert!(observed(&[("bytearray", 949), ("array.array", 51)]).is_empty());
+    assert!(observed(&[("bytearray", 18), ("array.array", 1)]).is_empty());
+    // The minority spread over several types counts together.
+    assert!(observed(&[("int", 940), ("bool", 30), ("float", 30)]).is_empty());
+    assert_eq!(observed(&[("int", 960), ("bool", 30), ("float", 10)]), [("p".to_string(), "int".to_string())]);
+}
+
+/// No type dominates a tie, and a dominant type no native body takes (an
+/// `array.array`, a `list`) specializes nothing, even with a native type
+/// among the rest.
+#[test]
+fn a_tie_or_an_unknown_majority_type_is_not_observed() {
+    assert!(observed(&[("bytearray", 500), ("bytes", 500)]).is_empty());
+    assert!(observed(&[("str", 1), ("int", 1)]).is_empty());
+    assert!(observed(&[("array.array", 998), ("bytearray", 2)]).is_empty());
+    assert!(observed(&[("list", 1000)]).is_empty());
+    // A parameter with no counted call has no type.
+    assert!(observed(&[]).is_empty());
+    assert!(observed(&[("int", 0)]).is_empty());
+}

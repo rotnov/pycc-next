@@ -449,7 +449,13 @@ rejected with the reason.
 Each operation in a selected body is lowered for the types it is expected to meet:
 
 - **Expected types.** They come from the profile's `arg_types`, and from local inference
-  (a literal, a display, a builtin's result).
+  (a literal, a display, a builtin's result). A parameter is expected to hold the exact
+  type that covers at least 95% of its sampled calls (`profile::DOMINANT_PERCENT`), not
+  only one held in all of them: a test suite that passes pypng's filter loops an
+  `array('B')` 2 times in 1,000 calls, a `bytearray` the rest, must not cost the
+  `bytearray` calls their native body. The other calls fail the exact-type guard and run
+  the generic body, so the threshold decides speed, never results. Pass 2 records argument
+  types only; return values and locals are not observed (local inference types them).
 - **Hot path inline.** The exact-type path is inline: `Py_IS_TYPE(o, &PyDict_Type)`, then
   the CPython call that type needs (`PyDict_GetItemRef`, `PyList_GetItemRef`,
   `PyDict_Next`).
