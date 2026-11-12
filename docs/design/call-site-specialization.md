@@ -5,9 +5,14 @@ order they landed, each with the measurement that justified it. Section 2.5 stat
 rule; this document is the record of how the shim and the code generator follow it.
 
 **PR 8, first part: bodies specialized for observed types.** A selected function gets
-the parameter types pass 2 observed. Only parameters that held one exact type in every
-sampled call count, and only for `int`, `float`, `str` and `bytearray`
-(`Entry::observed_types`). Those types travel with the selection:
+the parameter types pass 2 observed. Only parameters with one exact type in at least 95%
+of the sampled calls count (`profile::DOMINANT_PERCENT`; until v0.12.0, in every sampled
+call), and only for `int`, `float`, `str` and `bytearray` (`Entry::observed_types`).
+Unanimity cost pypng its filter loops: its test suite passes `undo_filter_*` an
+`array('B')` 1-2 times in 1,000 sampled calls, so no buffer was typed and the five-filter
+read ran at 1.74x CPython's instructions (1.59x wall); with the dominant `bytearray`
+typed, 17.85x (10.1x wall), and PngSuite 1.23x to 3.55x (1.11x to 2.61x wall), both from
+the same profile. Those types travel with the selection:
 - `Selection.types`;
 - the member `--select-functions` file, as ` param:type` after the qualified name;
 - for pass 3's builds, `--types-profile`, so pass 3 times the same typed bodies a build

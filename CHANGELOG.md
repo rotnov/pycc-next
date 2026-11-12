@@ -6,6 +6,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- A profile-selected function's compiled body is specialized for a parameter's exact type
+  when that type covers at least 95% of the calls pass 2 sampled, not only when it covers
+  all of them (`profile::DOMINANT_PERCENT`, `docs/design/compile-little.md` section 2.5).
+  pypng's test suite passes `undo_filter_*` an `array('B')` 1-2 times in 1,000 calls, which
+  left the filter loops untyped: from the same profile, pypng's five-filter read goes from
+  1.74x to 17.85x CPython's instructions (1.59x to 10.1x wall time) and its PngSuite
+  decode from 1.23x to 3.55x (1.11x to 2.61x); tomli is unchanged (1.46x instructions).
+  An argument of another type fails the exact-type guard and runs the generic compiled
+  body, as before, so results do not change.
+
 - `pycc --help` and `pycc <command> --help` describe every subcommand and flag for the
   user. v0.12.0 printed internal doc comments there (`run`, `check` and `lock` showed
   "Non-strict mode (#3)...", `build` a design-document reference, flag help carried issue

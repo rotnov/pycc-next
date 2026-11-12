@@ -184,12 +184,29 @@ impl Measured {
 /// The calls of a function pass 2 samples.
 pub(crate) const TYPE_CALLS: u64 = 1000;
 
+/// The share of a parameter's sampled calls, in percent, one exact type
+/// must cover for the compiled body to be specialized for it
+/// ([`Entry::observed_types`]).
+///
+/// Unanimity is too strict: a test suite or a workload that passes a
+/// function a different buffer once or twice (pypng's `undo_filter_*`
+/// get an `array('B')` 2 times in 1,000 sampled calls, a `bytearray` the
+/// others) would cost the 99.8% their native body. The minority loses
+/// nothing: the specialized copy runs only behind an exact-type guard
+/// (`type(p) is T`), and any other argument runs the generic compiled body,
+/// as before. 95% keeps the guess close to the evidence (at most 50 of
+/// 1,000 sampled calls of another type, each paying the guard on top of
+/// the generic body) and leaves the final word to pass 3, which measures
+/// the typed body against CPython.
+pub(crate) const DOMINANT_PERCENT: u64 = 95;
+
 impl Entry {
-    /// The parameters pass 2 saw holding one exact type in every call it
-    /// sampled, each with that type, when it is one a native body takes
-    /// ([`pycc_ast::OBSERVED_TYPES`]): what the function's compiled body is
-    /// specialized for (docs/design/compile-little.md, section 2.5).
-    /// Nothing when pass 2 did not sample it.
+    /// The parameters pass 2 saw holding one exact type in at least
+    /// [`DOMINANT_PERCENT`] of the calls it sampled, each with that type,
+    /// when it is one a native body takes ([`pycc_ast::OBSERVED_TYPES`]):
+    /// what the function's compiled body is specialized for
+    /// (docs/design/compile-little.md, section 2.5). Nothing when pass 2
+    /// did not sample it.
     pub(crate) fn observed_types(&self) -> Vec<(String, String)> {
         if !self.sampled {
             return Vec::new();
@@ -197,11 +214,8 @@ impl Entry {
         self.arg_types
             .iter()
             .filter_map(|(param, types)| {
-                let mut seen = types.keys();
-                let (Some(ty), None) = (seen.next(), seen.next()) else {
-                    return None;
-                };
-                pycc_ast::OBSERVED_TYPES.contains(&ty.as_str()).then(|| (param.clone(), ty.clone()))
+                let ty = dominant(types)?;
+                pycc_ast::OBSERVED_TYPES.contains(&ty).then(|| (param.clone(), ty.to_string()))
             })
             .collect()
     }
@@ -210,6 +224,16 @@ impl Entry {
     pub(crate) fn callee_key(&self) -> String {
         format!("{}:{}:{}", self.module, self.qualname, self.firstlineno)
     }
+}
+
+/// The type of `types` (exact type name to count) that covers at least
+/// [`DOMINANT_PERCENT`] of the counted calls, if one does. With the
+/// threshold above one half, at most one type can.
+fn dominant(types: &BTreeMap<String, u64>) -> Option<&str> {
+    let total: u64 = types.values().sum();
+    let (ty, count) = types.iter().max_by_key(|(_, count)| **count)?;
+    (*count > 0 && u128::from(*count) * 100 >= u128::from(total) * u128::from(DOMINANT_PERCENT))
+        .then_some(ty.as_str())
 }
 
 /// A profile file.

@@ -48,7 +48,7 @@ thread_local! {
     /// the loader specializes.
     static ONLY: RefCell<Option<BTreeSet<String>>> = const { RefCell::new(None) };
     /// The compiled lifts of selected functions whose parameters a profile
-    /// observed holding one exact type (`crate::select::Types`): by the
+    /// observed holding one dominant exact type (`crate::select::Types`): by the
     /// lift's name, its report name and those types. Only these, flagged
     /// here by the selection and never by their names or annotations, get
     /// specializations from observed types ([`specialize_entry`]).

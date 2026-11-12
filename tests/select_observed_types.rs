@@ -436,3 +436,137 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
         .unwrap();
     assert_eq!(text(&o), "_PyccFinder\n");
 }
+
+/// pypng's `undo_filter_sub`: a filter loop over two byte buffers.
+const FILTER: &str = "\
+def unfilter(unit, scanline, result):
+    ai = 0
+    for i in range(unit, len(result)):
+        x = scanline[i]
+        a = result[ai]
+        result[i] = (x + a) & 0xff
+        ai += 1
+";
+
+/// The training workload: as pypng's test suite, a few calls with an
+/// `array('B')` among a thousand with `bytearray`s, all within the calls
+/// pass 2 samples.
+const FILTER_WORK: &str = "\
+from array import array
+from pkg import f
+for i in range(1000):
+    if i % 400 == 7:
+        f.unfilter(1, array('B', b'\\x01\\x02\\x03\\x04'), array('B', b'\\x01\\x00\\x00\\x00'))
+    else:
+        f.unfilter(1, bytearray(b'\\x01\\x02\\x03\\x04'), bytearray(b'\\x01\\x00\\x00\\x00'))
+";
+
+/// Calls with the dominant type and with the minority ones, mutated in
+/// place as pypng's result buffers are, and arguments that raise.
+const FILTER_CALLS: &str = "\
+import sys
+sys.path.insert(0, sys.argv[1])
+from array import array
+from pkg import f
+
+class Buf(bytearray):
+    pass
+
+def show(*args):
+    try:
+        r = f.unfilter(*args)
+        print(r, type(args[2]).__name__, list(args[2]))
+    except Exception as e:
+        print(type(e).__name__, e)
+
+data = bytes(range(200, 256)) + bytes(range(0, 40))
+for scan, res in [
+    (bytearray(data), bytearray(len(data))),
+    (array('B', data), array('B', bytes(len(data)))),
+    (bytearray(data), array('B', bytes(len(data)))),
+    (array('B', data), bytearray(len(data))),
+    (list(data), [0] * len(data)),
+    (data, bytearray(len(data))),
+    (Buf(data), Buf(len(data))),
+    (bytearray(), bytearray()),
+    (bytearray(b'\\x05'), bytearray(b'\\x09')),
+]:
+    show(1, scan, res)
+show(3, bytearray(data), bytearray(len(data)))
+show(1, bytearray(b'ab'), bytearray(b'xyz'))
+show(1, array('B', b'ab'), array('B', b'xyz'))
+show(1, bytearray(b'abc'), bytes(3))
+show(1, array('B', b'abc'), array('h', [300, 2, 3]))
+show(1, array('B', b'abc'), [1, 2, 3])
+";
+
+/// A profile that saw a few `array('B')`s among a thousand `bytearray`s
+/// specializes the filter loop for `bytearray` (the dominant type), and the
+/// minority types still run the generic compiled body, as CPython.
+#[test]
+fn a_dominant_observed_type_specializes_and_the_minority_behaves_as_cpython() {
+    let scratch = ScratchDir::new("select_types_dominant").unwrap();
+    let mut dirs = Vec::new();
+    for name in ["built", "plain"] {
+        let pkg = scratch.join(name).join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join("__init__.py"), "").unwrap();
+        std::fs::write(pkg.join("f.py"), FILTER).unwrap();
+        dirs.push(scratch.join(name));
+    }
+    let work = scratch.join("work.py");
+    std::fs::write(&work, FILTER_WORK).unwrap();
+    let profile = scratch.join("p.json");
+    let pkg = dirs[0].join("pkg");
+    let o = pycc(&[
+        "profile".as_ref(),
+        pkg.as_os_str(),
+        "-o".as_ref(),
+        profile.as_os_str(),
+        "--no-verify".as_ref(),
+        "--".as_ref(),
+        &python(),
+        work.as_os_str(),
+    ]);
+    assert!(o.status.success(), "{}", text(&o));
+    // Pass 2 saw both types: 997 `bytearray`s and 3 `array.array`s.
+    let json = std::fs::read_to_string(&profile).unwrap();
+    let flat: String = json.split_whitespace().collect();
+    assert!(flat.contains("\"scanline\":{\"array.array\":3,\"bytearray\":997}"), "{json}");
+    assert!(flat.contains("\"result\":{\"array.array\":3,\"bytearray\":997}"), "{json}");
+    let out = pkg.join("__init__");
+    let o = pycc(&[
+        "build".as_ref(),
+        pkg.as_os_str(),
+        "-o".as_ref(),
+        out.as_os_str(),
+        "--ext".as_ref(),
+        "--non-strict".as_ref(),
+        "--report-fallbacks".as_ref(),
+        "--select".as_ref(),
+        "none".as_ref(),
+        "--compile".as_ref(),
+        "pkg.f:unfilter".as_ref(),
+        "--types-profile".as_ref(),
+        profile.as_os_str(),
+    ]);
+    let report = text(&o);
+    assert!(o.status.success(), "{report}");
+    assert!(report.contains("compiled: pkg.f:unfilter"), "{report}");
+    assert!(report.contains("specialized: `unfilter` runs natively when called with"), "{report}");
+    assert!(report.contains("scanline: bytearray") && report.contains("result: bytearray"), "{report}");
+    let run = |dir: &Path| {
+        let o = Command::new(python()).args(["-I", "-c", FILTER_CALLS]).arg(dir).output().unwrap();
+        assert!(o.status.success(), "{}", text(&o));
+        text(&o)
+    };
+    let got = run(&dirs[0]);
+    assert_eq!(got, run(&dirs[1]));
+    // Every argument shape ran, the dominant and the minority types.
+    assert!(got.contains("None bytearray [0, 201, 147, 94, 42,"), "{got}");
+    assert!(got.contains("None array [0, 201, 147, 94, 42,"), "{got}");
+    assert!(got.contains("None list [0, 201, 147, 94, 42,"), "{got}");
+    assert!(got.contains("None Buf [0, 201, 147, 94, 42,"), "{got}");
+    assert!(got.contains("IndexError"), "{got}");
+    assert!(got.contains("TypeError"), "{got}");
+}

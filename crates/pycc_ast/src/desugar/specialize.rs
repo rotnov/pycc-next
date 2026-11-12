@@ -446,7 +446,8 @@ pub type Observed = (String, Vec<(String, &'static str)>);
 /// `observed` names: each such function (a selected function's compiled
 /// lift, docs/design/compile-little.md, section 2.5) gets a native copy
 /// whose parameters take the exact types a profile observed them to have
-/// in every sampled call ([`OBSERVED_TYPES`]), and the guard that calls it
+/// in (nearly) every sampled call ([`OBSERVED_TYPES`]; the profile reader
+/// decides how nearly), and the guard that calls it
 /// when the arguments have them, as [`specialize_untyped`]'s guesses do.
 /// `observed` maps a function's name to the name a report gives it and
 /// its parameters' types; its other parameters keep their annotations. As
