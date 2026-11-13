@@ -95,6 +95,22 @@ static int pycc_fwd_keyword(PycFwdSlot *slot, PyObject *name)
     return -1;
 }
 
+/* Drops what `pycc_fwd_bind` held for a call: the keyword defaults among
+ * the `n` `bound` that `owned` marks, and the defaults themselves. */
+static void pycc_fwd_release(PyObject **bound, const char *owned, int n, PyObject *defaults,
+                             PyObject *kwdefaults)
+{
+    int i;
+
+    for (i = 0; i < n; i++) {
+        if (owned[i]) {
+            Py_DECREF(bound[i]);
+        }
+    }
+    Py_XDECREF(kwdefaults);
+    Py_XDECREF(defaults);
+}
+
 /*
  * A call the fast path does not take: binds the arguments to the
  * forwarder's parameters and calls the compiled body with them in its
@@ -109,7 +125,9 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
 {
     PyObject *bound[PYCC_FWD_MAX_PARAMS];
     PyObject *call[PYCC_FWD_MAX_PARAMS + 1];
-    PyObject *star = NULL, *starstar = NULL, *result;
+    /* The keyword defaults `bound` takes, held until the body returns. */
+    char owned[PYCC_FWD_MAX_PARAMS];
+    PyObject *star = NULL, *starstar = NULL, *result, *defaults = NULL, *kwdefaults = NULL;
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
     Py_ssize_t nkw;
     int nparams = slot->argcount + slot->kwonly;
@@ -140,6 +158,7 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
     }
     for (i = 0; i < nparams; i++) {
         bound[i] = i < nargs && i < slot->argcount ? args[i] : NULL;
+        owned[i] = 0;
     }
     for (i = 0; i < nkw; i++) {
         PyObject *name = PyTuple_GetItem(kwnames, i);
@@ -164,37 +183,49 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
         }
     }
     {
-        PyObject *defaults = PYCC_FUNC_FIELD(func, PYCC_FUNC_DEFAULTS);
-        PyObject *kwdefaults = PYCC_FUNC_FIELD(func, PYCC_FUNC_KWDEFAULTS);
+        PyObject *now = PYCC_FUNC_FIELD(func, PYCC_FUNC_DEFAULTS);
 
-        if (defaults != slot->defaults) {
+        if (now != slot->defaults) {
             /* `__defaults__` changed (or this is the first call): take the
              * new items. The old tuple is kept until then, so its address
              * cannot come back as another tuple's. */
-            Py_ssize_t count = defaults != NULL ? PyTuple_Size(defaults) : 0;
+            Py_ssize_t count = now != NULL ? PyTuple_Size(now) : 0;
 
             if (count > slot->argcount) {
+                Py_XDECREF(starstar);
                 return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
             }
             {
                 PyObject *old = slot->defaults;
 
-                slot->defaults = Py_XNewRef(defaults);
+                slot->defaults = Py_XNewRef(now);
                 Py_XDECREF(old);
             }
             slot->ndefaults = count;
         }
+        /* Held, not borrowed from the slot or the function, until the body
+         * returns: a keyword default's key compares with `__eq__`, and
+         * unpacking an argument can run code too, and either can rebind
+         * `__defaults__` (a nested call then replaces `slot->defaults`) or
+         * `__kwdefaults__`, which would free a default the call passes. */
+        defaults = Py_XNewRef(slot->defaults);
+        kwdefaults = Py_XNewRef(PYCC_FUNC_FIELD(func, PYCC_FUNC_KWDEFAULTS));
         for (i = 0; i < nparams; i++) {
             if (bound[i] != NULL) {
                 continue;
             }
             if (i < slot->argcount && i >= slot->argcount - slot->ndefaults) {
-                bound[i] = PyTuple_GetItem(slot->defaults, i - (slot->argcount - slot->ndefaults));
+                bound[i] = PyTuple_GetItem(defaults, i - (slot->argcount - slot->ndefaults));
             } else if (i >= slot->argcount && kwdefaults != NULL) {
                 bound[i] = PyDict_GetItemWithError(kwdefaults, PyTuple_GetItem(slot->names, i));
                 PyErr_Clear();
+                if (bound[i] != NULL) {
+                    Py_INCREF(bound[i]);
+                    owned[i] = 1;
+                }
             }
             if (bound[i] == NULL) {
+                pycc_fwd_release(bound, owned, nparams, defaults, kwdefaults);
                 Py_XDECREF(starstar);
                 return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
             }
@@ -205,6 +236,7 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
 
         star = PyTuple_New(extra);
         if (star == NULL) {
+            pycc_fwd_release(bound, owned, nparams, defaults, kwdefaults);
             Py_XDECREF(starstar);
             return NULL;
         }
@@ -214,6 +246,7 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
         }
     }
     if (slot->varkw && starstar == NULL && (starstar = PyDict_New()) == NULL) {
+        pycc_fwd_release(bound, owned, nparams, defaults, kwdefaults);
         Py_XDECREF(star);
         return NULL;
     }
@@ -233,6 +266,7 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
         call[n++] = starstar;
     }
     result = pycc_fwd_target(slot, call, n);
+    pycc_fwd_release(bound, owned, nparams, defaults, kwdefaults);
     Py_XDECREF(star);
     Py_XDECREF(starstar);
     return result;
@@ -321,7 +355,7 @@ static int pycc_fwd_defaulted(PycFwdSlot *slot, PyObject *func, PyObject *const 
 {
     PyObject *call[PYCC_FWD_MAX_PARAMS];
     PyObject *defaults, *kwdefaults;
-    Py_ssize_t i, nkw = pycc_fwd_nkw(kwnames);
+    Py_ssize_t i, kwstart, nkw = pycc_fwd_nkw(kwnames);
     Py_ssize_t given = nargs + nkw, total = slot->argcount + slot->kwonly, ndefaults;
 
     if (slot->varargs || slot->varkw || slot->cell != NULL || nargs > slot->argcount
@@ -332,6 +366,11 @@ static int pycc_fwd_defaulted(PycFwdSlot *slot, PyObject *func, PyObject *const 
     for (i = 0; i < given; i++) {
         call[i] = args[i];
     }
+    /* The defaults are held, not borrowed, until the body returns: a
+     * keyword default's key compares with `__eq__`, and unpacking an
+     * argument can run code too, and either can rebind `__defaults__` or
+     * `__kwdefaults__` (or empty the dict), which would free a default the
+     * call still passes. */
     defaults = PYCC_FUNC_FIELD(func, PYCC_FUNC_DEFAULTS);
     ndefaults = defaults != NULL ? PyTuple_Size(defaults) : 0;
     if (ndefaults < 0 || ndefaults > slot->argcount) {
@@ -344,20 +383,39 @@ static int pycc_fwd_defaulted(PycFwdSlot *slot, PyObject *func, PyObject *const 
         }
         call[i] = PyTuple_GetItem(defaults, i - (slot->argcount - ndefaults));
     }
+    Py_XINCREF(defaults);
     kwdefaults = PYCC_FUNC_FIELD(func, PYCC_FUNC_KWDEFAULTS);
-    for (; i < total; i++) {
-        PyObject *value = kwdefaults != NULL
-                                  && (Py_IS_TYPE(kwdefaults, &PyDict_Type) || PyDict_Check(kwdefaults))
-                              ? PyDict_GetItemWithError(kwdefaults, pycc_fwd_name(slot, i))
-                              : NULL;
-
-        if (value == NULL) {
-            PyErr_Clear();
+    kwstart = i;
+    if (i < total) {
+        if (kwdefaults == NULL
+            || !(Py_IS_TYPE(kwdefaults, &PyDict_Type) || PyDict_Check(kwdefaults))) {
+            Py_XDECREF(defaults);
             return 0;
         }
-        call[i] = value;
+        Py_INCREF(kwdefaults);
+        for (; i < total; i++) {
+            PyObject *value = PyDict_GetItemWithError(kwdefaults, pycc_fwd_name(slot, i));
+
+            if (value == NULL) {
+                PyErr_Clear();
+                while (--i >= kwstart) {
+                    Py_DECREF(call[i]);
+                }
+                Py_DECREF(kwdefaults);
+                Py_XDECREF(defaults);
+                return 0;
+            }
+            call[i] = Py_NewRef(value);
+        }
     }
     *result = pycc_fwd_target(slot, call, total);
+    for (i = kwstart; i < total; i++) {
+        Py_DECREF(call[i]);
+    }
+    if (kwstart < total) {
+        Py_DECREF(kwdefaults);
+    }
+    Py_XDECREF(defaults);
     return 1;
 }
 

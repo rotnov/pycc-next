@@ -92,3 +92,91 @@ fn defaulted_method_calls_match_cpython_and_reach_the_compiled_body() {
         }
     }
 }
+
+/// The module of `defaults_rebound_during_the_lookup_stay_alive`.
+const REENTRANT_MODULE: &str = "\
+from typing import Any
+
+
+class K(metaclass=type):
+    def f(self, a: Any, b: Any = [1, 2, 3], *, c: Any = 3) -> Any:
+        return (a, len(b), b[0], c)
+";
+
+/// Its driver: each call leaves `b` and `c` to their defaults, and the key
+/// of `c` in `__kwdefaults__` compares with an `__eq__` that drops
+/// `__defaults__` while the forwarder looks `c` up, which frees the
+/// default of `b` unless the call holds it. The first call takes the
+/// defaulted path (`pycc_fwd_defaulted`); the second names `a` by an equal
+/// but other string, so `pycc_fwd_bind` binds it. (Dropping
+/// `__kwdefaults__` itself in `__eq__` crashes CPython 3.15 too, so there is
+/// no oracle for it.)
+const REENTRANT_DRIVER: &str = "\
+import sys
+sys.path.insert(0, sys.argv[1])
+from {module} import K
+
+
+class S(str):
+    __hash__ = str.__hash__
+
+    def __eq__(self, other):
+        K.f.__defaults__ = None
+        return str.__eq__(self, other)
+
+
+class D(list):
+    def __del__(self):
+        print('del D')
+
+
+K.f.__defaults__ = (D([1, 2, 3]),)
+K.f.__kwdefaults__ = {S('c'): 7}
+print(K().f(0))
+K.f.__defaults__ = (D([4, 5]),)
+print(K().f(**{''.join(['a']): 1}))
+print('done')
+";
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn defaults_rebound_during_the_lookup_stay_alive() {
+    let dir = ScratchDir::new("forwarder_defaults_rebound").expect("scratch");
+    let module = "forwarder_defaults_rebound_ext";
+    let pure = dir.join("pure");
+    let native = dir.join("native");
+    std::fs::create_dir_all(&pure).expect("pure dir");
+    std::fs::create_dir_all(&native).expect("native dir");
+    std::fs::write(pure.join(format!("{module}.py")), REENTRANT_MODULE).expect("write the module");
+    std::fs::write(native.join(format!("{module}.py")), REENTRANT_MODULE).expect("write the module");
+    let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .args(["build", "--ext", "--non-strict", "--select", "all", "--report-fallbacks"])
+        .arg(native.join(format!("{module}.py")))
+        .arg("-o")
+        .arg(native.join(module))
+        .output()
+        .expect("pycc should spawn");
+    let report = text(&pycc_scratch::lf(&build.stderr));
+    assert!(build.status.success(), "{report}");
+    assert!(report.contains(&format!("compiled: {module}:K.f\n")), "{report}");
+    std::fs::remove_file(native.join(format!("{module}.py"))).expect("remove the source");
+    let driver = dir.join("driver.py");
+    std::fs::write(&driver, REENTRANT_DRIVER.replace("{module}", module)).expect("write the driver");
+    let run = |from: &Path| {
+        // The debug allocator overwrites freed memory, so a default freed
+        // under the call shows as a crash or a wrong value, not by luck.
+        python()
+            .args(["-X", "dev"])
+            .arg(&driver)
+            .arg(from)
+            .env("PYTHONMALLOC", "debug")
+            .env_remove("PYCC_NO_ATTR_CACHE")
+            .output()
+            .expect("python3 should spawn")
+    };
+    let oracle = run(&pure);
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    let ours = run(&native);
+    assert!(ours.status.success(), "{:?}\n{}", ours.status, text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
+}

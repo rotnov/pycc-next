@@ -735,7 +735,10 @@ full binding (`pycc_fwd_bind`) 88 times.
   any other shape, or a parameter without a default, is bound as before. A slot keeps its
   parameter names' item array where the tuple layout holds it, and the in-order test is
   skipped for a slot with keyword-only parameters or a `__class__` cell, which it never
-  passes.
+  passes. The forwarder holds strong references to `__defaults__`, `__kwdefaults__` and
+  the keyword defaults it takes until the body returns (`pycc_fwd_bind` likewise), since a
+  `__kwdefaults__` key's `__eq__`, or code run while an argument is unpacked, can rebind
+  them and free a default the call still passes.
 
 Measured as 5.4 (the bytecode cache written before the counts):
 
@@ -759,7 +762,9 @@ Measured as 5.4 (the bytecode cache written before the counts):
   varied by up to 1.9x.
 - `tests/forwarder_defaulted_calls.rs` checks the calls that leave defaults out against
   CPython with the caches on and off, while the defaults change under them, and that they
-  reach the compiled body (300 direct calls, none on main). The copies' frames are
+  reach the compiled body (300 direct calls, none on main), and that a key whose `__eq__`
+  drops `__defaults__` during the lookup leaves the defaults alive (under
+  `PYTHONMALLOC=debug`). The copies' frames are
   checked by `tests/select_regions.rs` (tracebacks through copies, the `RecursionError`
   of a deep cycle) and `tests/v08_frames.rs`.
 
