@@ -9,8 +9,9 @@
 //! operand is a small `int` -- a literal, a local holding one (tagged or a
 //! compact `int` object), or the sum or difference of two such -- these
 //! take a word path. A region copy's position is a native `int` local
-//! instead (`docs/design/selected-regions.md` R3): its D-061 word is read
-//! as it is, and a sum or difference of native locals (`MirExpr::BinOp`)
+//! instead (`docs/design/selected-regions.md` R3), as is any `Ty::Int`
+//! local of a compiled body (a `range` loop variable, for one): its D-061
+//! word is read as it is, and a sum or difference of native locals (`MirExpr::BinOp`)
 //! is computed from the leaves as an `object` one is.
 //!
 //! - `s[a:b]` (no step): `pycc_ext_str_slice` clamps the bounds as

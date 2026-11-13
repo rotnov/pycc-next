@@ -630,6 +630,10 @@ about 200.
   240,779,856 per repeat of the default workload. diff-match-patch (`bench/package_check.py
   --instructions`, both builds selecting `diff_bisect` alone): `diff_main` 101.55M per call
   either way.
+- The word paths take any native `int` local, not only a region copy's position: a
+  `for i in range(...)` variable of a compiled body also gets them (`s[i:i+2]`,
+  `s.startswith("ab", i)`, `c = s[i]`). A leaf or a sum outside the word range (2**62)
+  takes CPython's operation; `tests/region_words.rs` (`edges`) pins that edge.
 - What is left in `_parser` beside R4's membership tests is not in the `str` word paths:
   positions boxed for the regular expressions' `match(src, pos)` and `src.index(expect,
   pos)` (about 150 per `loads()`), the tuple slices of the generic `Flags.is_` and

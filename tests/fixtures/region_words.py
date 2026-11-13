@@ -91,6 +91,23 @@ def beyond(s: str, pos: int) -> str:
     return char
 
 
+def edges(s: str, pos: int) -> list:
+    # Operands and sums at the edge of the word range (2**62): a leaf or a
+    # sum outside it takes CPython's operation.
+    hi = 2**62 - 1
+    lo = -(2**62)
+    return [
+        s[pos + hi :],
+        s[pos - hi :],
+        s[pos + lo :],
+        s[lo:pos],
+        s[hi - pos :],
+        s.startswith("a", pos + hi),
+        s.startswith("a", pos + lo),
+        s.startswith("a", lo + pos),
+    ]
+
+
 def step(s: str, pos: int) -> int:
     return skip(s, pos + 1)
 
@@ -99,7 +116,7 @@ def run(s: str) -> list:
     out = []
     pos = 0
     while pos <= len(s) + 1:
-        out.append((pos, kind(s, pos), cuts(s, pos), starts(s, pos), beyond(s, pos)))
+        out.append((pos, kind(s, pos), cuts(s, pos), starts(s, pos), beyond(s, pos), edges(s, pos)))
         pos = step(s, pos)
     return out
 

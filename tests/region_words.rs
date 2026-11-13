@@ -9,7 +9,7 @@
 use pycc_scratch::ScratchDir;
 use std::process::{Command, Output};
 
-const SELECTED: [&str; 7] = ["skip", "kind", "cuts", "starts", "beyond", "step", "run"];
+const SELECTED: [&str; 8] = ["skip", "kind", "cuts", "starts", "beyond", "edges", "step", "run"];
 
 fn python() -> Command {
     Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
@@ -55,7 +55,7 @@ fn region_copies_read_native_positions_as_words_and_match_cpython() {
     let build = cmd.output().expect("pycc runs");
     let report = text(&build);
     assert!(build.status.success(), "{report}");
-    for name in ["skip", "kind", "cuts", "starts", "beyond", "step"] {
+    for name in ["skip", "kind", "cuts", "starts", "beyond", "edges", "step"] {
         assert!(
             report.contains(&format!("specialized: `region {name}` runs natively when called with pos: int")),
             "{name}: {report}"
@@ -64,7 +64,10 @@ fn region_copies_read_native_positions_as_words_and_match_cpython() {
     // The word paths are taken where the position is native: the copies
     // slice an exact `str` without a `slice` or a boxed bound, compare
     // `startswith`'s bytes inline, and load `kind`'s character as a word.
-    let ir = std::fs::read_to_string(scratch.join("m.ll.pre.ll")).expect("the IR before optimization");
+    // Line endings as on POSIX: on Windows the dump ends its lines with `\r\n`.
+    let ir = std::fs::read_to_string(scratch.join("m.ll.pre.ll"))
+        .expect("the IR before optimization")
+        .replace('\r', "");
     let cuts = copy(&ir, "cuts");
     assert_eq!(cuts.matches("call ptr @pycc_ext_str_slice(").count(), 10, "{cuts}");
     let starts = copy(&ir, "starts");

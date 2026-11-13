@@ -45,7 +45,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   598,119 B before R2, was +80%), `loads()` 2,592,013 -> 2,543,978 instructions per call
   (-1.8%).
 - Native `int` positions in the `str` word paths (`docs/design/selected-regions.md`, R3).
-  In a region copy, `s[a:b]` whose bounds are native `int` locals, literals or their sums
+  In a region copy (and in any compiled body with native `int` locals, such as a
+  `for i in range(...)` variable), `s[a:b]` whose bounds are native `int` locals, literals or their sums
   and differences calls `pycc_ext_str_slice` directly for an exact `str`;
   `s.startswith(t, a)` with a native `a` compares the bytes inline for compact ASCII text,
   in place of a method call with a boxed position; and `c = s[pos]` with a native `pos`
