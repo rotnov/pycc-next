@@ -25,7 +25,8 @@ file of the package is changed. Then, for each package:
   4. the venv's Python (`-I`, from an empty directory) imports every module the backend
      compiles and checks it is served by an extension module of the venv's site-packages
      (its own, or its package's finder), then runs the package's own tests, copied out of
-     the archive without its sources.
+     the archive without its sources, but for those that assert only a wall-time ratio
+     (`SuiteLoader`, `bench/package_check_workloads.py`).
 
 Usage: python3 bench/wheel_check.py [PACKAGE ...] [--pycc PATH] [--backend DIR]
                                     [--cache DIR] [--keep DIR]
@@ -50,6 +51,7 @@ import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import package_check  # noqa: E402  (the pinned packages and the untrusted-archive rules)
+from package_check_workloads import SUITE_LOADER  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -94,9 +96,9 @@ packages = ["diff_match_patch"]
 pure-python = ["diff_match_patch.tests"]
 """,
         tests=(),
-        run="""
+        run=SUITE_LOADER + """
 from diff_match_patch.tests import diff_match_patch_test as t
-r = unittest.main(module=t, argv=["wheel_check"], exit=False, verbosity=1).result
+r = unittest.main(testLoader=SuiteLoader(), module=t, argv=["wheel_check"], exit=False, verbosity=1).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
         compiled=(),
@@ -115,9 +117,9 @@ strict = false
 # src/tomli is found by the default discovery (src layout).
 """,
         tests=(("tests", "tomli-2.5.0/tests"),),
-        run="""
+        run=SUITE_LOADER + """
 import os
-r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+r = unittest.main(testLoader=SuiteLoader(), module=None, exit=False, verbosity=1, argv=[
     "wheel_check", "discover", "-s", os.path.join(sys.argv[1], "tests"),
     "-t", sys.argv[1]]).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
@@ -142,9 +144,9 @@ py-modules = ["png"]
                ("pngsuite.py", "pypng-0.20220715.0/code/pngsuite.py")),
         # `test_test_dir` runs the sdist's shell scripts, which are not copied: it
         # skips itself.
-        run="""
+        run=SUITE_LOADER + """
 import test_png
-r = unittest.main(module=test_png, argv=["wheel_check"], exit=False, verbosity=1).result
+r = unittest.main(testLoader=SuiteLoader(), module=test_png, argv=["wheel_check"], exit=False, verbosity=1).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
         compiled=(),
@@ -166,10 +168,10 @@ strict = false
         # directory: the suite runs from the test directory, which holds a copy.
         tests=(("tests", "mistune-3.3.4/tests"),
                ("pyproject.toml", "mistune-3.3.4/pyproject.toml")),
-        run="""
+        run=SUITE_LOADER + """
 import os
 os.chdir(sys.argv[1])
-r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+r = unittest.main(testLoader=SuiteLoader(), module=None, exit=False, verbosity=1, argv=[
     "wheel_check", "discover", "-s", os.path.join(sys.argv[1], "tests"),
     "-t", sys.argv[1]]).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
@@ -192,11 +194,11 @@ packages = ["pystache"]
 pure-python = ["pystache.tests"]
 """,
         tests=(),
-        run="""
+        run=SUITE_LOADER + """
 import os
 import pystache.tests
 start = os.path.dirname(pystache.tests.__file__)
-r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+r = unittest.main(testLoader=SuiteLoader(), module=None, exit=False, verbosity=1, argv=[
     "wheel_check", "discover", "-s", start,
     "-t", os.path.dirname(os.path.dirname(start))]).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
