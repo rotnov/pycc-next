@@ -6,7 +6,8 @@ one extension `pkg/__init__.abi3.so` serving its modules with compiled functions
 build PKG --ext`, v0.8; `--separate` builds each module as its own extension instead), a
 single-module package as its own extension; the modules stay bytecode, so their `.py`
 files stay, and the package's own unittest suite runs in CPython against the compiled
-tree (and, first, against the sources). The downloaded
+tree (and, first, against the sources), but for its tests that assert only a
+wall-time ratio (`SuiteLoader`, `bench/package_check_workloads.py`). The downloaded
 archive is untrusted data: every member must be a regular file or a directory (a
 symlink, hard link or special file fails the check before anything is extracted, so
 what is hashed is what is built and run), it is extracted with tarfile's `data` filter
