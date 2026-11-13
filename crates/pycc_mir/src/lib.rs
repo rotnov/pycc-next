@@ -46,6 +46,7 @@ pub use set_ops::{SetElementOps, SetEqOp, SetHashOp};
 mod comp_source;
 mod stmt;
 mod unpack_display;
+mod unreferenced;
 pub mod multi_return;
 pub mod multi_return_object;
 mod optional_str;
@@ -502,6 +503,7 @@ pub fn build(hir: &HirModule) -> MirModule {
     optional_str::rewrite(&mut module);
     multi_return::rewrite(&mut module);
     multi_return_object::rewrite(&mut module);
+    unreferenced::drop_unreferenced(&mut module);
     // #1337 (D-254): every user-method call runs the body its static
     // receiver class resolves to; re-derived independently of the routing
     // sites and checked on every debug (so every test) build.

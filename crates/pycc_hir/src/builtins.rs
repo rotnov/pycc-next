@@ -478,7 +478,9 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         // R2; `src/ext/module/regions.c`): whether region `k` of the
         // module is intact, and the recursion check around a native copy
         // that closes a cycle. Only `pycc_ast::specialize_regions` writes
-        // them, in an `--ext` module's selected unit.
+        // them, in an `--ext` module's selected unit. `pycc_ext_region_intact`
+        // has no definition: codegen loads the region's flag itself
+        // (`pycc_codegen::rt_call`).
         ("__pycc_region_intact", [Ty::Int]) => {
             sig("pycc_ext_region_intact", &[Ty::Int], Ty::Bool)
         }

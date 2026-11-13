@@ -94,7 +94,9 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                 }),
                 None => module.add_function(&mangled, fn_type, None),
             };
-            if producer.is_none() && leaf_inline::is_tiny_leaf(body) {
+            if producer.is_none() && crate::region_slow::is_slow(name) {
+                crate::region_slow::mark(context, f);
+            } else if producer.is_none() && leaf_inline::is_tiny_leaf(body) {
                 leaf_inline::mark(context, f);
             }
             function_defs_in_order.push((name.as_str(), f));

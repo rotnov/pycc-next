@@ -439,12 +439,23 @@ acceptance numbers then apply to `m0`, measured again.
   until R2 lands and is then measured again on top of it.
 - **R2, done.** Measured below (5.4): tomli's `loads()` at 2,591,280 instructions, under the
   2.66M target, at +77% `.text` for `_parser`.
-- **Next: R2's code size.** Before R3, the `.text` growth (5.4) is cut: (a) the entry guard
-  calls the copy's multi-value twin and builds the tuple itself, so the tuple-returning
-  copies that only entries call become dead, and functions nothing references are not
-  emitted; (b) one shared cold helper per callee for the generic arm of region calls, in
-  place of an inline arm at every call site; (c) the intact flag's read inlined (about 15K
-  instructions per `loads()` are its calls).
+- **R2's code size, done.** Measured below (5.4): `_parser`'s `.text` +27% over main before
+  R2 (the plan allowed +30%), at 2,544,987 instructions per `loads()`. (a) An entry guard
+  unpacks its copy's tuple result, so the call takes the copy's multi-value twin, and the
+  guard builds the tuple; the compiler-generated functions nothing calls (a copy only
+  entries called, a twin no unpack calls, a conversion of a dropped arm) are not emitted
+  (`pycc_mir::unreferenced`). (b) The generic arm of each region call is a *slow call*
+  shared by every site of its shape (the kinds of its arguments, their keywords and the
+  result's conversion): `cold`, `noinline` and without a frame of its own
+  (`regions/slow.rs`). (c) The intact flag is a byte compiled code loads and compares where
+  it reads it (`pycc_ext_region_flags`). And (e), found by the breakdown below: the lift of
+  a member with a copy takes no multi-value twin, since its generic body runs only once
+  the region is closed or for arguments of other types (`pycc_mir::multi_return_object`).
+  (d) `loads`' copy, the only one with neither a native parameter nor a native result,
+  stays: its `pos = 0` starts every position the prover proves, and without it no member
+  has anything native (2.82M instructions, `m0`'s). The fixture's `parse` and `tails`
+  start theirs the same way (`pos = 0`, `skip(s, 0)`).
+- **Next: R3**, then R4 measured again on top of R2 (above).
 - **R1, done.** Regions are formed from the selected unit (4.1, without position-flow
   callees: `src/fallback/regions.rs`), a build's `--report-fallbacks` lists them, and
   pass 3 prunes them as units (4.7, `src/profile/verify/units.rs`). No code is generated
@@ -542,20 +553,44 @@ Taken locally as section 3's (CPython 3.15.0b4, x86-64, `PYTHONHASHSEED=0`, call
   fixture of `tests/select_regions.rs` the code splits into generic lifts 70.5K, the lifts'
   multi-value twins 42.6K, copies 57.0K, the copies' twins 41.6K and the conversions 5.1K:
   every member is compiled four times over (lift, copy and a twin of each), and every region
-  call carries its generic arm inline. The follow-ups in 5.1 address this before R3.
+  call carries its generic arm inline. The follow-ups in 5.1, measured below, cut this.
 - pypng's `read()` is unchanged (its region's edges are method edges, generic in R2);
   pydantic's regions get no copies.
+
+R2's code size (5.1), each step on top of the one before, measured the same way (the
+module's bytecode cache written before either count, so both runs import the same):
+
+| build | instructions per `loads()` | `_parser` `.text` |
+|---|---|---|
+| R2 | 2,592,013 | 1,075,175 B (+80%) |
+| (c) the intact flag loaded inline | 2,570,885 | 1,069,767 B |
+| (a) guards take the copies' twins; unreferenced functions dropped | 2,563,533 | 925,799 B |
+| (b) slow calls for the generic arms | 2,544,682 | 907,751 B (+52%) |
+| (e) no multi-value twins for the lifts of members with copies | 2,544,987 (-1.8%) | 760,775 B (+27%) |
+
+- After (a)-(c), `.text` stood at +52%. By symbol, the lifts' multi-value twins were
+  143K of it: they double the generic bodies for a path an intact region never takes.
+  (e) dropped them, with no change in instructions.
+- Where `_parser`'s `.text` goes now, by symbol, against main before R2 (591,875 B of
+  symbols there, 753,937 B here): the 24 generic lifts 245.5K (+66.2K: the seven
+  position-flow callees' lifts 52.6K, the guards in the members' lifts about 13.6K), the
+  lifts' twins 0 (-92.5K), the 6 copies that return no tuple 42.3K, the 15 copies' twins
+  118.2K, the slow calls 10.8K and their 2 conversions 4.2K, the runtime and generated
+  C 332.6K (+12.7K).
+- On the fixture of `tests/select_regions.rs` the compiled functions went from 216.8K to
+  149.9K: generic lifts 83.1K (70.5K before), no lifts' twins,
+  copies 13.9K, the copies' twins 34.9K, slow calls 11.2K and conversions 6.9K.
 
 ## 6. Risks
 
 - **The margin is thin.** The projection beats the old build by about 2%, and part of it is an
   estimate (R4's 170K, from the IR). If R2 measures above 2.66M, or R4 saves less than 120K,
   accept 2 is not reachable by this plan, and the next step is a measurement, not more tuning.
-- **Code size.** Each member is compiled twice (lift and copy), and each again as a
-  multi-value twin: +77% `.text` for tomli's `_parser` as built by R2 (5.4), not the +16%
-  section 3 estimated. That
-  costs I1 misses, which section 2.9 found to dominate generic bodies. Wall time stays the
-  verdict in pass 3.
+- **Code size.** Each member is compiled twice, as its lift and as its copy (or the copy's
+  multi-value twin): +27% `.text` for tomli's `_parser` after R2's code-size follow-ups,
+  +80% as R2 first built it (5.4), against the +16% section 3 estimated. That costs I1
+  misses, which section 2.9 found to dominate generic bodies. Wall time stays the verdict
+  in pass 3.
 - **Over-wide regions.** A region joins everything connected by calls, so in pydantic's
   glue a large component could pull in cold code. Pass 3 prunes whole regions, so such a
   region is kept only if it wins as a whole. Copies are made only for members with a native

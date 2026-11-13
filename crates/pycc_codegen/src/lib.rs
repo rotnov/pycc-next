@@ -74,6 +74,7 @@ mod optional_ptr;
 mod str_rc;
 use heap_rc::release_scalar_if_temporary;
 use str_rc::incref_if_str_duplicate;
+mod region_slow;
 mod rt_call;
 mod rt_fns;
 use rt_fns::{RtFns, declare_rt_functions};

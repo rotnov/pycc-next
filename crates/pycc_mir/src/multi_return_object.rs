@@ -180,8 +180,28 @@ fn has_closure(expr: &MirExpr) -> bool {
     ) || expr.children().into_iter().any(has_closure)
 }
 
-/// The lifted bodies that may have a twin, with their arity.
+/// The lifted bodies with a region's native copy (`__pycc_rnative_liftN_f__`
+/// of `__pycc_liftN_f__`, `pycc_ast::specialize_regions`).
+fn region_copied(module: &MirModule) -> HashSet<String> {
+    module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            MirItem::Function { name, .. } => name.strip_prefix(pycc_hir::REGION_COPY_PREFIX),
+            _ => None,
+        })
+        .map(|lift| format!("__pycc_{lift}"))
+        .collect()
+}
+
+/// The lifted bodies that may have a twin, with their arity. A body with a
+/// region's native copy has none: while its region is intact, its entry
+/// guard runs the copy, and its callers in the region call the copy, so
+/// the generic body runs only once the region is closed or with arguments
+/// of other types, where a twin would double its code for a path no
+/// measured workload takes (docs/design/selected-regions.md, section 5.4).
 fn candidates(module: &MirModule, lifts: &Lifts) -> HashMap<String, usize> {
+    let copied = region_copied(module);
     let mut shapes: HashMap<String, Vec<Returned>> = HashMap::new();
     for item in &module.items {
         let MirItem::Function {
@@ -194,6 +214,7 @@ fn candidates(module: &MirModule, lifts: &Lifts) -> HashMap<String, usize> {
             continue;
         };
         if !lifts.contains_key(name)
+            || copied.contains(name.as_str())
             || *return_ty != Ty::Object
             || params.iter().any(|(_, ty)| *ty != Ty::Object)
         {
@@ -489,4 +510,49 @@ fn expr_reads(expr: &MirExpr, name: &str) -> bool {
             .children()
             .into_iter()
             .any(|child| expr_reads(child, name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn function(name: &str, body: Vec<MirStmt>) -> MirItem {
+        MirItem::Function {
+            name: name.to_string(),
+            params: vec![("x".to_string(), Ty::Object)],
+            return_ty: Ty::Object,
+            body,
+        }
+    }
+
+    /// `return x, x`.
+    fn pair() -> Vec<MirStmt> {
+        let x = MirExpr::Name {
+            name: "x".to_string(),
+            ty: Ty::Object,
+        };
+        vec![MirStmt::Return(Some(MirExpr::ObjDisplay {
+            kind: ObjDisplayKind::Tuple,
+            elements: vec![x.clone(), x],
+        }))]
+    }
+
+    #[test]
+    fn a_body_with_a_region_copy_takes_no_twin() {
+        let module = MirModule {
+            items: vec![
+                function("__pycc_lift1_f__", pair()),
+                function("__pycc_lift2_g__", pair()),
+                function("__pycc_rnative_lift1_f__", Vec::new()),
+            ],
+            class_defs: Default::default(),
+        };
+        let lifts: Lifts = ["__pycc_lift1_f__", "__pycc_lift2_g__"]
+            .iter()
+            .map(|name| (name.to_string(), vec!["x".to_string()]))
+            .collect();
+        let found = candidates(&module, &lifts);
+        assert_eq!(found.get("__pycc_lift2_g__"), Some(&2));
+        assert!(!found.contains_key("__pycc_lift1_f__"), "{found:?}");
+    }
 }

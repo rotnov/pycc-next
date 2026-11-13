@@ -75,10 +75,16 @@ pub(crate) fn emit_assign_multi_stmt<'ctx>(
             finally_stack,
         );
     }
-    let resolved = user_functions
-        .get(multi.original.as_str())
-        .filter(|original| original.direct_value.is_some() || original.single_def.is_some())
-        .zip(user_functions.get(multi.twin.as_str()));
+    // An original nothing else calls is not in the module
+    // (`pycc_mir::unreferenced`): it is compiler-generated, has no name to
+    // look up, and its twin is called alone.
+    let original = user_functions.get(multi.original.as_str());
+    let resolved = match original {
+        Some(original) => (original.direct_value.is_some() || original.single_def.is_some())
+            .then_some(Some(original))
+            .zip(user_functions.get(multi.twin.as_str())),
+        None => user_functions.get(multi.twin.as_str()).map(|twin| (None, twin)),
+    };
     let Some((original, twin)) = resolved else {
         return emit_body(
             context,
@@ -95,7 +101,9 @@ pub(crate) fn emit_assign_multi_stmt<'ctx>(
     // The original's name is looked up before any argument is evaluated,
     // as the call it replaces looks it up (a `NameError` before its `def`
     // has run); the twin itself is then called directly.
-    let _ = user_call::resolve_callee(context, builder, rt, original);
+    if let Some(original) = original {
+        let _ = user_call::resolve_callee(context, builder, rt, original);
+    }
     let twin_fn = twin
         .direct_value
         .expect("a multi-value twin is compiler-generated and dispatched directly");

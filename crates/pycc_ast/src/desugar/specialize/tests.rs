@@ -624,3 +624,77 @@ fn a_rebound_guess_stays_native_only_if_its_value_never_leaves() {
     assert_eq!(names.last(), Some(&"_pycc_object_s"), "{names:?}");
     assert_eq!(objects_read(&native.body), ["_pycc_object_s"]);
 }
+
+/// Every call of `name` in `body`.
+fn calls_of(body: &[Stmt], prefix: &str) -> Vec<String> {
+    struct Calls<'p>(&'p str, Vec<String>);
+    impl<'a> Visitor<'a> for Calls<'_> {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if let Expr::Call(call) = expr
+                && let Expr::Name(n) = call.func.as_ref()
+                && n.id.starts_with(self.0)
+            {
+                self.1.push(n.id.to_string());
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut calls = Calls(prefix, Vec::new());
+    for stmt in body {
+        calls.visit_stmt(stmt);
+    }
+    calls.1
+}
+
+#[test]
+fn a_region_guard_unpacks_a_tuple_copy_and_generic_arms_take_slow_calls() {
+    let mut module = parse(
+        "def __pycc_lift1_scan__(s, pos):\n    while pos < len(s):\n        pos += 1\n    return pos, s[pos:]\n\
+         def __pycc_lift2_top__(s):\n    pos = 0\n    pos, w = __pycc_fallback_ns['scan'](s, pos)\n    n = __pycc_fallback_ns['size'](s, pos)\n    return n\n\
+         def __pycc_lift3_size__(s, pos):\n    return len(s) - pos\n",
+    );
+    let function = |n: usize, name: &str, params: usize| RegionFunction {
+        lift: format!("__pycc_lift{n}_{name}__"),
+        global: name.to_string(),
+        report: name.to_string(),
+        posonly: 0,
+        positional: params,
+        defaults: vec![None; params],
+    };
+    let input = RegionInput {
+        functions: vec![function(1, "scan", 2), function(2, "top", 1), function(3, "size", 2)],
+        patterns: Vec::new(),
+    };
+    let planned = specialize_regions(&mut module, &input, &|_| false);
+    assert_eq!(planned.len(), 3, "{planned:?}");
+    let def = |name: &str| {
+        module
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Stmt::FunctionDef(def) if def.name.as_str() == name => Some(def),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{name}"))
+    };
+    // `scan`'s copy returns a tuple: its guard unpacks the call, so the
+    // call takes the copy's twin, and returns the items, recording no
+    // traceback entry of its own.
+    let Stmt::If(guard) = &def("__pycc_lift1_scan__").body[0] else { panic!("the guard") };
+    assert_eq!(guard.body.len(), 2);
+    assert!(matches!(&guard.body[0], Stmt::Assign(a) if matches!(a.value.as_ref(), Expr::Call(_))));
+    assert!(guard.body.iter().all(is_copy_tail_call));
+    // `size`'s returns an `int`: its guard returns the call.
+    let Stmt::If(guard) = &def("__pycc_lift3_size__").body[0] else { panic!("the guard") };
+    assert!(matches!(guard.body.as_slice(), [Stmt::Return(_)]) && is_copy_tail_call(&guard.body[0]));
+    // Each generic arm of `top`'s copy is a slow call, one per shape, and
+    // the module defines each once.
+    let copy = def("__pycc_rnative_lift2_top__");
+    let mut slow = calls_of(&copy.body, REGION_SLOW_PREFIX);
+    slow.sort();
+    assert_eq!(slow, ["__pycc_rslow0", "__pycc_rslow1"]);
+    assert!(calls_of(&copy.body, "__pycc_rconv_").is_empty());
+    for name in ["__pycc_rslow0", "__pycc_rslow1"] {
+        assert_eq!(def(name).name.as_str(), name);
+    }
+}

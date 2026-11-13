@@ -100,6 +100,9 @@ pub use program::{
 /// The callee of a nested function used as a value (`pycc_ast::desugar`).
 pub use pycc_ast::CLOSURE_MARKER;
 pub use pycc_ast::function_qualname;
+/// The prefixes of a region's native copies and of its generic arms' slow calls
+/// (`pycc_ast::specialize_regions`).
+pub use pycc_ast::{REGION_COPY_PREFIX, REGION_SLOW_PREFIX};
 pub use expr::comprehension::is_fresh_comprehension_var;
 pub use pycc_ast::unpack_target_arity;
 pub use pycc_ast::namespace;

@@ -98,7 +98,9 @@ fn expr_reaches_cpython(expr: &MirExpr, frameless: &HashSet<&str>) -> bool {
     let own = match expr {
         MirExpr::Call { callee, .. } => !frameless.contains(callee.as_str()),
         MirExpr::Instantiate(inst) => !frameless.contains(inst.ctor.as_str()),
-        MirExpr::RtCall(call) => call.sig.symbol.starts_with("pycc_ext_"),
+        MirExpr::RtCall(call) => {
+            call.sig.symbol.starts_with("pycc_ext_") && call.sig.symbol != crate::rt_call::REGION_INTACT_SYMBOL
+        }
         MirExpr::Comprehension(comp) => matches!(comp.source, pycc_mir::CompSource::Object(_)),
         MirExpr::ObjAttrGet { .. }
         | MirExpr::ObjMethodCall { .. }

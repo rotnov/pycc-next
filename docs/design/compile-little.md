@@ -6,7 +6,7 @@ sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`), PR 5 (the chunk 
 deleted, section 7 items 1-5; `src/ext_build/module_code.rs`), PR 5a (selection by
 region), PR 8's first part (observed-type specialization), PR 6b (`--select module`
 deleted), native calls inside a region ([selected-regions.md](selected-regions.md) R1 and R2).
-Planned next: R2's code-size follow-ups, then the rest of selected-regions.md (R3-R6). Tracking issue:
+Planned next: the rest of selected-regions.md (R3-R6). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../roadmap/v0.12.md), continued in [v0.13](../ROADMAP.md#v013--compile-little-compile-well).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -359,9 +359,12 @@ holds (`src/ext/module/regions.c`: a `PyDict_Watch` watcher on the module dict a
 checks the recursion limit. A region also takes its *position-flow callees*: unselected
 functions it calls whose results the prover types as native positions
 (`Plan::flow_callees`), which a build reports as `compiled as a region's callee:` apart
-from the selection pass 3 checks. tomli's `loads()` goes from 2.82M to 2.59M
-instructions per call with the same 19-function selection; pypng's selection has method
-regions only, which stay generic.
+from the selection pass 3 checks. tomli's `loads()` goes from 2.82M to 2.54M
+instructions per call with the same 19-function selection, at +27% `.text` for its
+`_parser` (selected-regions.md 5.4: a region call's generic arm is a shared cold slow call,
+the lifts of members with copies take no multi-value twins, and compiler-generated
+functions nothing calls are not emitted); pypng's selection has method regions only,
+which stay generic.
 
 A function the winner leaves out of a set it was measured in is rejected ("faster
 without it", `measured.without`, with the selection's instructions in

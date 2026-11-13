@@ -20,7 +20,7 @@ pub use desugar::{
     ext_entry_name, ext_entry_target, fold_static_branches,
     ext_needs_wrapper, ext_signatures, find_yield, function_qualname, object_except_handlers, split_ext_generators,
     split_ext_signatures, WRAPPER_FLAG,
-    BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, OBSERVED_TYPES, is_copy_tail_call, Observed, REGION_COPY_PREFIX, RegionFunction,
+    BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, OBSERVED_TYPES, is_copy_tail_call, Observed, REGION_COPY_PREFIX, REGION_SLOW_PREFIX, RegionFunction,
     RegionInput, Specialized, region_native_results, specialize_observed, specialize_regions, specialize_untyped,
 };
 pub use rebound_defs::rebound_def_names;

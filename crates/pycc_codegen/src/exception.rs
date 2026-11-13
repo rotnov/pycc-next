@@ -105,6 +105,8 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // A native `str | None` local's tests (`pycc_mir::optional_str`)
         // read a pointer and compare bytes; none of them raises.
         MirExpr::RtCall(call) if call.sig.symbol.starts_with("pycc_rt_optional_str_") => false,
+        // A region's flag is a load (`rt_call::emit_region_intact`).
+        MirExpr::RtCall(call) if call.sig.symbol == crate::rt_call::REGION_INTACT_SYMBOL => false,
         // An operation on CPython objects raises nothing pycc's pending state
         // (D-173) holds once it is done: its helper reports a failure
         // CPython's way (a `NULL` result or a negative status, with
