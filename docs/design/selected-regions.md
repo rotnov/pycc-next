@@ -1,7 +1,7 @@
 # Native calls inside a selected region
 
-Status: R1 and R2 done (sections 5.2 and 5.4), R4 measured and parked, R3, R5 and R6 planned,
-and R2's code-size follow-ups next (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+Status: R1, R2 (with its code-size follow-ups) and R3 done (sections 5.2, 5.4 and 5.5), R4
+measured and parked until it is measured again on top of R3, R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
 part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
@@ -418,7 +418,7 @@ number stops the sequence for a measurement and a revision of this plan.
 |---|---|---|---|
 | R1 | Regions: formation from the selected unit (4.1, without the position-flow callees), `--report-fallbacks` lines `region: m: a, b, c (entries: ...)`, and pass 3 measuring and pruning regions as units (4.7) | unit tests of formation on a fixture module: an edge through a rebound global, a method edge, two components, a self-recursive function; prune tests with a two-member region; `package_check` reports tomli's region | no change in instructions (no code is generated differently); the five packages' selections unchanged or each change explained |
 | R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native; the prover's facts B1 (exact `str` along edges), B2 (a local bound only to members, dispatched on identity) and B3 (`re.Match` positions from a watched exact `re.Pattern` global); region edges as direct calls checked against the intact flag, which a shared `PyDict_Watch` watcher on the module dict and a shared `PyFunction_AddWatcher` watcher on the members clear; the recursion check on copies that close a cycle; method edges generic; captured locals never native; position-flow callees join the region (4.1); no checked conversion outside a rebound callee's generic arm; the two DEVIATIONS rows of 4.6 only if a test reaches them | `tests/select_regions.rs` against CPython: native edge results; a member global rebound after a first call, and `__code__` or `__defaults__` replaced, then called (CPython's result, no `TypeError`); the `RecursionError` depth; a member called from outside the region; B2 dispatching to each target and to a non-member; B3 with the pattern global replaced; a captured `pos` (late binding, 4.8); entry with `bool`, an `int` subclass and a big `int` | tomli `loads()` <= 2.66M per call locally (`u1`: 2.658M, `u1x`: 2.630M), wall >= 1.33x; pypng and pydantic not slower; `.text` growth reported |
-| R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6) | `tests/tagged_words.rs` extended with native `int` operands, fast paths on and off, a `str` subclass receiver | about -80K: tomli <= 2.59M; `diff_bisect` (native `int` locals) not slower |
+| R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6). Refined against R2's tree (5.5): R2 already hands native slice bounds and indexes to `pycc_ext_obj_getslice_int` and `pycc_ext_obj_getitem_int`, so no `slice` object is built for them; what is left is that call, `startswith` as a method call with a boxed position, a slice whose other bound is an `object`, and a character loaded from a native index, which stays an object | `tests/region_words.rs`: a region whose copies slice, test `startswith` and load characters at native positions, against CPython with fast paths on and off: a `str` subclass receiver, non-ASCII text, big `int` positions, indexes past the end; the copies' IR takes the word paths | about -75K: tomli <= 2.47M after R2's code size; `.text` at most about 800K; pypng's `read()`, pydantic's workload and `diff_bisect` (native `int` locals) not slower |
 | R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K estimated (tomli <= 2.45M); a prototype on `m0` measured **-85K**, under the 120K of section 6: parked until R2 lands (5.1) |
 | R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
 | R6 | CI confirmation in `bench.yml` on both runners | | accept 2's tomli numbers (1.70x / 1.49x) met, or the gap measured and this plan revised |
@@ -457,7 +457,16 @@ acceptance numbers then apply to `m0`, measured again.
   stays: its `pos = 0` starts every position the prover proves, and without it no member
   has anything native (2.82M instructions, `m0`'s). The fixture's `parse` and `tails`
   start theirs the same way (`pos = 0`, `skip(s, 0)`).
-- **Next: R3**, then R4 measured again on top of R2 (above).
+- **R3, done.** Measured below (5.5): tomli's `loads()` at 2,469,841 instructions, under the
+  2.47M target, at 770,951 B of `.text` for `_parser`. In a copy, a native `int` local is a
+  word operand of the `str` word paths (`pycc_codegen::str_words`): `s[a:b]` with native
+  bounds, or `leaf + leaf` / `leaf - leaf` of native locals and literals, takes
+  `pycc_ext_str_slice` directly; `s.startswith(t, a)` compares the bytes inline; and
+  `c = s[pos]` with a native `pos` makes `c` a tagged character (`tagged_locals`), whose
+  comparisons and membership tests read the word. A small native `int` is read by its tag;
+  a big one or a `str` subclass takes CPython's operation as before, and so does non-ASCII
+  text for `startswith` and the character load.
+- **Next: R4** measured again on top of R3 (above).
 - **R1, done.** Regions are formed from the selected unit (4.1, without position-flow
   callees: `src/fallback/regions.rs`), a build's `--report-fallbacks` lists them, and
   pass 3 prunes them as units (4.7, `src/profile/verify/units.rs`). No code is generated
@@ -582,6 +591,53 @@ module's bytecode cache written before either count, so both runs import the sam
 - On the fixture of `tests/select_regions.rs` the compiled functions went from 216.8K to
   149.9K: generic lifts 83.1K (70.5K before), no lifts' twins,
   copies 13.9K, the copies' twins 34.9K, slow calls 11.2K and conversions 6.9K.
+
+### 5.5 R3's measurements
+
+The plan's estimate of R3 (about 80K, section 3) was taken against the hand-written `u1`,
+in which a native bound built a `slice`. R2 as built already passes native bounds and
+indexes as words: `s[a:b]` calls `pycc_ext_obj_getslice_int` and `s[i]` reads an exact
+`str`'s character inline. A breakdown of main after R2's code size (2,543,791 instructions
+per `loads()`) found what was left of item 6, per `loads()`:
+
+- `pycc_ext_obj_getslice_int`, 62.7K inclusive, about 186 calls on a `str` from the copies
+  (26.1K of it `pycc_ext_str_slice`, the slice itself) and 178 on tuples from generic lifts;
+- `src.startswith(t, pos)`, about 92 calls, each a method call with its position boxed
+  (`unicode_startswith` alone 10.1K);
+- `skip_until`'s `src[pos:new_pos]`, whose `new_pos` (from `src.index`) is an `object`, 23
+  calls through `pycc_ext_obj_getslice` and a `slice` object, 13.4K;
+- `c = src[pos]` with a native `pos`: an object character, retained and released, its
+  comparisons made on the object.
+
+Measured as 5.4 (the bytecode cache written before the counts):
+
+| build | instructions per `loads()` | `_parser` `.text` |
+|---|---|---|
+| main (R2's code size) | 2,543,791 | 760,807 B |
+| R3 | 2,469,841 (-2.9%) | 770,951 B (+1.3%; +28.9% over main before R2) |
+
+The target, 2.47M, is met by 159 instructions; two counts of the same build differ by
+about 200.
+
+- By symbol, the saving is about 35K from `startswith` (the method call, its site cache,
+  the boxed position and its release), about 22K from the slices (`pycc_ext_obj_getslice_int`'s
+  dispatch and `skip_until`'s `slice` object, less 2.4K of inline code in `parse_key_part`)
+  and about 10K from characters loaded as words (`skip_comment`, `loads`, `parse_value`,
+  `parse_basic_str`).
+- pypng (the 8-function selection, built the same way by main and R3): `read()` of the
+  256x256 image 143,010,463 and 143,010,461 instructions per call, the PngSuite decode
+  123,529,259 and 123,527,458. pydantic (the 5-function selection): 240,819,502 and
+  240,779,856 per repeat of the default workload. diff-match-patch (`bench/package_check.py
+  --instructions`, both builds selecting `diff_bisect` alone): `diff_main` 101.55M per call
+  either way.
+- The word paths take any native `int` local, not only a region copy's position: a
+  `for i in range(...)` variable of a compiled body also gets them (`s[i:i+2]`,
+  `s.startswith("ab", i)`, `c = s[i]`). A leaf or a sum outside the word range (2**62)
+  takes CPython's operation; `tests/region_words.rs` (`edges`) pins that edge.
+- What is left in `_parser` beside R4's membership tests is not in the `str` word paths:
+  positions boxed for the regular expressions' `match(src, pos)` and `src.index(expect,
+  pos)` (about 150 per `loads()`), the tuple slices of the generic `Flags.is_` and
+  `key_value_rule`, and the fixed cost of each `skip_chars` call.
 
 ## 6. Risks
 
