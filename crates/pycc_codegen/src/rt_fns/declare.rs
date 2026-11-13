@@ -560,6 +560,7 @@ pub(crate) fn declare_rt_functions<'ctx>(
         frames: crate::frames::FrameState::declare(context, module),
         nd_caches: crate::ndarray::NdCaches::default(),
         loops: crate::loop_control::LoopControlState::default(),
+        char_classes: crate::char_class::LoopClasses::default(),
         list_free: declare(
             "pycc_rt_list_free",
             void_type.fn_type(&[ptr_type.into()], false),

@@ -1,7 +1,7 @@
 # Native calls inside a selected region
 
-Status: R1, R2 (with its code-size follow-ups) and R3 done (sections 5.2, 5.4 and 5.5), R4
-measured and parked until it is measured again on top of R3, R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+Status: R1, R2 (with its code-size follow-ups), R3 and R4 done (sections 5.2, 5.4, 5.5 and
+5.6), R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
 part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
@@ -419,7 +419,7 @@ number stops the sequence for a measurement and a revision of this plan.
 | R1 | Regions: formation from the selected unit (4.1, without the position-flow callees), `--report-fallbacks` lines `region: m: a, b, c (entries: ...)`, and pass 3 measuring and pruning regions as units (4.7) | unit tests of formation on a fixture module: an edge through a rebound global, a method edge, two components, a self-recursive function; prune tests with a two-member region; `package_check` reports tomli's region | no change in instructions (no code is generated differently); the five packages' selections unchanged or each change explained |
 | R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native; the prover's facts B1 (exact `str` along edges), B2 (a local bound only to members, dispatched on identity) and B3 (`re.Match` positions from a watched exact `re.Pattern` global); region edges as direct calls checked against the intact flag, which a shared `PyDict_Watch` watcher on the module dict and a shared `PyFunction_AddWatcher` watcher on the members clear; the recursion check on copies that close a cycle; method edges generic; captured locals never native; position-flow callees join the region (4.1); no checked conversion outside a rebound callee's generic arm; the two DEVIATIONS rows of 4.6 only if a test reaches them | `tests/select_regions.rs` against CPython: native edge results; a member global rebound after a first call, and `__code__` or `__defaults__` replaced, then called (CPython's result, no `TypeError`); the `RecursionError` depth; a member called from outside the region; B2 dispatching to each target and to a non-member; B3 with the pattern global replaced; a captured `pos` (late binding, 4.8); entry with `bool`, an `int` subclass and a big `int` | tomli `loads()` <= 2.66M per call locally (`u1`: 2.658M, `u1x`: 2.630M), wall >= 1.33x; pypng and pydantic not slower; `.text` growth reported |
 | R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6). Refined against R2's tree (5.5): R2 already hands native slice bounds and indexes to `pycc_ext_obj_getslice_int` and `pycc_ext_obj_getitem_int`, so no `slice` object is built for them; what is left is that call, `startswith` as a method call with a boxed position, a slice whose other bound is an `object`, and a character loaded from a native index, which stays an object | `tests/region_words.rs`: a region whose copies slice, test `startswith` and load characters at native positions, against CPython with fast paths on and off: a `str` subclass receiver, non-ASCII text, big `int` positions, indexes past the end; the copies' IR takes the word paths | about -75K: tomli <= 2.47M after R2's code size; `.text` at most about 800K; pypng's `read()`, pydantic's workload and `diff_bisect` (native `int` locals) not slower |
-| R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K estimated (tomli <= 2.45M); a prototype on `m0` measured **-85K**, under the 120K of section 6: parked until R2 lands (5.1) |
+| R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K estimated (tomli <= 2.45M); a prototype on `m0` measured **-85K**, under the 120K of section 6, and was parked until R2 landed (5.1); measured again on top of R3, the per-test prototype saves 47K, and the loop prepared once (5.6) 96K: tomli <= 2.42M, `.text` at most +5% |
 | R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
 | R6 | CI confirmation in `bench.yml` on both runners | | accept 2's tomli numbers (1.70x / 1.49x) met, or the gap measured and this plan revised |
 
@@ -466,7 +466,13 @@ acceptance numbers then apply to `m0`, measured again.
   comparisons and membership tests read the word. A small native `int` is read by its tag;
   a big one or a `str` subclass takes CPython's operation as before, and so does non-ASCII
   text for `startswith` and the character load.
-- **Next: R4** measured again on top of R3 (above).
+- **R4, done.** Measured below (5.6): tomli's `loads()` at 2,374,567 instructions, under the
+  2.42M target set from the prototype measured again on top of R3, at 774,151 B of `.text`
+  for `_parser` (+0.4%). The prototype's per-test path alone saved 47K; the rest comes from
+  preparing the loop: a `while s[i] in chars:` whose `s` and `chars` are parameters the loop
+  only reads checks both once, before the loop, and copies the set's mask, so each test is
+  a bounds check, a byte load and a bit test (`pycc_codegen::char_class`).
+- **Next: R5**, the entry guard in the patched trampoline.
 - **R1, done.** Regions are formed from the selected unit (4.1, without position-flow
   callees: `src/fallback/regions.rs`), a build's `--report-fallbacks` lists them, and
   pass 3 prunes them as units (4.7, `src/profile/verify/units.rs`). No code is generated
@@ -639,11 +645,69 @@ about 200.
   pos)` (about 150 per `loads()`), the tuple slices of the generic `Flags.is_` and
   `key_value_rule`, and the fixed cost of each `skip_chars` call.
 
+### 5.6 R4's measurements
+
+R4 was parked (5.1) after a prototype on `m0` saved 85K. Measured again on top of R3, the
+same prototype (`src[pos] in chars` fused into one test: the byte read from an exact compact
+ASCII `str` and tested against the set's cached mask, with no character object) saved
+46,762 instructions per `loads()`, all in `skip_chars`, whose loop still ran about 37
+instructions a test: the `str`'s type and state, the index, the set's type and the cache's
+two ways were checked again at each of the 2,358 tests per `loads()`, since LLVM does not
+unswitch a loop whose slow path calls out. The target was then set from that measurement:
+at least 50K, tomli at most 2.42M, `.text` at most about +5%.
+
+R4 as built adds what section 4.5 planned: the mask is looked up once where the loop
+starts. A `while` loop whose test is `s[i] in c` or `s[i] not in c`, with `s` and `c`
+parameters (always bound, never tagged) that the loop only reads and no `yield` in it,
+reads both once before the loop: `s` an exact compact ASCII `str`, `c` an exact `frozenset`
+whose cached mask is usable (`pycc_ext_ascii_mask_entry` computes it on a miss), and the
+mask's two words copied. Anything else leaves a length of 0, which no index passes. Each
+test is then the index's small-`int` check, one unsigned compare with the length (a
+negative index, too, takes the per-test path), the byte and the bit: 14 instructions in
+the compiled loop.
+The copied words stay the set's answer whatever later happens to the cache, since a
+`frozenset` cannot change and the loop does not rebind the name. A parameter rebound only
+before the loop is prepared as it is bound at the loop; one a nested scope captures (and
+could rebind through `nonlocal`) is a cell and is not prepared (`tests/char_class_loops.rs`,
+`closure`). The `yield` guard is defensive: generators are not compiled today.
+
+Measured as 5.4 (the bytecode cache written before the counts):
+
+| build | instructions per `loads()` | `_parser` `.text` |
+|---|---|---|
+| main (R3) | 2,470,292 | 770,951 B |
+| prototype, per test | 2,423,530 (-46,762) | 771,943 B |
+| prepared, with a flag tested at each test | 2,405,210 (-65,082) | 774,631 B |
+| **R4** (no flag: a length of 0) | **2,374,567 (-95,725, -3.9%)** | **774,151 B (+0.4%)** |
+
+- By symbol, all of the saving is in `skip_chars`' copy: 227,058 -> 131,412 instructions per
+  `loads()` (646 calls, 2,358 tests). A test is now 14 instructions in the compiled loop,
+  and `pos += 1` 6 more. What is left is mostly the per-call cost, about 135 instructions
+  a call: the copy's frame (entered and left), the two parameter references it releases,
+  and the loop's preparation.
+- tomli's `loads()` is now below the old whole-module build's 2.427M (section 1): 1.72x
+  CPython's 4.082M in instructions, against the old 1.68x. Wall time, 100 `loads()`, median
+  of 15 interleaved rounds: CPython 39.2 ms, main 26.5 ms (1.48x), R4 25.7 ms (1.53x), on a machine whose rounds varied by up to 1.6x.
+- pypng (the 8-function selection): no compiled function has such a loop, and the compiled
+  functions' machine code is identical to main's (the shim gains `pycc_ext_ascii_mask_entry`
+  only). The PngSuite decode counts 123,548,861 and 123,560,813 per call. `read()` of the
+  256x256 image varied between 121.7M and 161.7M per call across repeated counts of either
+  build on this machine (main 139.6M, 134.5M, 161.7M, 144.0M; R4 113.9M, 126.2M, 151.2M,
+  161.7M), with identical code, so no difference is attributable to R4. pydantic (the
+  5-function selection): 240,902,069 and 240,877,776 per repeat. diff-match-patch
+  (`bench/package_check.py --instructions`): `diff_main` 101.55M on main, 101.55M with R4.
+- `tests/char_class_loops.rs` checks the loops in copies (a native position) and in their
+  generic lifts (a `bool`, a big `int` or a `str` subclass sends a call there) against
+  CPython, with the fast paths on and off.
+
 ## 6. Risks
 
 - **The margin is thin.** The projection beats the old build by about 2%, and part of it is an
   estimate (R4's 170K, from the IR). If R2 measures above 2.66M, or R4 saves less than 120K,
   accept 2 is not reachable by this plan, and the next step is a measurement, not more tuning.
+  As built, R2 and R3 came in under their targets and R4 saved 96K, not 120K, but from a lower
+  start: tomli's `loads()` is at 2.375M, under the old build's 2.427M (5.6). The CI ratios
+  (R6) are still the verdict.
 - **Code size.** Each member is compiled twice, as its lift and as its copy (or the copy's
   multi-value twin): +27% `.text` for tomli's `_parser` after R2's code-size follow-ups,
   +80% as R2 first built it (5.4), against the +16% section 3 estimated. That costs I1

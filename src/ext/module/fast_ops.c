@@ -276,6 +276,30 @@ static long long pycc_ext_ascii_mask_fill(PyObject *s, long long c)
     return answer;
 }
 
+/* The usable cached entry of the exact `frozenset` `s`, computed on a miss
+ * (`pycc_ext_ascii_mask_fill`), or NULL when `s` is not usable: for a loop
+ * that tests characters against one set, whose generated code reads the
+ * entry's two words once before the loop (`pycc_codegen::char_class`). The
+ * fill may release an evicted set, whose release can run Python code that
+ * refills this bucket, so the entry is looked up again after it; a set
+ * evicted by then gives NULL, and the loop tests each character as before.
+ * The caller reads the words before it runs any other code. */
+static PyccAsciiMask *pycc_ext_ascii_mask_entry(PyObject *s)
+{
+    PyccAsciiMask *way = &pycc_ext_ascii_masks[PYCC_ASCII_MASK_INDEX(s) * 2];
+    int i;
+
+    if (way[0].set != s && way[1].set != s) {
+        (void)pycc_ext_ascii_mask_fill(s, 0);
+    }
+    for (i = 0; i < 2; i++) {
+        if (way[i].set == s) {
+            return way[i].usable ? &way[i] : NULL;
+        }
+    }
+    return NULL;
+}
+
 long long pycc_ext_ascii_mask_fill_count(void)
 {
     return pycc_ext_ascii_mask_fills;

@@ -132,6 +132,8 @@ pub(crate) fn emit_while_stmt<'ctx>(
     let body_bb = context.append_basic_block(function, "while_body");
     let after_bb = context.append_basic_block(function, "while_after");
 
+    // `while s[i] in chars:` reads `s`'s and `chars`'s facts once, here.
+    let prepared = crate::char_class::prepare_loop(context, builder, module, rt, user_functions, locals, test, body);
     builder
         .build_unconditional_branch(test_bb)
         .expect("build_unconditional_branch should not fail entering the loop test");
@@ -149,7 +151,7 @@ pub(crate) fn emit_while_stmt<'ctx>(
         finally_stack.len(),
         crate::exception::owned_slots::depth(rt),
     );
-    emit_body_then_branch(
+    let emitted = emit_body_then_branch(
         context,
         builder,
         module,
@@ -160,7 +162,11 @@ pub(crate) fn emit_while_stmt<'ctx>(
         test_bb,
         expected_return_ty,
         finally_stack,
-    )?;
+    );
+    if prepared {
+        crate::char_class::finish_loop(rt);
+    }
+    emitted?;
     rt.loops.exit();
 
     builder.position_at_end(after_bb);

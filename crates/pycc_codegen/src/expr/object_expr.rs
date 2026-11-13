@@ -502,6 +502,11 @@ pub(crate) fn emit_obj_contains_expr<'ctx>(
     else {
         unreachable!()
     };
+    if crate::char_class::applies(item, container) {
+        // `s[i] in chars`: the character's code, with no object made
+        // (`char_class`).
+        return crate::char_class::emit(context, builder, module, rt, user_functions, locals, *negate, item, container);
+    }
     if let Some(slot) = crate::tagged_locals::tagged_read(rt, locals, item)
         && boxed_text_set_name(item, container).is_none()
         && !crate::const_container::is_constant_sequence(container)
