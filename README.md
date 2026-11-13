@@ -274,6 +274,16 @@ documented bound, which CI gates with `--select all`):
   in 17 modules, with its unittest suite and benchmark inside the package, pinned by
   sdist sha256).
 
+`package_check.py` and `wheel_check.py` (below) run every test of each suite but one
+kind: an upstream test whose name ends in `_near_linear` (mistune 3.3.4 has 9) asserts
+nothing but the ratio of two millisecond-scale wall times measured in the same process,
+so on a shared CI runner it fails on a scheduling hiccup whatever the build. The suites'
+loader (`SuiteLoader` in `bench/package_check_workloads.py`) drops those tests, and only
+those, for every package and every tree it tests (CPython, compiled, competitors,
+installed wheel), and prints each one it drops. Tests with an absolute deadline and an
+output check still run; a version bump re-checks that the suffix still matches
+timing-only tests.
+
 An archive member that is not a regular file or a directory (a link, a device) is
 refused before extraction.
 
@@ -356,8 +366,9 @@ and per-row object calls, not the filters.
 mistune is typed, class-based library code: a block parser, an inline parser, plugins,
 directives and renderers, in 38 modules that call each other through their classes,
 with tokens as dicts and dispatch by name (`getattr(self, name)`, a dict of lambdas).
-All 38 build unchanged (in parallel, as `pycc.build` builds them) and its own 1155 tests
-pass against them; 386 of its 413 functions compile (`--report-fallbacks`). It is
+All 38 build unchanged (in parallel, as `pycc.build` builds them) and its own tests
+pass against them (1155; the checks run the 1146 that do not assert only a wall-time
+ratio, see above); 386 of its 413 functions compile (`--report-fallbacks`). It is
 **slower** than CPython: rendering every document of its own benchmark
 (`benchmark/cases`) with `mistune.html` takes 106.1 ms against 94.8 ms for 20 passes
 (0.89x), and its "full" parser with every plugin 0.124 s against 0.106 s (0.86x; bench run
