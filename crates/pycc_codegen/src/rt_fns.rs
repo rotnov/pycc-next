@@ -392,6 +392,9 @@ pub(super) struct RtFns<'ctx> {
     /// The enclosing loops' `break`/`continue` targets; `loop_control.rs`
     /// owns it.
     pub(super) loops: crate::loop_control::LoopControlState<'ctx>,
+    /// The enclosing `while` loops' prepared character-class tests;
+    /// `char_class.rs` owns it.
+    pub(crate) char_classes: crate::char_class::LoopClasses<'ctx>,
     /// `pycc_rt_list_free`/`pycc_rt_instance_free`: the cold call an inline
     /// decrement makes when a count reaches zero (`heap_rc`).
     pub(super) list_free: FunctionValue<'ctx>,

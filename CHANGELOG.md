@@ -56,6 +56,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   tomli's `loads()` with the 19-function selection: 2,543,791 -> 2,469,841 instructions per
   call (-2.9%), `_parser` `.text` 760,807 -> 770,951 B; pypng's `read()` (143.01M) and
   pydantic's workload unchanged.
+- Character-class tests without a character object (`docs/design/selected-regions.md`, R4).
+  `s[i] in chars` (and `not in`) of an exact compact ASCII `str` indexed in range by a small
+  `int` reads the byte and tests the bit of an exact `frozenset`'s cached ASCII mask, in a
+  region copy and in a generic body. A `while` loop with such a test, whose `str` and set
+  are parameters the loop only reads, checks both once before the loop and copies the
+  set's mask, so each test is a bounds check, a byte load and a bit test. Any other operand
+  (a `str` subclass, non-ASCII text, an index below zero, past the end or not a small `int`,
+  a `set`, a `frozenset` subclass, a set of more than 256 members or with a member that is
+  not an exact `str`) takes CPython's own subscript and membership test, as before. tomli's
+  `loads()` with the 19-function selection: 2,470,292 -> 2,374,567 instructions per call
+  (-3.9%), below the whole-module build from before v0.12's switch (2.427M); `_parser`
+  `.text` 770,951 -> 774,151 B; pypng's compiled code identical, pydantic's workload
+  unchanged.
 
 ### Fixed
 
