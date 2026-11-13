@@ -311,3 +311,84 @@ fn an_entry_is_a_member_called_from_outside_its_region() {
         "region: m: skip, loads (entries: skip, loads)"
     );
 }
+
+/// A module whose region (`loads`, `value`, `skip`) calls unselected
+/// functions whose results it binds or returns.
+const FLOW: &str = "\
+import functools
+
+def skip(src, pos):
+    return pos + 1
+
+def parse_str(src, pos):
+    return pos + 1, src[pos]
+
+def esc_a(src, pos):
+    return pos + 1, 'a'
+
+def esc_b(src, pos):
+    return hex_char(src, pos)
+
+def hex_char(src, pos):
+    return pos + 4, src[pos:pos + 4]
+
+def escapes(src, pos, loud):
+    if loud:
+        f = esc_a
+    else:
+        f = esc_b
+    pos, t = f(src, pos)
+    return pos, t
+
+def dropped(src):
+    return src
+
+@functools.cache
+def decorated(src, pos):
+    return pos
+
+def rebound(src, pos):
+    return pos
+
+rebound = functools.cache(rebound)
+
+def value(src, pos):
+    pos = skip(src, pos)
+    dropped(src)
+    pos = decorated(src, pos)
+    pos = rebound(src, pos)
+    if src[pos] == '\"':
+        return parse_str(src, pos)
+    return escapes(src, pos, True)
+
+def loads(src):
+    pos = skip(src, 0)
+    pos, v = value(src, pos)
+    return v
+
+def alone(src):
+    return parse_str(src, 0)
+";
+
+/// The candidate position-flow callees of the region of `selected` in
+/// [`FLOW`], by name.
+fn flow(selected: &[&str]) -> Vec<String> {
+    let keys = selected.iter().map(|name| key(FLOW, name)).collect();
+    let (plan, units) = regions::selected_units(FLOW, &keys).expect("the fixture parses");
+    plan.flow_callees(&units)
+        .into_iter()
+        .map(|unit| plan.lift(unit).expect("a lift").qualname.clone())
+        .collect()
+}
+
+#[test]
+fn a_region_reaches_its_flow_callees_to_a_fixpoint() {
+    // `parse_str` and `escapes` by a `return`, `esc_a` and `esc_b` through
+    // the local `f`, and `hex_char` through `esc_b`. `dropped` discards its
+    // result; `decorated` and `rebound` are not bound by their own `def`.
+    assert_eq!(flow(&["skip", "value", "loads"]), ["parse_str", "esc_a", "esc_b", "hex_char", "escapes"]);
+    // A selected callee is no candidate, and its own calls still count.
+    assert_eq!(flow(&["skip", "value", "loads", "escapes"]), ["parse_str", "esc_a", "esc_b", "hex_char"]);
+    // A function in no region reaches none.
+    assert!(flow(&["alone"]).is_empty());
+}

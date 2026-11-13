@@ -24,7 +24,8 @@
 //! raises before storing any result, so a caller's temporaries are only
 //! written on a normal return. A function with a `finally` (which could
 //! run code between a result's store and the return) or a bare `return`
-//! keeps no twin.
+//! keeps no twin, except a `finally` that only leaves a region copy's
+//! recursion check, which can neither raise nor return.
 
 use crate::{AssignMulti, MirExpr, MirItem, MirModule, MirStmt, ObjDisplayKind, Ty};
 use std::collections::HashMap;
@@ -359,8 +360,8 @@ fn is_abi_ty(ty: &Ty) -> bool {
 }
 
 /// Collects every `return` of `body` into `out`; `false` when one is not a
-/// tuple display or a call, or the body has a `finally`, a generator
-/// statement or a closure.
+/// tuple display or a call, or the body has a `finally` (but one that only
+/// leaves a region's recursion check), a generator statement or a closure.
 fn body_returns(body: &[MirStmt], out: &mut Vec<Returned>) -> bool {
     for stmt in body {
         match stmt {
@@ -388,7 +389,7 @@ fn body_returns(body: &[MirStmt], out: &mut Vec<Returned>) -> bool {
             | MirStmt::AssignMulti(_)
             | MirStmt::SetOut { .. } => return false,
             MirStmt::Try { finalbody, .. } | MirStmt::TryStar { finalbody, .. }
-                if !finalbody.is_empty() =>
+                if !finalbody.is_empty() && !only_region_leave(finalbody) =>
             {
                 return false;
             }
@@ -404,6 +405,21 @@ fn body_returns(body: &[MirStmt], out: &mut Vec<Returned>) -> bool {
         }
     }
     true
+}
+
+/// The symbol of `__pycc_region_leave()`, which neither raises nor
+/// returns a value.
+const REGION_LEAVE_SYMBOL: &str = "pycc_ext_region_leave";
+
+/// Whether the `finally` body `body` only leaves a region's recursion
+/// check (`pycc_ast`'s region copies): it runs no code that could raise
+/// or return between a result's store and the return, so the twin keeps
+/// the original's semantics.
+fn only_region_leave(body: &[MirStmt]) -> bool {
+    body.iter().all(|stmt| {
+        matches!(stmt, MirStmt::Pos(_))
+            || matches!(stmt, MirStmt::ExprStmt(MirExpr::RtCall(call)) if call.sig.symbol == REGION_LEAVE_SYMBOL)
+    })
 }
 
 fn has_closure(expr: &MirExpr) -> bool {
@@ -745,4 +761,46 @@ fn reads(stmt: &MirStmt, name: &str) -> bool {
 fn expr_reads(expr: &MirExpr, name: &str) -> bool {
     matches!(expr, MirExpr::Name { name: read, .. } if read == name)
         || expr.children().into_iter().any(|child| expr_reads(child, name))
+}
+
+#[cfg(test)]
+mod region_leave_tests {
+    use super::*;
+
+    fn leave() -> MirStmt {
+        let sig = pycc_hir::builtins::resolve_call("__pycc_region_leave", &[])
+            .expect("a builtin")
+            .expect("no arguments");
+        MirStmt::ExprStmt(MirExpr::RtCall(Box::new(crate::RtCallExpr { sig, args: Vec::new() })))
+    }
+
+    /// Whether a body returning a pair inside `try: ... finally:` with
+    /// `finalbody` may have a twin.
+    fn twin_with_finally(finalbody: Vec<MirStmt>) -> bool {
+        let body = vec![MirStmt::Try {
+            body: vec![MirStmt::Return(Some(MirExpr::TupleLiteral(vec![
+                MirExpr::IntLiteral(1),
+                MirExpr::IntLiteral(2),
+            ])))],
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody,
+        }];
+        body_returns(&body, &mut Vec::new())
+    }
+
+    #[test]
+    fn only_a_finally_that_leaves_a_region_keeps_a_twin() {
+        assert_eq!(REGION_LEAVE_SYMBOL, leave_symbol());
+        assert!(twin_with_finally(vec![leave()]));
+        assert!(!twin_with_finally(vec![leave(), MirStmt::ExprStmt(MirExpr::IntLiteral(0))]));
+        assert!(!twin_with_finally(vec![MirStmt::Return(None)]));
+    }
+
+    fn leave_symbol() -> &'static str {
+        match leave() {
+            MirStmt::ExprStmt(MirExpr::RtCall(call)) => call.sig.symbol,
+            _ => unreachable!("built above"),
+        }
+    }
 }

@@ -219,9 +219,14 @@ fn insert_guard_types(body: &mut Vec<Stmt>, types: &[&str]) {
     // The guards' types are read once, into globals of their own: an
     // attribute of the `builtins` module read at every call cost more
     // than the rest of the guard.
+    // Each is bound once: a second pass (`regions`) adds only what the
+    // first did not.
+    let bound = crate::namespace::module_scope_names(body);
     let mut source = format!("import builtins as {BUILTINS}\n");
     for ty in types {
-        source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
+        if !bound.contains(&format!("{GUARD_TYPE_PREFIX}{ty}")) {
+            source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
+        }
     }
     let import = super::signatures::parse_helper(&source, TextRange::default());
     for (offset, stmt) in import.into_iter().enumerate() {
@@ -780,6 +785,8 @@ fn loops(body: &[Stmt]) -> bool {
 
 mod attrs;
 mod call_sites;
+mod regions;
+pub use regions::{REGION_COPY_PREFIX, RegionFunction, RegionInput, region_native_results, specialize_regions};
 mod escapes;
 mod evidence;
 use evidence::Evidence;

@@ -236,10 +236,24 @@ impl<'ctx> FrameState<'ctx> {
     }
 }
 
+/// The prefix of a region copy of a lift (`pycc_ast::REGION_COPY_PREFIX`
+/// followed by the lift's name without `__pycc_`).
+const REGION_COPY_LIFT: &str = "__pycc_rnative_lift";
+
+/// The prefix of a native multi-value twin's name
+/// (`pycc_mir::multi_return::twin_name`).
+const NATIVE_TWIN: &str = "0gen_multi_";
+
 /// The frame names of the compiled function `mangled`: `co_name` and
 /// `co_qualname`.
 pub(crate) fn frame_names(mangled: &str) -> (String, String) {
-    let mut qualname = source_qualname(&pycc_hir::function_qualname(mangled));
+    // A native multi-value twin (`pycc_mir::multi_return::twin_name`) is
+    // the function it twins, and a region's native copy
+    // (`__pycc_rnative_liftN_<name>__`, `pycc_ast::specialize_regions`) is
+    // the lifted body it copies.
+    let mangled = mangled.strip_prefix(NATIVE_TWIN).unwrap_or(mangled);
+    let mangled = mangled.replacen(REGION_COPY_LIFT, "__pycc_lift", 1);
+    let mut qualname = source_qualname(&pycc_hir::function_qualname(&mangled));
     if let Some(lifted) = lifted_method(&qualname) {
         qualname = lifted;
     }
@@ -923,4 +937,22 @@ pub(crate) fn finish_module<'ctx>(context: &'ctx Context, module: &Module<'ctx>,
     let count = module.add_global(context.i64_type(), None, "pycc_fn_info_count");
     count.set_initializer(&context.i64_type().const_int(entries.len() as u64, false));
     count.set_constant(true);
+}
+
+#[cfg(test)]
+mod region_copy_tests {
+    use super::frame_names;
+
+    #[test]
+    fn a_region_copy_and_its_twin_are_named_after_the_source_function() {
+        for mangled in [
+            "__pycc_lift12_me__",
+            "__pycc_rnative_lift12_me__",
+            "0gen_multi2___pycc_rnative_lift12_me__",
+            "0gen_multi___pycc_rnative_lift12_me__",
+            "0gen_multi_me",
+        ] {
+            assert_eq!(frame_names(mangled).0, "me", "{mangled}");
+        }
+    }
 }

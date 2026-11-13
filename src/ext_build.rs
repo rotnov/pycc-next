@@ -61,6 +61,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/frames.c"),
     include_str!("ext/module/boundary.c"),
     include_str!("ext/module/global_sync.c"),
+    include_str!("ext/module/regions.c"),
     include_str!("ext/module/import_io.c"),
     include_str!("ext/module/object_unpack.c"),
     include_str!("ext/module/attr_cache.c"),

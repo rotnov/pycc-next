@@ -14,6 +14,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   pass 3 prunes a region of its winning set whole, never one member. No code is generated
   differently: a build of the same functions runs the same instructions. This prepares
   native calls inside a region (R2).
+- Native calls inside a region (`docs/design/selected-regions.md`, R2). A region's module
+  functions get native copies whose `int` positions (parameters, results, and the `int`
+  items of tuple results, returned without a tuple) are proven by a prover that also
+  trusts an exact `str` passed along the region, a local bound only to members, and the
+  positions of a match of a module-global `re.Pattern`. The copies call each other
+  directly while the region is intact: a watcher on the module dict and one on the
+  members' function objects end that when a member global, a pattern global, a member's
+  `__code__` or its `__defaults__` changes, and the members run their generic bodies from
+  then on. A copy that closes a cycle checks the recursion limit. A region also takes
+  the unselected functions whose results it uses as positions, when the prover types them
+  (`--report-fallbacks`: `compiled as a region's callee: MODULE:NAME`). tomli's `loads()`
+  with the same 19-function selection: 2,821,369 -> 2,591,280 instructions per call
+  (-8.2%), `.text` 598K -> 1,059K; pypng's `read()` (method regions only) unchanged at
+  143.01M; pydantic's workload unchanged within noise (its regions get no copies). Two
+  new DEVIATIONS rows: an `int` passed between copies and returned unchanged is a new
+  object, and a member rebound while a region call runs can raise `TypeError` for the
+  rest of that call.
 
 ### Fixed
 

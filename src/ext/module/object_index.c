@@ -364,10 +364,12 @@ PyObject *pycc_ext_obj_getslice(PyObject *o, PyObject *start, PyObject *stop, Py
  * `tuple` or `list` with smallint bounds is sliced directly, the bounds
  * clamped as `PySlice_AdjustIndices` clamps them for a step of 1, so the
  * result is the object CPython's own slice builds (an exact `tuple` sliced
- * whole is that tuple itself). Anything else packs the bounds and takes
- * `pycc_ext_obj_getslice`. The base and the words are borrowed. Returns a
+ * whole is that tuple itself); an exact `str` takes `pycc_ext_str_slice`.
+ * Anything else packs the bounds and takes `pycc_ext_obj_getslice`. The base and the words are borrowed. Returns a
  * new reference or `NULL` with the exception set.
  */
+PyObject *pycc_ext_str_slice(PyObject *s, long long start, long long stop);
+
 PyObject *pycc_ext_obj_getslice_int(PyObject *o, long long start, long long stop, int present)
 {
     Py_ssize_t lo = 0;
@@ -402,6 +404,10 @@ PyObject *pycc_ext_obj_getslice_int(PyObject *o, long long start, long long stop
             hi = size;
         }
         return tuple ? PyTuple_GetSlice(o, lo, hi) : PyList_GetSlice(o, lo, hi);
+    }
+    if (o != NULL && small && PyUnicode_CheckExact(o)) {
+        /* What `unicode_subscript` returns, without the `slice`. */
+        return pycc_ext_str_slice(o, lo, hi);
     }
     return pycc_ext_obj_getslice(o, (present & 1) ? pycc_ext_obj_pack_int(start) : NULL,
                                  (present & 2) ? pycc_ext_obj_pack_int(stop) : NULL, NULL,

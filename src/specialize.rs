@@ -61,6 +61,16 @@ thread_local! {
     /// natively in an attempt that passed, by the lift's report name: the
     /// next attempt leaves them objects ([`with_specialization`]).
     static IDLE: RefCell<BTreeMap<String, BTreeSet<String>>> = const { RefCell::new(BTreeMap::new()) };
+    /// The selected unit's functions a region of selected functions may
+    /// call natively, and its pattern globals (`pycc_ast::specialize_regions`,
+    /// docs/design/selected-regions.md R2).
+    static REGIONS: RefCell<pycc_ast::RegionInput> = RefCell::new(pycc_ast::RegionInput::default());
+}
+
+/// Records what the selected unit's regions may call natively, for
+/// [`specialize_entry`].
+pub(crate) fn set_regions(input: pycc_ast::RegionInput) {
+    REGIONS.with(|cell| *cell.borrow_mut() = input);
 }
 
 /// Records the lifts of the selected functions with observed types, for
@@ -92,6 +102,7 @@ pub(crate) fn reset() {
     PASSED.with(|passed| passed.borrow_mut().clear());
     UNOBSERVED.with(|unobserved| unobserved.borrow_mut().clear());
     IDLE.with(|idle| idle.borrow_mut().clear());
+    REGIONS.with(|regions| *regions.borrow_mut() = pycc_ast::RegionInput::default());
 }
 
 /// Adds the specializations of the entry module `parsed`, when the current
@@ -108,7 +119,15 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
         let skip = |qualname: &str| {
             dropped.contains_key(qualname) || only.as_ref().is_some_and(|only| !only.contains(qualname))
         };
-        let mut planned = LIFTS.with(|lifts| {
+        // The regions' copies first: a member with one takes no copy of
+        // its own observed types.
+        let mut planned = REGIONS.with(|regions| pycc_ast::specialize_regions(parsed, &regions.borrow(), &skip));
+        let in_region: BTreeSet<String> = planned
+            .iter()
+            .filter_map(|spec| spec.qualname.strip_prefix("region ").map(str::to_string))
+            .collect();
+        let skip_observed = |qualname: &str| skip(qualname) || in_region.contains(qualname);
+        planned.extend(LIFTS.with(|lifts| {
             let lifts = lifts.borrow();
             if lifts.is_empty() {
                 return Vec::new();
@@ -116,13 +135,13 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
             let (planned, unobserved) = pycc_ast::specialize_observed(
                 parsed,
                 &|name| lifts.get(name).cloned(),
-                &skip,
+                &skip_observed,
                 &|qualname| keep.contains(qualname),
                 &|qualname, param| idle.get(qualname).is_some_and(|params| params.contains(param)),
             );
             UNOBSERVED.with(|cell| *cell.borrow_mut() = unobserved);
             planned
-        });
+        }));
         planned.extend(pycc_ast::specialize_untyped(parsed, &skip, &|qualname| keep.contains(qualname)));
         planned
     });
@@ -233,11 +252,13 @@ fn run_all<T: Send>(
         let dropped = DROPPED.with(|dropped| dropped.borrow().clone());
         let keep = KEEP_BUILTINS.with(|keep| keep.borrow().clone());
         let idle = IDLE.with(|idle| idle.borrow().clone());
+        let regions = REGIONS.with(|regions| regions.borrow().clone());
         let fallback = crate::fallback::Snapshot::take();
         crate::timing::span("frontend: attempt wave", || std::thread::scope(|scope| {
             let workers: Vec<_> = wave
                 .map(|job| {
                     let (dropped, keep, idle) = (dropped.clone(), keep.clone(), idle.clone());
+                    let regions = regions.clone();
                     let fallback = fallback.clone();
                     let moved = job.clone();
                     let worker = std::thread::Builder::new()
@@ -246,6 +267,7 @@ fn run_all<T: Send>(
                             DROPPED.with(|cell| *cell.borrow_mut() = dropped);
                             KEEP_BUILTINS.with(|cell| *cell.borrow_mut() = keep);
                             IDLE.with(|cell| *cell.borrow_mut() = idle);
+                            REGIONS.with(|cell| *cell.borrow_mut() = regions);
                             fallback.install();
                             run(moved, attempt)
                         });
@@ -476,10 +498,16 @@ pub(crate) fn report() {
             .map(|(name, ty)| format!("{name}: {ty}"))
             .collect::<Vec<_>>()
             .join(", ");
-        eprintln!(
-            "specialized: `{}` runs natively when called with {params}",
-            spec.qualname
-        );
+        // A region copy may have no native parameter, only native locals
+        // or a native result.
+        if params.is_empty() {
+            eprintln!("specialized: `{}` runs natively", spec.qualname);
+        } else {
+            eprintln!(
+                "specialized: `{}` runs natively when called with {params}",
+                spec.qualname
+            );
+        }
     }
     for (qualname, reason) in DROPPED.with(|dropped| dropped.borrow().clone()) {
         eprintln!("not specialized: `{qualname}`: {reason}");
