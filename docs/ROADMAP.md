@@ -20,49 +20,41 @@ Milestones in order. A milestone is done when every Accept item is met with evid
 | v0.10 — Native dicts, exact errors, trustworthy numbers | 2026-10-30 | [v0.10](roadmap/v0.10.md) (accept 3 not met) |
 | v0.11 — Imports faster than CPython | 2026-11-01 | [v0.11](roadmap/v0.11.md) (accept 1 and accept 4 for pystache not met) |
 | v0.12 — Imports faster than CPython, finished | 2026-11-12 | [v0.12](roadmap/v0.12.md) (accept 1 and accept 3's import target not met) |
+| v0.13 — Compile little, compile well | 2026-11-13 | [v0.13](roadmap/v0.13.md) (accept 1 on aarch64, accept 2 for pypng's PngSuite read and accept 3's model definition on aarch64 not met) |
 
-## v0.13 — Compile little, compile well
+## v0.14 — Compile little, compile well, finished
 
-v0.12 switched non-strict `--ext` builds to compiling only the functions a `pycc profile`
-run measures as winners, with the modules run as CPython bytecode. At the release (bench
-run 43192816730 at 5b7cc6c, CPython 3.15.2, x86_64 / aarch64) pydantic's
-`model_json_schema()` runs 1.20x / 1.23x CPython, model definition 1.00x / 1.01x, the
-whole process 1.07x / 1.07x, and mistune's and pystache's imports and benchmarks are at
-parity. What is left: pydantic's import is at parity, not above it (0.99x / 0.99x), and
-pypng and tomli, compiled whole-module before the switch, lost most of their speed. What
-v0.12 did and measured: [v0.12](roadmap/v0.12.md); the design:
-[compile-little](design/compile-little.md).
+v0.13 let the functions a profile selects call each other natively inside a region
+(selected-regions R1-R5) and specialized a parameter for its dominant observed type. At
+the release (bench run 43418938409 at e579fe5, CPython 3.15.2, x86_64 / aarch64) tomli's
+`loads()` runs 1.81x / 1.56x CPython, above its whole-module build, pypng's five-filter
+read 13.94x / 16.98x, pydantic's `model_json_schema()` 1.24x / 1.22x and its whole
+process 1.07x / 1.05x. What is left: pydantic's import is at parity, not above it (1.02x
+inside the spread / 0.98x), its model definition is 0.99x on aarch64, and pypng's PngSuite
+read (2.72x / 2.88x) is below its whole-module build. What v0.13 did and measured:
+[v0.13](roadmap/v0.13.md); the designs: [compile-little](design/compile-little.md),
+[selected-regions](design/selected-regions.md).
 
-Accept (carried over from v0.12, not met there):
+Accept (carried over from v0.13, not met there on both runners):
 1. **pydantic import >= 1.0x**: median of the CI benchmark job (`bench.yml`) for the
    import phase of `bench/pydantic_workload.py`, compiled tree vs CPython from `.pyc`,
    same pydantic-core wheel, on both runners; its suite fails no test that passes against
-   its sources. v0.12: 0.99x / 0.99x. The modules run as bytecode, so the import is at
-   parity by construction; 43% of its instructions are CPython compiling texts at run
-   time (`compile()` of 737 forward references, `exec` or `eval` of 101 generated texts,
-   53 of them `dataclasses` methods). The lever: v0.12's lever 11 again, the build's
-   code objects for generated dataclass methods and forward-reference texts, which a
-   prototype measured at 1.14x (73.3 ms -> 64.2 ms locally).
-2. **pypng and tomli no slower than before the switch**: in `bench.yml` on both runners,
-   pypng's two reads and tomli's `loads` at least as fast relative to CPython as in bench
-   run 41750538464 at 0f97b93 (pypng five filters 10.42x / 17.20x, PngSuite 3.10x /
-   3.69x; tomli 1.70x / 1.49x). v0.12: pypng 2.02x / 1.95x and 1.24x / 1.20x, tomli
-   1.42x / 1.31x. The plan: [selected-regions](design/selected-regions.md), native calls
-   inside a region of selected functions, PRs R1-R6. Measured locally: a hand-written region
-   takes `loads()` from 2.808M to 2.657M instructions (old build 2.427M, CPython 4.082M).
-   With native `int` operands in the `str` word paths and character-class tests that make no
-   character object, it is projected at about 2.37-2.41M: accept 2 is met only with all
-   three, by a few percent.
-3. **Hold v0.12's met targets** in `bench.yml` on both runners: pydantic
-   `model_json_schema()` >= 1.15x (v0.12: 1.20x / 1.23x), model definition >= 1.0x
-   (1.00x / 1.01x), whole process >= 1.0x (1.07x / 1.07x); mistune's and pystache's
-   imports and benchmarks no slower than at v0.12.0.
+   its sources. v0.13: 1.02x / 0.98x, at parity under callgrind (470.80M instructions
+   against 470.12M on x86_64). The modules run as bytecode, so the import is at parity by
+   construction; the lever is v0.12's lever 11, the build's code objects for generated
+   dataclass methods and forward-reference texts, which a prototype measured at 1.14x
+   (73.3 ms -> 64.2 ms locally).
+2. **pypng's PngSuite read no slower than before the switch**: in `bench.yml` on both
+   runners, at least 3.10x / 3.69x CPython (bench run 41750538464 at 0f97b93). v0.13:
+   2.72x / 2.88x. pypng's five-filter read (10.42x / 17.20x then; 13.94x / 16.98x now)
+   and tomli's `loads` (1.70x / 1.49x then; 1.81x / 1.56x now) must not fall below those
+   ratios.
+3. **Hold the met targets** in `bench.yml` on both runners: pydantic
+   `model_json_schema()` >= 1.15x (v0.13: 1.24x / 1.22x), model definition >= 1.0x
+   (1.01x / 0.99x: not met on aarch64), whole process >= 1.0x (1.07x / 1.05x); mistune's
+   and pystache's imports and benchmarks no slower than at v0.13.0.
 
 Levers for the schema phase's margin, measured locally on 2026-11-12:
-1. pass 3 of `pycc profile` prunes losing members from its winning set (#122, in v0.12;
-   1.08x-1.12x schema locally before #124);
-2. idiom lowering in `_make_json_hashable` (#124 did the first part: dict items through
-   `PyDict_Next`, `tuple(sorted(genexpr))` sorted in place, tuple displays by
-   `PyTuple_New`); left: inline exact `isinstance` and lazy frames, about 1.25x estimated
-   with the rest;
-3. a cheaper boundary between bytecode and compiled properties and methods.
+1. idiom lowering in `_make_json_hashable` (#124 did the first part); left: inline exact
+   `isinstance` and lazy frames, about 1.25x estimated with the rest;
+2. a cheaper boundary between bytecode and compiled properties and methods.
