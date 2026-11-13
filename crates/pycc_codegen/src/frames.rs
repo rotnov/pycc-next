@@ -244,6 +244,16 @@ const REGION_COPY_LIFT: &str = "__pycc_rnative_lift";
 /// (`pycc_mir::multi_return::twin_name`).
 const NATIVE_TWIN: &str = "0gen_multi_";
 
+/// Whether only compiled code calls `mangled`, each call made with the
+/// caller's own frame linked on top: a region's native copy and its
+/// multi-value twin, which only region calls and their lifts' entry guards
+/// call (`pycc_ast::specialize_regions`), never a forwarder or a signature
+/// wrapper. Its frame links onto the top as it is
+/// ([`inline::link_frame`]'s `compiled_caller`).
+fn called_from_compiled(mangled: &str) -> bool {
+    mangled.strip_prefix(NATIVE_TWIN).unwrap_or(mangled).starts_with(REGION_COPY_LIFT)
+}
+
 /// The frame names of the compiled function `mangled`: `co_name` and
 /// `co_qualname`.
 pub(crate) fn frame_names(mangled: &str) -> (String, String) {
@@ -357,7 +367,7 @@ pub(crate) fn begin_function<'ctx>(
         flags & FN_INFO_GENERATOR == 0 && state.framed.borrow().contains(mangled)
     };
     let live = if live {
-        enter_frame(context, builder, state, info)
+        enter_frame(context, builder, state, info, called_from_compiled(mangled))
     } else {
         None
     };
@@ -396,16 +406,18 @@ fn enter_frame<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     state: &FrameState<'ctx>,
     info: GlobalValue<'ctx>,
+    compiled_caller: bool,
 ) -> Option<LiveFrame<'ctx>> {
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let function = builder.get_insert_block()?.get_parent()?;
     // `PyccIFrame` is twelve words, 3.15's larger frame (CPython never
     // reads its `localsplus`, where `pycc_ext_frame_enter` keeps the
-    // thread state and the top it replaced).
+    // thread state and the top it replaced), then the inline link's two
+    // (`inline::FRAME_WORDS`).
     let frame = builder
-        .build_alloca(ptr.array_type(12), "pycc_frame")
+        .build_alloca(ptr.array_type(inline::FRAME_WORDS), "pycc_frame")
         .expect("build_alloca should not fail for a frame");
-    link_frame(context, builder, state, function, frame, info)?;
+    link_frame(context, builder, state, function, frame, info, compiled_caller)?;
     let ip0_field = builder
         .build_struct_gep(info_type(context), info.as_pointer_value(), 4, "fninfo_ip0")
         .expect("build_struct_gep should not fail for PyccFnInfo.ip0");

@@ -253,6 +253,10 @@ PYCC_ENTRY PyObject *pycc_ext_ns_getitem_cached(PyObject *ns, PyObject *k, PyccN
     PyObject *result;
 
     cache->dict = NULL;
+    /* Compiled code reads `ns` borrowed (`pycc_codegen::operand_pin`): a
+     * key's `__eq__` run by the lookup could rebind the global that held
+     * it, so the read holds it until the lookup is done. */
+    Py_XINCREF(ns);
     Py_XINCREF(k);
     result = pycc_ext_ns_getitem(ns, k);
     if (result != NULL && version != NULL && k != NULL && PyDict_CheckExact(ns) && *version == seen) {
@@ -265,6 +269,7 @@ PYCC_ENTRY PyObject *pycc_ext_ns_getitem_cached(PyObject *ns, PyObject *k, PyccN
         PyErr_Clear();
     }
     Py_XDECREF(k);
+    Py_XDECREF(ns);
     return result;
 }
 

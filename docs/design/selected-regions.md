@@ -1,7 +1,7 @@
 # Native calls inside a selected region
 
-Status: R1, R2 (with its code-size follow-ups), R3 and R4 done (sections 5.2, 5.4, 5.5 and
-5.6), R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+Status: R1, R2 (with its code-size follow-ups), R3, R4 and R5 done (sections 5.2 and
+5.4-5.7), R5b and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
 part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
@@ -190,7 +190,7 @@ region's **entries**. Pass 2's `callees` counts tell which calls into a member c
 outside. Static edges alone cannot tell this, because a module's bytecode can call any member.
 So every member stays an entry: each keeps its generic lift. The counts are approximate (a
 member's total and each caller's count are medians taken separately across pass 2's runs), so
-the report's entries are a guide, not a guarantee: the entry guard (R5) must not rely on a
+the report's entries are a guide, not a guarantee: the entry guard (R5b) must not rely on a
 member being no entry, nor on a region reporting `entries: none`.
 
 ### 4.2 Types: annotations, observations and proofs
@@ -300,7 +300,7 @@ Generic lifts are unchanged for every caller outside the region.
 - **Entry.** An entry checks its observed parameter types exactly (`type(x) is int`, so a
   `bool` or a subclass runs the generic lift), then calls the copy. Until the guard moves
   into the trampoline, this check is the one `add_guard` puts at the top of the generic
-  lift (PR R5 below moves it).
+  lift (PR R5b below moves it).
 - **Bindings at entry.** An entry also checks that the region is still intact: every
   member's module global still holds the compiled function the region was built from. The
   check is one load and compare of a per-region `intact` flag. A `PyDict_Watch` watcher on
@@ -420,7 +420,8 @@ number stops the sequence for a measurement and a revision of this plan.
 | R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native; the prover's facts B1 (exact `str` along edges), B2 (a local bound only to members, dispatched on identity) and B3 (`re.Match` positions from a watched exact `re.Pattern` global); region edges as direct calls checked against the intact flag, which a shared `PyDict_Watch` watcher on the module dict and a shared `PyFunction_AddWatcher` watcher on the members clear; the recursion check on copies that close a cycle; method edges generic; captured locals never native; position-flow callees join the region (4.1); no checked conversion outside a rebound callee's generic arm; the two DEVIATIONS rows of 4.6 only if a test reaches them | `tests/select_regions.rs` against CPython: native edge results; a member global rebound after a first call, and `__code__` or `__defaults__` replaced, then called (CPython's result, no `TypeError`); the `RecursionError` depth; a member called from outside the region; B2 dispatching to each target and to a non-member; B3 with the pattern global replaced; a captured `pos` (late binding, 4.8); entry with `bool`, an `int` subclass and a big `int` | tomli `loads()` <= 2.66M per call locally (`u1`: 2.658M, `u1x`: 2.630M), wall >= 1.33x; pypng and pydantic not slower; `.text` growth reported |
 | R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6). Refined against R2's tree (5.5): R2 already hands native slice bounds and indexes to `pycc_ext_obj_getslice_int` and `pycc_ext_obj_getitem_int`, so no `slice` object is built for them; what is left is that call, `startswith` as a method call with a boxed position, a slice whose other bound is an `object`, and a character loaded from a native index, which stays an object | `tests/region_words.rs`: a region whose copies slice, test `startswith` and load characters at native positions, against CPython with fast paths on and off: a `str` subclass receiver, non-ASCII text, big `int` positions, indexes past the end; the copies' IR takes the word paths | about -75K: tomli <= 2.47M after R2's code size; `.text` at most about 800K; pypng's `read()`, pydantic's workload and `diff_bisect` (native `int` locals) not slower |
 | R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K estimated (tomli <= 2.45M); a prototype on `m0` measured **-85K**, under the 120K of section 6, and was parked until R2 landed (5.1); measured again on top of R3, the per-test prototype saves 47K, and the loop prepared once (5.6) 96K: tomli <= 2.42M, `.text` at most +5% |
-| R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
+| R5 | The fixed cost of each call into and inside a region (refined against R4's tree, 5.7): a copy's frame linked without the wrapper checks and unlinked from words of its own; global reads without count traffic on the namespace; a compiled method's forwarder calling its body directly when the call leaves the later parameters to their defaults | `tests/forwarder_defaulted_calls.rs` against CPython: defaults left out positionally and by keyword, `__kwdefaults__` changed in place or dropped, `__defaults__` replaced, a keyword-only parameter left without a default, with the caches on and off; the region tests' tracebacks and `RecursionError` (`tests/select_regions.rs`) | tomli <= 2.30M (about -75K), `_parser` `.text` at most +5%; pypng's PngSuite decode, pydantic's workload and `diff_main` not slower |
+| R5b | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
 | R6 | CI confirmation in `bench.yml` on both runners | | accept 2's tomli numbers (1.70x / 1.49x) met, or the gap measured and this plan revised |
 
 R3 and R4 do not depend on R1 and R2 and may land first if a measurement says so. Their
@@ -472,7 +473,12 @@ acceptance numbers then apply to `m0`, measured again.
   preparing the loop: a `while s[i] in chars:` whose `s` and `chars` are parameters the loop
   only reads checks both once, before the loop, and copies the set's mask, so each test is
   a bounds check, a byte load and a bit test (`pycc_codegen::char_class`).
-- **Next: R5**, the entry guard in the patched trampoline.
+- **R5, done.** Measured below (5.7): tomli's `loads()` at 2,293,301 instructions, under the
+  2.30M target, at 753,527 B of `.text` for `_parser` (-2.7%). The row was refined against
+  R4's tree: tomli enters its region once per `loads()`, so the trampoline's entry guard
+  (now R5b) cannot move it, while the 1,800 or so copy frames, 1,364 global reads and 88
+  forwarder calls with defaults left out per `loads()` each paid a fixed cost.
+- **Next: R5b**, the entry guard in the patched trampoline, then R6.
 - **R1, done.** Regions are formed from the selected unit (4.1, without position-flow
   callees: `src/fallback/regions.rs`), a build's `--report-fallbacks` lists them, and
   pass 3 prunes them as units (4.7, `src/profile/verify/units.rs`). No code is generated
@@ -700,13 +706,70 @@ Measured as 5.4 (the bytecode cache written before the counts):
   generic lifts (a `bool`, a big `int` or a `str` subclass sends a call there) against
   CPython, with the fast paths on and off.
 
+### 5.7 R5's measurements
+
+R4 left each call into and inside the region paying a fixed cost (5.6: about 135
+instructions of `skip_chars`' 203 a call). Per `loads()` on R4's tree, the copies linked
+and unlinked about 1,800 frames, each checking whether the frame on top was a signature
+wrapper or a forwarder, and each unlink reading the frame's version-dependent fields
+again; the 1,364 global reads (`__pycc_fallback_ns["name"]`) took and dropped a reference
+to the namespace dict around a cache hit that runs no code; and `get_or_create_nest(key)`,
+whose keyword-only `access_lists` is left to its default, went through the forwarder's
+full binding (`pycc_fwd_bind`) 88 times.
+
+- **Copies' frames.** Only compiled code calls a copy or its multi-value twin, with the
+  caller's frame on top, so its frame is linked onto that top unchecked
+  (`frames::called_from_compiled`). The link also writes the thread state and the top it
+  replaced into two words of the frame's own, past the twelve CPython reads (null when
+  `pycc_ext_frame_enter` linked it, the first call), and the unlink reads them there:
+  no layout select at the return, and no values held through the body. Held as SSA values
+  instead, they saved 5K on tomli but took registers in pypng's `undo_filter_paeth` loop
+  (+7 instructions an iteration, the PngSuite decode +0.1%).
+- **Global reads.** A namespace read is not pinned (`operand_pin::is_namespace_read`):
+  its site's cache answers without running code, and on a miss
+  `pycc_ext_ns_getitem_cached` holds the namespace itself for the lookup.
+- **Defaults left out.** `pycc_fwd_defaulted` (`src/ext/module/forward_call.c`, split out
+  of `forward.c`, which had reached 984 lines) calls the compiled body directly when a
+  call passes the leading parameters in order and leaves every later one to its default,
+  reading the defaults the function holds now (`__defaults__`, then `__kwdefaults__`);
+  any other shape, or a parameter without a default, is bound as before. A slot keeps its
+  parameter names' item array where the tuple layout holds it, and the in-order test is
+  skipped for a slot with keyword-only parameters or a `__class__` cell, which it never
+  passes.
+
+Measured as 5.4 (the bytecode cache written before the counts):
+
+| build | instructions per `loads()` | `_parser` `.text` |
+|---|---|---|
+| main (R4) | 2,374,136 | 774,151 B |
+| copies' frames unchecked, global reads unpinned | 2,324,841 (-49,295) | 752,743 B |
+| + defaults left out called directly | 2,306,893 (-17,948) | 753,639 B |
+| **R5** (+ the unlink from the frame's own words, the names' item array) | **2,293,301 (-80,835, -3.4%)** | **753,527 B (-2.7%)** |
+
+- What is left of the call path per `loads()`: the out-of-line part of each release of a
+  mortal object (`pycc_ext_obj_release_count`, about 21.7K), the method-call sites'
+  calls (`pycc_ext_site_call`, 11K), `Py_EnterRecursiveCall` (about 560 calls, 11K),
+  `PyThreadState_Get` at each frame link (7.6K), and the `__kwdefaults__` lookup of the
+  88 calls with defaults left out (6.5K).
+- pypng (the 8-function selection): the PngSuite decode 123,437,800 to 123,465,610 per
+  call (main 123,519,906 to 123,587,880). pydantic (the 5-function selection):
+  240,259,929 per repeat (main 240,919,356). diff-match-patch
+  (`bench/package_check.py --instructions`): `diff_main` 101.52M (main 101.55M). Wall time, 100 `loads()`, median of 15 interleaved
+  rounds: CPython 39.6 ms, main 25.4 ms (1.56x), R5 24.1 ms (1.64x), on a machine whose rounds
+  varied by up to 1.9x.
+- `tests/forwarder_defaulted_calls.rs` checks the calls that leave defaults out against
+  CPython with the caches on and off, while the defaults change under them, and that they
+  reach the compiled body (300 direct calls, none on main). The copies' frames are
+  checked by `tests/select_regions.rs` (tracebacks through copies, the `RecursionError`
+  of a deep cycle) and `tests/v08_frames.rs`.
+
 ## 6. Risks
 
 - **The margin is thin.** The projection beats the old build by about 2%, and part of it is an
   estimate (R4's 170K, from the IR). If R2 measures above 2.66M, or R4 saves less than 120K,
   accept 2 is not reachable by this plan, and the next step is a measurement, not more tuning.
   As built, R2 and R3 came in under their targets and R4 saved 96K, not 120K, but from a lower
-  start: tomli's `loads()` is at 2.375M, under the old build's 2.427M (5.6). The CI ratios
+  start: tomli's `loads()` is at 2.293M after R5, under the old build's 2.427M (5.7). The CI ratios
   (R6) are still the verdict.
 - **Code size.** Each member is compiled twice, as its lift and as its copy (or the copy's
   multi-value twin): +27% `.text` for tomli's `_parser` after R2's code-size follow-ups,

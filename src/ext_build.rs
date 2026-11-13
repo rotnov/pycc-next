@@ -86,6 +86,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/class_once.c"),
     include_str!("ext/module/instances.c"),
     include_str!("ext/module/forward.c"),
+    include_str!("ext/module/forward_call.c"),
     include_str!("ext/module/patch.c"),
     include_str!("ext/module/buffers.c"),
     include_str!("ext/module/module_ctx_head.c"),
