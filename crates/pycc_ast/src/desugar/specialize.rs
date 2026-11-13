@@ -58,7 +58,7 @@
 
 use super::build::name;
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_python_ast::{Expr, ExprContext, Identifier, ModModule, Number, Stmt, StmtFunctionDef};
+use ruff_python_ast::{Expr, ExprCall, ExprContext, Identifier, ModModule, Number, Stmt, StmtFunctionDef};
 use ruff_text_size::{Ranged, TextRange};
 
 /// The prefix of a specialization's name.
@@ -72,28 +72,48 @@ pub const NATIVE_PREFIX: &str = "_pycc_native_";
 /// of its own. A copy's region edge (`return __pycc_rnative_...(...)` in a
 /// copy's body) keeps its source range and records one, as the call it
 /// replaces does.
+///
+/// A region guard of a copy returning a tuple unpacks the call and returns
+/// the items (`__pycc_rg0, __pycc_rg1 = __pycc_rnative_...(...)`, `return
+/// __pycc_rg0, __pycc_rg1`): both statements are the tail call.
 #[must_use]
 pub fn is_copy_tail_call(stmt: &Stmt) -> bool {
-    let Stmt::Return(r) = stmt else { return false };
-    let Some(Expr::Call(call)) = r.value.as_deref() else {
-        return false;
+    let copy = |call: &ExprCall| match call.func.as_ref() {
+        Expr::Name(n) => n.id.starts_with(NATIVE_PREFIX) || n.id.starts_with(regions::REGION_COPY_PREFIX),
+        Expr::Attribute(a) => a.attr.as_str().starts_with(NATIVE_PREFIX),
+        _ => false,
     };
-    r.range.is_empty()
-        && match call.func.as_ref() {
-            Expr::Name(n) => n.id.starts_with(NATIVE_PREFIX) || n.id.starts_with(regions::REGION_COPY_PREFIX),
-            Expr::Attribute(a) => a.attr.as_str().starts_with(NATIVE_PREFIX),
+    let guard_temps = |t: &ruff_python_ast::ExprTuple| {
+        t.elts.iter().all(|e| matches!(e, Expr::Name(n) if n.id.starts_with(GUARD_TEMP)))
+    };
+    match stmt {
+        Stmt::Return(r) if r.range.is_empty() => match r.value.as_deref() {
+            Some(Expr::Call(call)) => copy(call),
+            Some(Expr::Tuple(t)) => guard_temps(t),
             _ => false,
+        },
+        Stmt::Assign(a) if a.range.is_empty() => {
+            matches!((a.targets.as_slice(), a.value.as_ref()), ([Expr::Tuple(t)], Expr::Call(call)) if guard_temps(t) && copy(call))
         }
+        _ => false,
+    }
 }
 
-/// Marks the `return` of an entry guard (`if ...: return copy(...)`) as
-/// its tail call ([`is_copy_tail_call`]): an empty range at its start.
+/// The prefix of the temporaries a region's entry guard unpacks its copy's
+/// tuple result into (`regions::rewrite`).
+pub(crate) const GUARD_TEMP: &str = "__pycc_rg";
+
+/// Marks the body of an entry guard (`if ...: return copy(...)`) as its
+/// tail call ([`is_copy_tail_call`]): an empty range at the start of each
+/// of its statements.
 fn mark_tail_call(guard: &mut [Stmt]) {
     for stmt in guard {
         if let Stmt::If(i) = stmt {
             for inner in &mut i.body {
-                if let Stmt::Return(r) = inner {
-                    r.range = TextRange::empty(r.range.start());
+                match inner {
+                    Stmt::Return(r) => r.range = TextRange::empty(r.range.start()),
+                    Stmt::Assign(a) => a.range = TextRange::empty(a.range.start()),
+                    _ => {}
                 }
             }
         }
@@ -823,7 +843,7 @@ fn loops(body: &[Stmt]) -> bool {
 mod attrs;
 mod call_sites;
 mod regions;
-pub use regions::{REGION_COPY_PREFIX, RegionFunction, RegionInput, region_native_results, specialize_regions};
+pub use regions::{REGION_COPY_PREFIX, REGION_MAX, REGION_SLOW_PREFIX, RegionFunction, RegionInput, region_native_results, specialize_regions};
 mod escapes;
 mod evidence;
 use evidence::Evidence;

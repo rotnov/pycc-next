@@ -333,9 +333,12 @@ pub(crate) fn begin_function<'ctx>(
     // So does the body of a nested `def` CPython creates
     // (`src/fallback/nested`): its Python forwarder's frame is the
     // function's.
+    // And so does a region's slow call, whose caller's frame records what
+    // it raises.
     if !state.enabled.get()
         || mangled.starts_with("_pycc_sig_")
         || mangled.starts_with("__pycc_lift_nest")
+        || crate::region_slow::is_slow(mangled)
     {
         return;
     }

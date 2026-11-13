@@ -21,8 +21,17 @@
 //!
 //! ```python
 //! pos = (__pycc_rnative_lift13_skip_chars__(src, pos, TOML_WS) if __pycc_region_intact(0)
-//!        else __pycc_rconv_i(__pycc_fallback_ns['skip_chars'](src, pos, TOML_WS)))
+//!        else __pycc_rslow0(__pycc_fallback_ns['skip_chars'], 'skip_chars() returned ', src, pos, TOML_WS))
 //! ```
+//!
+//! The generic arm is a shared, cold *slow call* (`slow`), and the copy's
+//! own call of a member returning a tuple is unpacked where it is made, so
+//! it takes the callee's multi-value twin; so does an entry guard's, which
+//! then builds the tuple. A copy nothing calls then is not emitted
+//! (`pycc_mir::unreferenced`), and the lift of a member with a copy takes no
+//! multi-value twin of its own (`pycc_mir::multi_return_object`): its
+//! generic body runs only once the region is closed, or for arguments of
+//! other types.
 //!
 //! A region is *intact* while every member's module global holds the
 //! function the trailer armed it with, running its code and defaults, and
@@ -47,6 +56,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod prove;
 mod rewrite;
+mod slow;
+
+pub use slow::SLOW_PREFIX as REGION_SLOW_PREFIX;
 
 use prove::{Kind, Ty};
 
@@ -56,6 +68,11 @@ const NS: &str = "__pycc_fallback_ns";
 /// The prefix of a copy's name: the lift's name follows, without its
 /// leading `__pycc_`.
 pub const REGION_COPY_PREFIX: &str = "__pycc_rnative_";
+
+/// The most regions one module arms: the length of the module unit's flag
+/// array (`PYCC_EXT_REGION_MAX`, `src/ext/module/module_ctx.c`, which a
+/// `pycc_codegen` test holds to this value). Regions past it get no copies.
+pub const REGION_MAX: usize = 64;
 
 /// A compiled module function that a region edge may call: its lift, the
 /// module global CPython binds it to (once, with its own undecorated

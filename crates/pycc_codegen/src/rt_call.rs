@@ -32,6 +32,82 @@ fn abi_value<'ctx>(scalar: Scalar<'ctx>) -> BasicMetadataValueEnum<'ctx> {
     }
 }
 
+/// `__pycc_region_intact(k)`'s symbol (`pycc_hir::builtins`), which has no
+/// definition: codegen reads the flag itself ([`emit_region_intact`]).
+pub(crate) const REGION_INTACT_SYMBOL: &str = "pycc_ext_region_intact";
+
+/// The flags of an `ext` module's regions of selected functions, one byte
+/// each, in the module's unit (`src/ext/module/module_ctx.c`).
+pub const EXT_REGION_FLAGS_SYMBOL: &str = "pycc_ext_region_flags";
+
+/// The value of an intact region's flag (`PYCC_REGION_INTACT`,
+/// `src/ext/module/regions.c`); a region still pending has another.
+const REGION_INTACT: u64 = 1;
+
+/// The most regions a module arms (`pycc_hir::REGION_MAX`, the length of
+/// `PYCC_EXT_REGION_MAX`'s array).
+const REGION_MAX: i64 = pycc_hir::REGION_MAX as i64;
+
+/// `__pycc_region_intact(k)`: `pycc_ext_region_flags[k] == 1`, a load and a
+/// compare where the call stands. The flag is a plain byte: a call that may
+/// run Python, and so a watcher, makes LLVM read it again. A plain load is
+/// enough because compiled code holds the GIL here, as the watchers that
+/// write the flags do (`src/ext/module/regions.c`); a free-threaded build
+/// would need an atomic load.
+fn emit_region_intact<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    call: &RtCallExpr,
+) -> Scalar<'ctx> {
+    let k = match call.args.as_slice() {
+        [MirExpr::IntLiteral(k)] if (0..REGION_MAX).contains(k) => *k as u64,
+        _ => panic!("pycc_codegen: internal error: a region's index is a literal below {REGION_MAX}"),
+    };
+    let i8_type = context.i8_type();
+    let flags_type = i8_type.array_type(REGION_MAX as u32);
+    let flags = module.get_global(EXT_REGION_FLAGS_SYMBOL).unwrap_or_else(|| {
+        let global = module.add_global(flags_type, None, EXT_REGION_FLAGS_SYMBOL);
+        global.set_linkage(inkwell::module::Linkage::External);
+        // The array is in this extension's own module unit (`PYCC_ENTRY`,
+        // hidden outside Windows), so the load is PC-relative, not
+        // through the GOT. COFF has no GOT to avoid.
+        if !cfg!(windows) {
+            global.set_visibility(inkwell::GlobalVisibility::Hidden);
+        }
+        global
+    });
+    let i64_type = context.i64_type();
+    // SAFETY: `k` is below the array's length, checked above.
+    let slot = unsafe {
+        builder.build_in_bounds_gep(
+            flags_type,
+            flags.as_pointer_value(),
+            &[i64_type.const_zero(), i64_type.const_int(k, false)],
+            "region_flag",
+        )
+    }
+    .expect("build_in_bounds_gep should not fail for a region flag");
+    let flag = builder
+        .build_load(i8_type, slot, "region_flag_value")
+        .expect("build_load should not fail for a region flag")
+        .into_int_value();
+    let intact = builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            flag,
+            i8_type.const_int(REGION_INTACT, false),
+            "region_intact",
+        )
+        .expect("build_int_compare should not fail for a region flag");
+    let bool_type = ty_to_basic_type(context, Ty::Bool).into_int_type();
+    Scalar::Bool(
+        builder
+            .build_int_z_extend_or_bit_cast(intact, bool_type, "region_intact_bool")
+            .expect("build_int_z_extend_or_bit_cast should not fail for a bool"),
+    )
+}
+
 pub(super) fn emit_rt_call<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -41,6 +117,9 @@ pub(super) fn emit_rt_call<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     call: &RtCallExpr,
 ) -> Scalar<'ctx> {
+    if call.sig.symbol == REGION_INTACT_SYMBOL {
+        return emit_region_intact(context, builder, module, call);
+    }
     if let Some(result) = crate::extend_scratch::emit(context, builder, module, rt, user_functions, locals, call) {
         return result;
     }
@@ -237,5 +316,65 @@ pub(super) fn emit_rt_call<'ctx>(
         return crate::containers::owned_word_element(context, builder, rt, &sig.ret, word);
     }
     crate::call_result::call_result_scalar(context, call_site, &sig.ret)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_region_flag_is_loaded_and_compared_where_it_is_read() {
+        let context = Context::create();
+        let module = context.create_module("m");
+        let builder = context.create_builder();
+        let f = module.add_function("f", context.void_type().fn_type(&[], false), None);
+        builder.position_at_end(context.append_basic_block(f, "entry"));
+        let call = RtCallExpr {
+            sig: pycc_hir::builtins::resolve_call("__pycc_region_intact", &[Ty::Int])
+                .expect("claimed")
+                .expect("admitted"),
+            args: vec![MirExpr::IntLiteral(3)],
+        };
+        assert_eq!(call.sig.symbol, REGION_INTACT_SYMBOL);
+        let Scalar::Bool(_) = emit_region_intact(&context, &builder, &module, &call) else {
+            panic!("a bool")
+        };
+        let ir = crate::compile::llvm_string_to_owned(module.print_to_string());
+        let declaration = if cfg!(windows) {
+            "@pycc_ext_region_flags = external global [64 x i8]"
+        } else {
+            "@pycc_ext_region_flags = external hidden global [64 x i8]"
+        };
+        assert!(ir.contains(declaration), "{ir}");
+        assert!(ir.contains("load i8, ptr getelementptr inbounds ([64 x i8], ptr @pycc_ext_region_flags, i64 0, i64 3)"), "{ir}");
+        assert!(ir.contains("icmp eq i8"), "{ir}");
+        assert!(!ir.contains("call"), "{ir}");
+    }
+
+    #[test]
+    #[should_panic(expected = "a region's index is a literal below 64")]
+    fn a_region_index_out_of_range_is_an_internal_error() {
+        let context = Context::create();
+        let module = context.create_module("m");
+        let builder = context.create_builder();
+        let f = module.add_function("f", context.void_type().fn_type(&[], false), None);
+        builder.position_at_end(context.append_basic_block(f, "entry"));
+        let call = RtCallExpr {
+            sig: pycc_hir::builtins::resolve_call("__pycc_region_intact", &[Ty::Int])
+                .expect("claimed")
+                .expect("admitted"),
+            args: vec![MirExpr::IntLiteral(64)],
+        };
+        emit_region_intact(&context, &builder, &module, &call);
+    }
+
+    #[test]
+    fn the_module_units_flag_array_has_one_byte_per_region() {
+        // Line endings as checked out on POSIX.
+        let unit = include_str!("../../../src/ext/module/module_ctx.c").replace('\r', "");
+        let define = format!("#define PYCC_EXT_REGION_MAX {}\n", pycc_hir::REGION_MAX);
+        assert!(unit.contains(&define), "module_ctx.c must `{}`", define.trim_end());
+        assert!(unit.contains("pycc_ext_region_flags[PYCC_EXT_REGION_MAX];"));
+    }
 }
 

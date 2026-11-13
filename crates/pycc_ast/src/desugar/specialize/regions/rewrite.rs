@@ -2,10 +2,11 @@
 //! planned from the proven signatures ([`plan`]) and then written into the
 //! unit ([`apply`]).
 
-use super::super::super::build::{call, call_name, load};
+use super::super::super::build::{call, load};
 use super::super::super::signatures::parse_helper;
 use super::super::Specialized;
 use super::prove::{Kind, Sig};
+use super::slow::{Form, Slows};
 use super::{ArgRef, Edge, Edges, Member, REGION_COPY_PREFIX, arm, intact, kind_annotation, result_annotation};
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{
@@ -14,9 +15,6 @@ use ruff_python_ast::{
 };
 use ruff_text_size::{Ranged, TextRange};
 use std::collections::{BTreeMap, BTreeSet};
-
-/// The most regions one module arms (`PYCC_EXT_REGION_MAX`, `regions.c`).
-const MAX_REGIONS: usize = 64;
 
 /// One region call to rewrite in a copy.
 #[derive(Debug, Clone)]
@@ -34,6 +32,11 @@ struct CallRewrite {
     /// For a callee returning a tuple with `int` items: which items are
     /// `int`s, for an unpack of the call (`split_sites`).
     ints: Option<Vec<bool>>,
+    /// Per argument of the call, in source order, whether it is an `int`:
+    /// the parameter it binds is one in every callee.
+    arg_ints: Vec<bool>,
+    /// The annotation of the callees' result.
+    result: String,
 }
 
 /// One callee of a region call.
@@ -56,6 +59,8 @@ struct Copy {
     region: usize,
     params: Vec<(String, Kind)>,
     result: String,
+    /// The arity of the copy's tuple result, when it returns one.
+    arity: Option<usize>,
     cyclic: bool,
     report: String,
     calls: BTreeMap<(u32, u32), CallRewrite>,
@@ -90,7 +95,7 @@ pub(crate) fn plan(
     let mut copies = Vec::new();
     let mut planned = Vec::new();
     let mut convs = BTreeSet::new();
-    for (k, region) in regions.iter().enumerate().take(MAX_REGIONS) {
+    for (k, region) in regions.iter().enumerate().take(super::REGION_MAX) {
         let cycle = cyclic(region);
         let mut patterns: BTreeSet<String> = BTreeSet::new();
         for &m in region {
@@ -121,6 +126,17 @@ pub(crate) fn plan(
                     _ => None,
                 };
                 let callee = local.clone().unwrap_or_else(|| members[callees[0]].function.global.clone());
+                let passed = (0..site.arguments.args.len())
+                    .map(ArgRef::Positional)
+                    .chain((0..site.arguments.keywords.len()).map(ArgRef::Keyword));
+                let arg_ints = passed
+                    .map(|arg| {
+                        callees.iter().all(|c| {
+                            let bound = &edges.bound[&(*site as *const _, *c)];
+                            bound.iter().position(|r| *r == arg).is_some_and(|p| sigs[*c].params[p] == Kind::Int)
+                        })
+                    })
+                    .collect();
                 calls.insert(
                     key(site.range),
                     CallRewrite {
@@ -138,6 +154,8 @@ pub(crate) fn plan(
                         conv,
                         callee,
                         ints,
+                        arg_ints,
+                        result: result_annotation(result).0,
                     },
                 );
             }
@@ -148,6 +166,10 @@ pub(crate) fn plan(
                 region: k,
                 params: members[m].params.iter().cloned().zip(sigs[m].params.iter().copied()).collect(),
                 result,
+                arity: match &sigs[m].result {
+                    super::prove::Ty::Tuple(items) => Some(items.len()),
+                    _ => None,
+                },
                 cyclic: cycle.contains(&m),
                 report: members[m].function.report.clone(),
                 calls,
@@ -166,7 +188,7 @@ pub(crate) fn plan(
 /// parenthesis. Later passes find a name by the offset its range starts at
 /// (`webs` renames a variable's reads and writes that way), and no name of
 /// the source starts at a `)`.
-fn added(site: &ExprCall) -> TextRange {
+pub(super) fn added(site: &ExprCall) -> TextRange {
     TextRange::empty(site.range.end() - ruff_text_size::TextSize::from(1))
 }
 
@@ -223,12 +245,20 @@ fn arm_test(site: &ExprCall, rewrite: &CallRewrite, target: &Target) -> Expr {
     }
 }
 
+/// The generic arm of `site`: its slow call (`slow`), whose result `form`
+/// says how to take.
+fn generic(slows: &Slows, site: &ExprCall, rewrite: &CallRewrite, form: Form) -> Expr {
+    let what = format!("{}() returned ", rewrite.callee);
+    slows.call(site, &rewrite.arg_ints, &rewrite.result, form, &what)
+}
+
 /// Rewrites the region calls of a copy's body that [`split_sites`] left in
-/// expressions: `(COPY(...) if intact else conv(f(...)))`.
+/// expressions: `(COPY(...) if intact else SLOW(f, ...))`.
 struct Calls<'p> {
     calls: &'p BTreeMap<(u32, u32), CallRewrite>,
     /// The calls [`split_sites`] rewrote as statements.
     skip: &'p BTreeSet<(u32, u32)>,
+    slows: &'p Slows,
 }
 
 impl Transformer for Calls<'_> {
@@ -256,10 +286,7 @@ impl Transformer for Calls<'_> {
             return;
         };
         let range = site.range;
-        let mut chosen = Expr::Call(site.clone());
-        if let Some(conv) = &rewrite.conv {
-            chosen = converted(conv, chosen, &rewrite.callee, site);
-        }
+        let mut chosen = generic(self.slows, site, rewrite, Form::Value(rewrite.conv.clone()));
         for target in rewrite.targets.iter().rev() {
             chosen = Expr::If(ExprIf {
                 node_index: AtomicNodeIndex::default(),
@@ -289,15 +316,15 @@ enum Use {
 /// if intact:              # and, for a dispatch, `local is NS['g']`
 ///     a, b_tmp = COPY(...)
 /// else:
-///     a_tmp, b_tmp = f(...)
-///     a = __pycc_rconv_i(a_tmp)
+///     a, b_tmp = SLOW(f, ...)
 /// b = b_tmp
 /// ```
 ///
 /// so the copy's call is unpacked where it is made and takes the copy's
 /// multi-value twin (`pycc_mir::multi_return`): no tuple is built. The
-/// generic arm unpacks CPython's object as before and converts each `int`
-/// item; a `return` converts the whole tuple (`__pycc_rconv_<shape>`). An
+/// generic arm's slow call (`slow`) unpacks CPython's object, converts each
+/// `int` item and takes its own twin; for a `return` it converts the whole
+/// tuple (`__pycc_rconv_<shape>`). An
 /// object item is bound once, after the `if`, where the statement was: a
 /// generator expression reading it is lifted only then
 /// (`helpers::genexpr`). `temps` numbers the temporaries, one per item, so
@@ -305,6 +332,7 @@ enum Use {
 fn split_sites(
     body: &mut ruff_python_ast::Suite,
     calls: &BTreeMap<(u32, u32), CallRewrite>,
+    slows: &Slows,
     temps: &mut usize,
     done: &mut BTreeSet<(u32, u32)>,
 ) {
@@ -312,28 +340,28 @@ fn split_sites(
     for mut stmt in old {
         match &mut stmt {
             Stmt::If(s) => {
-                split_sites(&mut s.body, calls, temps, done);
+                split_sites(&mut s.body, calls, slows, temps, done);
                 for clause in &mut s.elif_else_clauses {
-                    split_sites(&mut clause.body, calls, temps, done);
+                    split_sites(&mut clause.body, calls, slows, temps, done);
                 }
             }
             Stmt::While(s) => {
-                split_sites(&mut s.body, calls, temps, done);
-                split_sites(&mut s.orelse, calls, temps, done);
+                split_sites(&mut s.body, calls, slows, temps, done);
+                split_sites(&mut s.orelse, calls, slows, temps, done);
             }
             Stmt::For(s) => {
-                split_sites(&mut s.body, calls, temps, done);
-                split_sites(&mut s.orelse, calls, temps, done);
+                split_sites(&mut s.body, calls, slows, temps, done);
+                split_sites(&mut s.orelse, calls, slows, temps, done);
             }
-            Stmt::With(s) => split_sites(&mut s.body, calls, temps, done),
+            Stmt::With(s) => split_sites(&mut s.body, calls, slows, temps, done),
             Stmt::Try(s) => {
-                split_sites(&mut s.body, calls, temps, done);
+                split_sites(&mut s.body, calls, slows, temps, done);
                 for handler in &mut s.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(h) = handler;
-                    split_sites(&mut h.body, calls, temps, done);
+                    split_sites(&mut h.body, calls, slows, temps, done);
                 }
-                split_sites(&mut s.orelse, calls, temps, done);
-                split_sites(&mut s.finalbody, calls, temps, done);
+                split_sites(&mut s.orelse, calls, slows, temps, done);
+                split_sites(&mut s.finalbody, calls, slows, temps, done);
             }
             _ => {}
         }
@@ -389,23 +417,17 @@ fn split_sites(
             }
             s
         };
-        let generic: Vec<Stmt> = match usage {
-            Use::Unpack => {
-                let ints = rewrite.ints.as_ref().expect("checked above");
-                generic_unpack(with_value(Expr::Call(site.clone())), ints, &rewrite.callee, temps)
-            }
-            Use::Return => {
-                let conv = rewrite.conv.as_ref().expect("checked above");
-                vec![with_value(converted(conv, Expr::Call(site.clone()), &rewrite.callee, &site))]
-            }
+        let form = match usage {
+            Use::Unpack => Form::Unpack(rewrite.ints.clone().expect("checked above")),
+            Use::Return => Form::Value(rewrite.conv.clone()),
         };
-        let mut chosen: Vec<Stmt> = generic;
+        let mut chosen = vec![with_value(generic(slows, &site, rewrite, form))];
         for (i, target) in rewrite.targets.iter().enumerate().rev() {
             // An unpack's temporary is named by its statement's start
             // offset (`pycc_hir`): each native arm starts at its own offset
             // inside the call, where no statement starts, so its temporary
             // keeps the copy's native tuple type instead of sharing the
-            // generic arm's object one.
+            // generic arm's slow-call result type.
             let mut native = with_value(native_call(&site, target));
             let at = site.range.end() - ruff_text_size::TextSize::from(1 + i as u32);
             if at > stmt.range().start()
@@ -442,72 +464,8 @@ fn split_sites(
     }
 }
 
-/// `value`, the generic arm's call of `site`, converted by
-/// `__pycc_rconv_<conv>`, which names `callee` in its `TypeError`.
-fn converted(conv: &str, value: Expr, callee: &str, site: &ExprCall) -> Expr {
-    let at = added(site);
-    let what = super::super::super::build::string(&format!("{callee}() returned "), at);
-    let mut converted = call_name(&format!("__pycc_rconv_{conv}"), vec![value, what], at);
-    if let Expr::Call(c) = &mut converted {
-        c.range = site.range;
-    }
-    converted
-}
-
-/// The generic arm of an unpack `assign` (`a, b = f(...)`, `f` spelled
-/// `callee`): each `int` item (`ints`) is unpacked into a temporary and
-/// then converted. The target keeps the element's range; the temporary
-/// starts where the element ends (a comma, a parenthesis, a space or `=`,
-/// where no name starts), and the conversion's name where the statement
-/// ends.
-fn generic_unpack(mut assign: Stmt, ints: &[bool], callee: &str, temps: &mut usize) -> Vec<Stmt> {
-    let Stmt::Assign(a) = &mut assign else {
-        unreachable!("an unpacking assignment")
-    };
-    let range = a.range;
-    let mut converts = Vec::new();
-    if let [Expr::Tuple(t)] = a.targets.as_mut_slice() {
-        for (i, elt) in t.elts.iter_mut().enumerate() {
-            if !ints[i] {
-                continue;
-            }
-            let temp = format!("__pycc_ru{temps}");
-            *temps += 1;
-            let Expr::Name(name) = elt else { unreachable!("checked by split_sites") };
-            converts.push((name.id.to_string(), name.range, temp.clone(), i));
-            name.id = temp.into();
-            name.range = TextRange::empty(name.range.end());
-        }
-    }
-    let mut out = vec![assign];
-    for (name, at, temp, item) in converts {
-        let mut assign = parse_helper(
-            &format!("{name} = __pycc_rconv_i({temp}, '{callee}() returned a tuple whose item {item} is ')\n"),
-            range,
-        );
-        if let Some(Stmt::Assign(a)) = assign.first_mut() {
-            if let [Expr::Name(target)] = a.targets.as_mut_slice() {
-                target.range = at;
-            }
-            if let Expr::Call(c) = a.value.as_mut() {
-                if let Expr::Name(f) = c.func.as_mut() {
-                    f.range = TextRange::empty(range.end());
-                }
-                if let Some(Expr::Name(arg)) = c.arguments.args.first_mut() {
-                    arg.range = TextRange::empty(at.end());
-                }
-                if let Some(text) = c.arguments.args.get_mut(1) {
-                    ruff_python_ast::relocate::relocate_expr(text, TextRange::empty(range.end()));
-                }
-            }
-        }
-        out.extend(assign);
-    }
-    out
-}
-
 /// The copy of `lift` that `copy` plans.
-fn make_copy(lift: &StmtFunctionDef, copy: &Copy) -> StmtFunctionDef {
+fn make_copy(lift: &StmtFunctionDef, copy: &Copy, slows: &Slows) -> StmtFunctionDef {
     let mut clone = lift.clone();
     let range = lift.name.range();
     clone.name = ruff_python_ast::Identifier::new(copy.name.clone(), range);
@@ -519,8 +477,8 @@ fn make_copy(lift: &StmtFunctionDef, copy: &Copy) -> StmtFunctionDef {
         clone.returns = Some(a.annotation);
     }
     let mut done = BTreeSet::new();
-    split_sites(&mut clone.body, &copy.calls, &mut 0, &mut done);
-    let calls = Calls { calls: &copy.calls, skip: &done };
+    split_sites(&mut clone.body, &copy.calls, slows, &mut 0, &mut done);
+    let calls = Calls { calls: &copy.calls, skip: &done, slows };
     for stmt in &mut clone.body {
         calls.visit_stmt(stmt);
     }
@@ -550,7 +508,18 @@ fn guard(lift: &mut StmtFunctionDef, copy: &Copy) {
         }
     }
     let args: Vec<&str> = copy.params.iter().map(|(n, _)| n.as_str()).collect();
-    let source = format!("if {}:\n    return {}({})\n", tests.join(" and "), copy.name, args.join(", "));
+    let call = format!("{}({})", copy.name, args.join(", "));
+    let source = match copy.arity {
+        // Unpacked where it is made, the call takes the copy's multi-value
+        // twin (`pycc_mir::multi_return`) and the guard builds the tuple, so
+        // nothing calls the copy itself, which is then not emitted.
+        Some(n) => {
+            let temps: Vec<String> = (0..n).map(|i| format!("{}{i}", super::super::GUARD_TEMP)).collect();
+            let temps = temps.join(", ");
+            format!("if {}:\n    {temps} = {call}\n    return {temps}\n", tests.join(" and "))
+        }
+        None => format!("if {}:\n    return {call}\n", tests.join(" and ")),
+    };
     let mut guard = parse_helper(&source, lift.name.range());
     super::super::mark_tail_call(&mut guard);
     let at = usize::from(matches!(lift.body.first(), Some(Stmt::Expr(e)) if e.value.is_string_literal_expr()));
@@ -607,6 +576,7 @@ pub(crate) fn apply(module: &mut ModModule, plan: Plan) -> Vec<Specialized> {
     }
     let by_lift: BTreeMap<&str, &Copy> = plan.copies.iter().map(|c| (c.lift.as_str(), c)).collect();
     let mut out = Vec::new();
+    let slows = Slows::default();
     let old = std::mem::take(&mut module.body);
     let mut body: Vec<Stmt> = Vec::with_capacity(old.len() + plan.copies.len());
     for stmt in old {
@@ -616,7 +586,7 @@ pub(crate) fn apply(module: &mut ModModule, plan: Plan) -> Vec<Specialized> {
         };
         match by_lift.get(def.name.as_str()) {
             Some(copy) => {
-                let clone = make_copy(&def, copy);
+                let clone = make_copy(&def, copy, &slows);
                 out.push(Specialized {
                     qualname: format!("region {}", copy.report),
                     range: def.range(),
@@ -643,6 +613,7 @@ pub(crate) fn apply(module: &mut ModModule, plan: Plan) -> Vec<Specialized> {
     for shape in &plan.convs {
         body.extend(parse_helper(&conversion(shape), range));
     }
+    body.extend(slows.defs());
     super::super::insert_guard_types(&mut body, &["int", "str"]);
     for (k, globals, patterns) in &plan.regions {
         let globals: Vec<&str> = globals.iter().map(String::as_str).collect();

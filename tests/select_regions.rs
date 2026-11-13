@@ -115,6 +115,64 @@ fn region_copies_behave_as_cpython_until_and_after_what_they_rely_on_changes() {
     assert_eq!(run(&scratch, &built, "identity"), "identity True False True\n");
 }
 
+/// A region call made only in the argument of a lift's unpacked call: the
+/// object multi-value twin's fallback holds the call with its arguments,
+/// and the copy and slow call it names are kept (`pycc_mir::unreferenced`).
+const UNPACKED_ARGUMENT: &str = "\
+def skip(s: str, pos: int, chars=\" \") -> int:
+    while pos < len(s) and s[pos] in chars:
+        pos += 1
+    return pos
+
+
+def pair(x, s):
+    return x[0], s
+
+
+def top(s):
+    pos = 0
+    out = []
+    while pos < len(s):
+        pos = skip(s, pos)
+        a, b = pair([skip(s, pos, chars=\";\")], s)
+        out.append(a)
+        pos += 1
+    return out
+";
+
+#[test]
+fn a_region_call_in_an_unpacked_calls_argument_is_kept() {
+    let scratch = ScratchDir::new("select_regions").unwrap();
+    let dir = scratch.join("unpacked");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.py"), UNPACKED_ARGUMENT).unwrap();
+    let run = |dir: &Path| {
+        let o = Command::new(python())
+            .arg("-I")
+            .arg("-c")
+            .arg("import sys; sys.path.insert(0, sys.argv[1]); import m; print(m.top('  a; b;;c'))")
+            .arg(dir)
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{}", text(&o));
+        text(&o)
+    };
+    let expected = run(&dir);
+    assert_eq!(expected, "[2, 4, 5, 8, 8, 8]\n");
+    let o = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(dir.join("m.py"))
+        .arg("-o")
+        .arg(dir.join("m"))
+        .args(["--ext", "--non-strict", "--select", "none"])
+        .args(["--compile", "m:skip", "--compile", "m:pair", "--compile", "m:top"])
+        .output()
+        .expect("pycc runs");
+    assert!(o.status.success(), "{}", text(&o));
+    std::fs::remove_file(dir.join("m.py")).unwrap();
+    assert_eq!(run(&dir), expected);
+}
+
 #[test]
 fn the_scenarios_reach_what_they_test() {
     // CPython's own answers, so a scenario that stops exercising its case

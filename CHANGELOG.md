@@ -33,6 +33,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   can raise `TypeError` for the rest of that call (`skip() returned str, the compiled
   caller needs int`).
 
+### Changed
+
+- R2's code size (`docs/design/selected-regions.md` 5.4). An entry guard unpacks its
+  copy's tuple result, so it takes the copy's multi-value twin; the generic arm of a
+  region call is a shared cold slow call, one per shape of call, with no traceback frame
+  of its own; the lift of a member with a copy takes no object multi-value twin; the region's
+  intact flag is read inline; and a compiler-generated function nothing calls (a native
+  twin, a region copy, its slow calls and conversions) is no longer emitted. tomli's
+  `_parser` with the 19-function selection: `.text` 1,075,175 -> 760,807 B (+27% over
+  598,119 B before R2, was +80%), `loads()` 2,592,013 -> 2,543,978 instructions per call
+  (-1.8%).
+
 ### Fixed
 
 - An exception escaping an observed-type or region copy no longer shows an extra

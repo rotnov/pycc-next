@@ -28,7 +28,7 @@ pub const MODULE_UNIT_ENTRIES: [&str; 15] = [
     crate::fast_ops::EXT_NS_GETITEM_CACHED_SYMBOL,
     crate::ext::EXT_OBJ_PACK_FUNCTION_SYMBOL,
     "pycc_ext_ns_version",
-    "pycc_ext_region_intact",
+    crate::rt_call::EXT_REGION_FLAGS_SYMBOL,
     "pycc_ext_global_sync",
     "pycc_ext_obj_pack_instance",
     "pycc_ext_obj_pack_list",
