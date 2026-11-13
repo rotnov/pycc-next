@@ -268,6 +268,31 @@ PYCC_ENTRY PyObject *pycc_ext_ns_getitem_cached(PyObject *ns, PyObject *k, PyccN
     return result;
 }
 
+/* The flags of the module's regions of selected functions (`regions.c`):
+ * region `k`'s is set while it is intact. Compiled code reads one with
+ * `pycc_ext_region_intact`, its index an encoded `int` word. */
+#define PYCC_EXT_REGION_MAX 64
+static unsigned char pycc_ext_region_flags[PYCC_EXT_REGION_MAX];
+
+PYCC_ENTRY signed char pycc_ext_region_intact(long long word)
+{
+    long long k = word >> 1;
+
+    /* 1 is `PYCC_REGION_INTACT` (`regions.c`): a region still pending is not. */
+    return (signed char)(k >= 0 && k < PYCC_EXT_REGION_MAX && pycc_ext_region_flags[k] == 1);
+}
+
+/* `__pycc_regions__`, bound in the namespace while the body runs. */
+static PyObject *pycc_ext_regions_hook(PyObject *module, PyObject *const *args, Py_ssize_t nargs)
+{
+    return pycc_ext_regions_arm(pycc_ext_region_flags, PYCC_EXT_REGION_MAX, PyModule_GetDict(module), args,
+                                nargs);
+}
+
+static PyMethodDef pycc_ext_regions_def = {
+    "__pycc_regions__", (PyCFunction)(void (*)(void))pycc_ext_regions_hook, METH_FASTCALL, NULL,
+};
+
 PYCC_ENTRY void pycc_ext_global_sync(const char *name, void *slot, int kind,
                                      PyccGlobalCache *cache, char *initialized)
 {

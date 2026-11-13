@@ -24,6 +24,8 @@ use crate::Ty;
 mod byte_buffer;
 mod conversions;
 mod itertools;
+mod math;
+use math::{float_math, math_log};
 mod methods;
 mod object_calls;
 mod object_defaultdict;
@@ -157,42 +159,6 @@ fn is_numeric(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num)
 }
 
-/// The runtime symbol of a `math` function of `float` arguments (an `int`
-/// argument is converted to `float` at the call) and its arity.
-fn float_math(name: &str) -> Option<(&'static str, usize)> {
-    Some(match name {
-        "math.sqrt" => ("pycc_rt_math_sqrt", 1),
-        "math.exp" => ("pycc_rt_math_exp", 1),
-        "math.sin" => ("pycc_rt_math_sin", 1),
-        "math.cos" => ("pycc_rt_math_cos", 1),
-        "math.tan" => ("pycc_rt_math_tan", 1),
-        "math.asin" => ("pycc_rt_math_asin", 1),
-        "math.acos" => ("pycc_rt_math_acos", 1),
-        "math.atan" => ("pycc_rt_math_atan", 1),
-        "math.fabs" => ("pycc_rt_math_fabs", 1),
-        "math.atan2" => ("pycc_rt_math_atan2", 2),
-        "math.hypot" => ("pycc_rt_math_hypot", 2),
-        "math.copysign" => ("pycc_rt_math_copysign", 2),
-        _ => return None,
-    })
-}
-
-/// `math.log`/`log2`/`log10` of one argument: an `int` is taken exactly.
-fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
-    let (float_symbol, int_symbol) = match name {
-        "math.log" => ("pycc_rt_math_log", "pycc_rt_math_log_int"),
-        "math.log2" => ("pycc_rt_math_log2", "pycc_rt_math_log2_int"),
-        "math.log10" => ("pycc_rt_math_log10", "pycc_rt_math_log10_int"),
-        _ => return None,
-    };
-    Some(match arg {
-        // An `int | float` argument converts as `float(x)` does.
-        Ty::Float | Ty::Num => sig(float_symbol, &[Ty::Float], Ty::Float),
-        a if is_intlike(a) => sig(int_symbol, &[Ty::Int], Ty::Float),
-        _ => return None,
-    })
-}
-
 /// Whether a list's elements are ordered by a natively supported `<`
 /// (`pycc_rt::value::lt`, lexicographic for lists and tuples).
 /// Whether values of `ty` are immutable builtin values that compare without
@@ -324,6 +290,9 @@ pub const CALL_NAMES: &[&str] = &[
     "__pycc_min_keyed",
     "__pycc_print_str",
     "__pycc_printf",
+    "__pycc_region_enter",
+    "__pycc_region_intact",
+    "__pycc_region_leave",
     "__pycc_chr",
     "__pycc_setrecursionlimit",
     "__pycc_sort_keyed",
@@ -447,7 +416,9 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
         "__pycc_print_str"
         | "__pycc_stdout_flush"
         | "__pycc_setrecursionlimit"
+        | "__pycc_region_leave"
         | "__pycc_mark_tuple" => Ty::None,
+        "__pycc_region_intact" | "__pycc_region_enter" => Ty::Bool,
         _ => return None,
     })
 }
@@ -503,6 +474,16 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_print_write_str", std::slice::from_ref(&str_), Ty::None)
         }
         ("__pycc_stdout_flush", []) => sig("pycc_rt_print_flush", &[], Ty::None),
+        // A region of selected functions (docs/design/selected-regions.md,
+        // R2; `src/ext/module/regions.c`): whether region `k` of the
+        // module is intact, and the recursion check around a native copy
+        // that closes a cycle. Only `pycc_ast::specialize_regions` writes
+        // them, in an `--ext` module's selected unit.
+        ("__pycc_region_intact", [Ty::Int]) => {
+            sig("pycc_ext_region_intact", &[Ty::Int], Ty::Bool)
+        }
+        ("__pycc_region_enter", []) => sig("pycc_ext_region_enter", &[], Ty::Bool),
+        ("__pycc_region_leave", []) => sig("pycc_ext_region_leave", &[], Ty::None),
         // A function's `*args` list (`pycc_ast::desugar::signatures`).
         ("__pycc_mark_tuple", [Ty::List(_)]) => {
             sig("pycc_rt_list_mark_tuple", &[args[0].clone()], Ty::None)

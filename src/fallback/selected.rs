@@ -59,6 +59,8 @@ pub(super) fn with_selection<T, E>(
     };
     let mut units: Vec<usize> = Vec::new();
     let mut dropped: Vec<(String, String)> = Vec::new();
+    // The regions' position-flow callees the compiler refused.
+    let mut dropped_flow: Vec<(String, String)> = Vec::new();
     for (at, lift) in plan.lifts.iter().enumerate() {
         let unit = plan.top + at;
         let key = (lift.qualname.clone(), line_of(&plan.source, lift.range.start) as u32);
@@ -84,6 +86,32 @@ pub(super) fn with_selection<T, E>(
             dropped.push((qualname.clone(), "pycc does not compile a function of its kind".to_string()));
         }
     }
+    // The regions' position-flow callees (selected-regions.md, section
+    // 4.1) join while the prover finds their results native: one that
+    // leaves may take a native result from another, so the proof runs
+    // again until none leaves.
+    let mut flow = plan.flow_callees(&units);
+    while !flow.is_empty() {
+        let mut trial = units.clone();
+        trial.extend(&flow);
+        trial.sort_unstable();
+        let rendered = plan.render_selected(&trial);
+        let Ok(parsed) = pycc_parser::parse_all(&rendered.text) else {
+            flow.clear();
+            break;
+        };
+        let native = pycc_ast::region_native_results(&parsed, &plan.region_input(&trial));
+        let before = flow.len();
+        flow.retain(|unit| plan.lift(*unit).is_some_and(|lift| native.contains(&lift.name)));
+        if flow.len() == before {
+            break;
+        }
+    }
+    // Reported apart from the selected functions: pass 3 checks that a
+    // build compiled exactly the set it asked for (`profile::verify`).
+    let flow: BTreeSet<usize> = flow.into_iter().collect();
+    units.extend(&flow);
+    units.sort_unstable();
     // The selected functions' observed types, for their lifts' guarded
     // specializations (`crate::specialize`).
     let types = crate::select::module_types();
@@ -103,6 +131,7 @@ pub(super) fn with_selection<T, E>(
         .collect();
     crate::specialize::set_lifts(lifts);
     let value = loop {
+        crate::specialize::set_regions(plan.region_input(&units));
         let rendered = plan.render_selected(&units);
         if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
             eprintln!("--- selected functions ---\n{}", rendered.text);
@@ -160,7 +189,11 @@ pub(super) fn with_selection<T, E>(
         units.retain(|unit| !refused.contains_key(unit));
         for (unit, reason) in refused {
             let lift = plan.lift(unit).expect("a lift");
-            dropped.push((lift.qualname.clone(), reason));
+            if flow.contains(&unit) {
+                dropped_flow.push((lift.qualname.clone(), reason));
+            } else {
+                dropped.push((lift.qualname.clone(), reason));
+            }
         }
     };
     if reporting() {
@@ -168,10 +201,14 @@ pub(super) fn with_selection<T, E>(
         let module = crate::select::import_name(path);
         for unit in &units {
             let lift = plan.lift(*unit).expect("a lift");
-            eprintln!("compiled: {module}:{}", lift.qualname);
+            let how = if flow.contains(unit) { "compiled as a region's callee" } else { "compiled" };
+            eprintln!("{how}: {module}:{}", lift.qualname);
         }
         for (qualname, reason) in &dropped {
             eprintln!("not compiled: {module}:{qualname}: {reason}");
+        }
+        for (qualname, reason) in &dropped_flow {
+            eprintln!("not compiled as a region's callee: {module}:{qualname}: {reason}");
         }
         // The regions of what compiled (selected-regions.md, section 4.1).
         let none = BTreeMap::new();

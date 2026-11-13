@@ -1,7 +1,7 @@
 # Native calls inside a selected region
 
-Status: R1 done, R4 measured and parked, R2 replanned after a first attempt (section 5.3), R3,
-R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+Status: R1 and R2 done (sections 5.2 and 5.4), R4 measured and parked, R3, R5 and R6 planned,
+and R2's code-size follow-ups next (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
 part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
@@ -263,16 +263,21 @@ Each member gets a native copy `__pycc_rnative_<lift>`:
 
 - native parameters in their native representation (a tagged `int` word), the others as
   `object`, in source order;
-- the original objects of guarded entry parameters, appended as observed copies already do
-  (the argument stays the argument);
 - the result native, or `object`, or a tuple through the twin's out-pointers.
+
+Unlike an observed-type copy, a region copy is not passed the original objects of its native
+parameters: an `int` it returns unchanged is boxed again, a new object equal to the argument
+(4.6, and the DEVIATIONS row).
 
 A region edge compiles as a direct call of the callee's copy, checked first against the
 callee's cell, as section 2.8's direct calls are (one load and compare of the function
 object and its code object per call), or, equivalently, against the region's intact flag,
 which the same mutations clear (4.4). `Py_EnterRecursiveCall` is asked once per invocation of
-the calling copy, as for direct calls today, so `RecursionError` is raised where CPython raises
-it. Only a copy that can close a cycle of region edges (a member that reaches itself, as
+the calling copy, as for direct calls today, so unbounded recursion through copies raises
+`RecursionError` instead of overflowing the stack. The depth at which it is raised is not
+CPython's: on 3.12 and later `Py_EnterRecursiveCall` checks the C stack, not
+`sys.getrecursionlimit()`, which bounds only Python frames (the generic path behaves the
+same). Only a copy that can close a cycle of region edges (a member that reaches itself, as
 `parse_value` does through `parse_array`) pays it; a copy no cycle passes through cannot
 recurse without leaving the region. A copy keeps its compiled frame, named as the original
 function. The `u2` variant shows the frame is not the cost.
@@ -316,9 +321,15 @@ Generic lifts are unchanged for every caller outside the region.
 - **A rebound callee.** If the cell check fails (`mock.patch`, a replaced `__code__`, a
   global rebound by code the region called), the call goes to whatever object the name holds.
   It goes through the object protocol, with native arguments boxed: CPython calls the new
-  object too. Its result is converted where the caller needs a native value. When it is not
-  of that exact type, the call raises `TypeError` at the call site (`skip_chars() returned
-  str, the compiled caller needs int`). DEVIATIONS already has this rule for a compiled
+  object too. Its result is converted where the caller needs a native value: an `int` (or a
+  subclass, converted to a plain `int`), or a tuple of the copy's shape. Anything else raises
+  `TypeError` at the call site, naming the callee as the source spells it (`skip_chars()
+  returned str, the compiled caller needs int`; for an item of a tuple result,
+  `parse_value() returned a tuple whose item 0 is str, the compiled caller needs int`).
+  A pattern global (B3) replaced while a call runs reaches the same conversion in the callers
+  of the member that used it. A copy that reads the replaced pattern itself, after the
+  replacement, raises the compiled conversion's own `TypeError` where it uses the `end()`
+  result (`return value must be int, not str`). DEVIATIONS already has this rule for a compiled
   method that a Python subclass overrides. Here it applies to a module function rebound
   while a region call that reaches it is running.
   Mid-function deoptimization into the generic body is not attempted: it would need the
@@ -348,12 +359,14 @@ helps `m0` as well.
   - `IndexError` at the end of `src`;
   - a member rebound before a call (the region is not entered: CPython's result, no
     `TypeError`) and during one (section 4.4's deviation);
-  - the recursion limit;
-  - tracebacks through copies.
+  - unbounded recursion through copies (`RecursionError`; the depth is not compared, 4.3);
+  - tracebacks through copies and out of an entry (an entry guard's call of its copy records
+    no frame of its own, so each Python call has one).
 - **Identity of `int`s.** An `int` that passes between copies natively, and then reaches
   Python unchanged (returned, stored, passed to bytecode or to an exception), is a new object
   equal to the old one, where CPython would pass the argument's own object. Only `is` and `id()`
-  on `int`s outside `-5..256` can see it. This needs a new DEVIATIONS row, next to the one
+  on `int`s outside CPython's small-int cache (`-5..1024` on 3.14 and later, `-5..256` on
+  3.13) can see it. This needs a new DEVIATIONS row, next to the one
   for observed-type specializations.
   `int`s an operation makes are new objects in CPython as well, so they are not affected.
 - **A rebound member's mismatched result** raises `TypeError` (4.4). This needs a DEVIATIONS
@@ -424,6 +437,14 @@ acceptance numbers then apply to `m0`, measured again.
   argument binding and boxed results that R2's native calls inside a region remove. The
   saving stacks with R2, since the per-test cost stays inside a region, so R4 is parked
   until R2 lands and is then measured again on top of it.
+- **R2, done.** Measured below (5.4): tomli's `loads()` at 2,591,280 instructions, under the
+  2.66M target, at +77% `.text` for `_parser`.
+- **Next: R2's code size.** Before R3, the `.text` growth (5.4) is cut: (a) the entry guard
+  calls the copy's multi-value twin and builds the tuple itself, so the tuple-returning
+  copies that only entries call become dead, and functions nothing references are not
+  emitted; (b) one shared cold helper per callee for the generic arm of region calls, in
+  place of an inline arm at every call site; (c) the intact flag's read inlined (about 15K
+  instructions per `loads()` are its calls).
 - **R1, done.** Regions are formed from the selected unit (4.1, without position-flow
   callees: `src/fallback/regions.rs`), a build's `--report-fallbacks` lists them, and
   pass 3 prunes them as units (4.7, `src/profile/verify/units.rs`). No code is generated
@@ -504,12 +525,35 @@ The target stays 2.66M per `loads()`, and the stop rule of section 5 stands: if 
 measures above it, the implementation pull request is not opened, and the next step is a
 per-function breakdown and a revision of this plan.
 
+### 5.4 R2's measurements
+
+Taken locally as section 3's (CPython 3.15.0b4, x86-64, `PYTHONHASHSEED=0`, callgrind,
+`(I(21) - I(1)) / 20`), tomli with the 19-function selection:
+
+| build | instructions per `loads()` | wall vs CPython | `_parser` `.text` |
+|---|---|---|---|
+| main (R1) | 2,821,369 | 1.30x | 598,119 B |
+| R2 | 2,591,280 (-8.2%) | 1.51x | 1,058,631 B (+77%) |
+| R2 after its review fixes (named conversion errors) | 2,592,008 (-8.1%) | | 1,075,175 B (+80%) |
+
+- The target, 2.66M, is met. Wall times are noisy on this machine; `bench.yml` (R6) is the
+  verdict.
+- `.text` grew 77%, against the 16% section 3 estimated for 14 hand-written copies. On the
+  fixture of `tests/select_regions.rs` the code splits into generic lifts 70.5K, the lifts'
+  multi-value twins 42.6K, copies 57.0K, the copies' twins 41.6K and the conversions 5.1K:
+  every member is compiled four times over (lift, copy and a twin of each), and every region
+  call carries its generic arm inline. The follow-ups in 5.1 address this before R3.
+- pypng's `read()` is unchanged (its region's edges are method edges, generic in R2);
+  pydantic's regions get no copies.
+
 ## 6. Risks
 
 - **The margin is thin.** The projection beats the old build by about 2%, and part of it is an
   estimate (R4's 170K, from the IR). If R2 measures above 2.66M, or R4 saves less than 120K,
   accept 2 is not reachable by this plan, and the next step is a measurement, not more tuning.
-- **Code size.** Each member is compiled twice (lift and copy): +16% `.text` for tomli. That
+- **Code size.** Each member is compiled twice (lift and copy), and each again as a
+  multi-value twin: +77% `.text` for tomli's `_parser` as built by R2 (5.4), not the +16%
+  section 3 estimated. That
   costs I1 misses, which section 2.9 found to dominate generic bodies. Wall time stays the
   verdict in pass 3.
 - **Over-wide regions.** A region joins everything connected by calls, so in pydantic's

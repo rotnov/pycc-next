@@ -64,6 +64,42 @@ use ruff_text_size::{Ranged, TextRange};
 /// The prefix of a specialization's name.
 pub const NATIVE_PREFIX: &str = "_pycc_native_";
 
+/// Whether `stmt` is an entry guard's tail call into a native copy
+/// (`return _pycc_native_f(...)`, `return C._pycc_native_m(...)` or
+/// `return __pycc_rnative_...(...)`, as [`mark_tail_call`] leaves it: with
+/// an empty range, which no `return` of the source has). The copy's own
+/// frame stands for the function, so the guard records no traceback entry
+/// of its own. A copy's region edge (`return __pycc_rnative_...(...)` in a
+/// copy's body) keeps its source range and records one, as the call it
+/// replaces does.
+#[must_use]
+pub fn is_copy_tail_call(stmt: &Stmt) -> bool {
+    let Stmt::Return(r) = stmt else { return false };
+    let Some(Expr::Call(call)) = r.value.as_deref() else {
+        return false;
+    };
+    r.range.is_empty()
+        && match call.func.as_ref() {
+            Expr::Name(n) => n.id.starts_with(NATIVE_PREFIX) || n.id.starts_with(regions::REGION_COPY_PREFIX),
+            Expr::Attribute(a) => a.attr.as_str().starts_with(NATIVE_PREFIX),
+            _ => false,
+        }
+}
+
+/// Marks the `return` of an entry guard (`if ...: return copy(...)`) as
+/// its tail call ([`is_copy_tail_call`]): an empty range at its start.
+fn mark_tail_call(guard: &mut [Stmt]) {
+    for stmt in guard {
+        if let Stmt::If(i) = stmt {
+            for inner in &mut i.body {
+                if let Stmt::Return(r) = inner {
+                    r.range = TextRange::empty(r.range.start());
+                }
+            }
+        }
+    }
+}
+
 /// The module-level name the guards read CPython's `builtins` module
 /// through: `type(x) is str` on a CPython object compares with the `str`
 /// type object, which compiled code reaches as an attribute of the module.
@@ -219,9 +255,14 @@ fn insert_guard_types(body: &mut Vec<Stmt>, types: &[&str]) {
     // The guards' types are read once, into globals of their own: an
     // attribute of the `builtins` module read at every call cost more
     // than the rest of the guard.
+    // Each is bound once: a second pass (`regions`) adds only what the
+    // first did not.
+    let bound = crate::namespace::module_scope_names(body);
     let mut source = format!("import builtins as {BUILTINS}\n");
     for ty in types {
-        source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
+        if !bound.contains(&format!("{GUARD_TYPE_PREFIX}{ty}")) {
+            source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
+        }
     }
     let import = super::signatures::parse_helper(&source, TextRange::default());
     for (offset, stmt) in import.into_iter().enumerate() {
@@ -742,7 +783,8 @@ fn add_guard(def: &mut StmtFunctionDef, class: Option<&str>, spec: &Specialized,
         .collect::<Vec<_>>()
         .join(" and ");
     let source = format!("if {test}:\n    return {callee}({args})\n");
-    let guard = super::signatures::parse_helper(&source, def.name.range());
+    let mut guard = super::signatures::parse_helper(&source, def.name.range());
+    mark_tail_call(&mut guard);
     let at = usize::from(matches!(def.body.first(), Some(Stmt::Expr(e))
         if matches!(e.value.as_ref(), Expr::StringLiteral(_))));
     for (offset, stmt) in guard.into_iter().enumerate() {
@@ -780,6 +822,8 @@ fn loops(body: &[Stmt]) -> bool {
 
 mod attrs;
 mod call_sites;
+mod regions;
+pub use regions::{REGION_COPY_PREFIX, RegionFunction, RegionInput, region_native_results, specialize_regions};
 mod escapes;
 mod evidence;
 use evidence::Evidence;

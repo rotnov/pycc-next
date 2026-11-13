@@ -290,6 +290,13 @@ show(m.skip, 'ab', 'x', frozenset('a'))
 show(m.last, 0, ['ok'])
 show(m.last, 0, [1, 2])
 show(m.last, 0, [])
+# An exception escaping the native copy: one frame for the function, as
+# CPython's, none for its guard.
+import traceback
+try:
+    m.first('')
+except IndexError as e:
+    print('frames', [(t.name, t.lineno) for t in traceback.extract_tb(e.__traceback__)])
 ";
 
 /// A package `pkg` with `m`, profiled (no pass 3) and built with `count`
@@ -407,7 +414,13 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     // `matched` is not compiled (the checker does not yet take a `case`
     // capture as a binding: T0021), so it runs as CPython runs it; the
     // pycc_ast tests check its specialization would read `x`'s object.
-    for (f, p) in [("plus", "x: float"), ("same_i", "n: int"), ("stripped", "s: str"), ("whole", "s: str")] {
+    for (f, p) in [
+        ("plus", "x: float"),
+        ("same_i", "n: int"),
+        ("stripped", "s: str"),
+        ("whole", "s: str"),
+        ("first", "s: str"),
+    ] {
         assert!(report.contains(&format!("specialized: `{f}` runs natively when called with {p}")), "{report}");
     }
     for f in ["hashed", "added", "measured", "caught"] {
@@ -426,6 +439,7 @@ fn a_specialized_body_and_its_guard_failures_behave_as_cpython() {
     assert!(out.contains("nan True True 2.5\nbig True 5\n"), "{out}");
     assert!(out.contains("str True x\nseek True n n True True True\n"), "{out}");
     assert!(out.contains("last 'ok'\nlast 2\nlast 0\n"), "{out}");
+    assert!(out.contains("frames [('<module>', 75), ('first', 139)]\n"), "{out}");
     assert!(out.contains("skip 3\nskip 3\nskip 1\nskip TypeError string indices must be integers, not 'str'\n"), "{out}");
     assert!(out.contains("hash True True\nradd True True 2.5\nlen True 7\ncase True 7\nexcept True 2.5\nplus True True True -2.5\nself True True True True\n"), "{out}");
     // The module is the one the package's extension serves.

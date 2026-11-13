@@ -29,6 +29,14 @@
 //! A *region* is a connected component of region edges among the selected
 //! functions that has at least one edge: a function no edge touches is in
 //! no region, and a function that only calls itself is a region of one.
+//!
+//! A region is extended by its *position-flow callees* (section 4.1): an
+//! unselected function a member calls by a module global bound once by
+//! its own undecorated `def` (or by a local an assignment binds to one,
+//! B2), whose result the member binds to names or returns, and which the
+//! prover then types with a native position result. [`Plan::flow_callees`]
+//! finds the candidates; the selected unit keeps those the prover accepts
+//! (`selected::with_selection`).
 
 use super::*;
 use pycc_ast::visitor::{self, Visitor};
@@ -144,6 +152,137 @@ impl Plan {
         edges
     }
 
+    /// The candidate position-flow callees of the regions of `units`, in
+    /// source order: every function outside `units` that a region member,
+    /// a candidate found before or a selected function one of them reaches
+    /// this way calls as `x = f(...)`, `x, y = f(...)` or
+    /// `return f(...)`, `f` a module global bound once by its own
+    /// undecorated, directly callable `def`, or a local some `f = g`
+    /// assignment binds to such a global. Whether a candidate joins its
+    /// region is the prover's (`pycc_ast::region_native_results`).
+    pub(super) fn flow_callees(&self, units: &[usize]) -> Vec<usize> {
+        let members: BTreeSet<usize> = self.regions(units).into_iter().flatten().collect();
+        // Every function a flow site may reach: a candidate, or a selected
+        // function in no region yet, which the edge makes a member whose
+        // own calls count.
+        let mut callable: BTreeMap<&str, usize> = BTreeMap::new();
+        for at in 0..self.lifts.len() {
+            let unit = self.top + at;
+            let Some(lift) = self.lift(unit) else {
+                continue;
+            };
+            if members.contains(&unit)
+                || self.by_string.contains(&unit)
+                || lift.qualname.contains('.')
+                || !matches!(&self.ast[lift.owner], Stmt::FunctionDef(def) if def.name.as_str() == lift.qualname)
+                || !self.module_binds_once(&lift.qualname)
+                || !self.directly_callable(unit)
+            {
+                continue;
+            }
+            callable.insert(&lift.qualname, unit);
+        }
+        let mut work: Vec<usize> = members.into_iter().collect();
+        let mut reached: BTreeSet<usize> = BTreeSet::new();
+        while let Some(caller) = work.pop() {
+            let (Some(lift), Stmt::FunctionDef(def)) = (self.lift(caller), &self.ast[caller]) else {
+                continue;
+            };
+            let mut locals = names::bound_names(&def.body);
+            locals.extend(lift.params.iter().cloned());
+            let mut aliases: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            let mut called: Vec<&str> = Vec::new();
+            flow_sites(&def.body, &mut aliases, &mut called);
+            for name in called {
+                let globals: Vec<&str> = if locals.contains(name) {
+                    aliases.get(name).map(|g| g.iter().map(String::as_str).collect()).unwrap_or_default()
+                } else {
+                    vec![name]
+                };
+                for global in globals {
+                    if locals.contains(global) {
+                        continue;
+                    }
+                    if let Some(callee) = callable.get(global)
+                        && reached.insert(*callee)
+                    {
+                        work.push(*callee);
+                    }
+                }
+            }
+        }
+        reached.into_iter().filter(|unit| !units.contains(unit)).collect()
+    }
+
+    /// What the native copies of the regions of `units` may rely on
+    /// (`pycc_ast::specialize_regions`, selected-regions.md R2): the
+    /// compiled module functions a region edge may call (method edges stay
+    /// generic), and the module globals bound once by an assignment or an
+    /// import, which a copy may rely on holding an exact `re.Pattern`.
+    pub(super) fn region_input(&self, units: &[usize]) -> pycc_ast::RegionInput {
+        let mut functions = Vec::new();
+        for unit in units {
+            let Some(lift) = self.lift(*unit) else {
+                continue;
+            };
+            // The lift's own def has no defaults: read the source def's.
+            let Stmt::FunctionDef(def) = &self.ast[lift.owner] else {
+                continue;
+            };
+            if lift.qualname.contains('.')
+                || !self.directly_callable(*unit)
+                || def.name.as_str() != lift.qualname
+                || !self.module_binds_once(&lift.qualname)
+            {
+                continue;
+            }
+            // A default a call may leave out: a literal, the same object
+            // at every call.
+            let defaults = def
+                .parameters
+                .posonlyargs
+                .iter()
+                .chain(&def.parameters.args)
+                .chain(&def.parameters.kwonlyargs)
+                .map(|p| {
+                    let default = p.default.as_deref()?;
+                    let literal = match default {
+                        Expr::NumberLiteral(_) | Expr::BooleanLiteral(_) | Expr::NoneLiteral(_) => true,
+                        Expr::StringLiteral(s) => !s.value.is_implicit_concatenated(),
+                        Expr::UnaryOp(u) => matches!(u.operand.as_ref(), Expr::NumberLiteral(_)),
+                        _ => false,
+                    };
+                    let range = pycc_ast::Ranged::range(default);
+                    literal.then(|| self.source[range.start().to_usize()..range.end().to_usize()].to_string())
+                })
+                .collect();
+            functions.push(pycc_ast::RegionFunction {
+                lift: lift.name.clone(),
+                global: lift.qualname.clone(),
+                report: lift.qualname.clone(),
+                posonly: def.parameters.posonlyargs.len(),
+                positional: def.parameters.posonlyargs.len() + def.parameters.args.len(),
+                defaults,
+            });
+        }
+        let top = &self.stmts[..self.top];
+        let mut patterns: BTreeSet<String> = BTreeSet::new();
+        for (at, stmt) in top.iter().enumerate() {
+            if !matches!(
+                &self.ast[at],
+                Stmt::Assign(_) | Stmt::AnnAssign(_) | Stmt::Import(_) | Stmt::ImportFrom(_)
+            ) {
+                continue;
+            }
+            for name in &stmt.bound {
+                if name != "*" && self.module_binds_once(name) {
+                    patterns.insert(name.clone());
+                }
+            }
+        }
+        pycc_ast::RegionInput { functions, patterns: patterns.into_iter().collect() }
+    }
+
     /// Whether the lift `unit` has decorators.
     fn decorated(&self, unit: usize) -> bool {
         self.lift(unit)
@@ -191,6 +330,72 @@ impl Plan {
             class = inner;
         }
         matches!(sole_binder(&class.body, member), Some(Stmt::FunctionDef(def)) if def.name.as_str() == member)
+    }
+}
+
+/// Walks the statements of a compiled body (not a nested scope's) for
+/// [`Plan::flow_callees`]: each `local = name` assignment into `aliases`,
+/// and the name each `x = f(...)`, `x, y = f(...)` or `return f(...)`
+/// calls into `called`.
+fn flow_sites<'b>(body: &'b [Stmt], aliases: &mut BTreeMap<String, BTreeSet<String>>, called: &mut Vec<&'b str>) {
+    let callee = |value: &'b Expr| match value {
+        Expr::Call(call) => match call.func.as_ref() {
+            Expr::Name(name) => Some(name.id.as_str()),
+            _ => None,
+        },
+        _ => None,
+    };
+    for stmt in body {
+        match stmt {
+            Stmt::Assign(assign) => {
+                if let ([Expr::Name(target)], Expr::Name(value)) = (assign.targets.as_slice(), assign.value.as_ref()) {
+                    aliases.entry(target.id.to_string()).or_default().insert(value.id.to_string());
+                }
+                let names = assign.targets.iter().all(|target| match target {
+                    Expr::Name(_) => true,
+                    Expr::Tuple(t) => t.elts.iter().all(|e| matches!(e, Expr::Name(_))),
+                    _ => false,
+                });
+                if names && let Some(name) = callee(&assign.value) {
+                    called.push(name);
+                }
+            }
+            Stmt::Return(ret) => {
+                if let Some(name) = ret.value.as_deref().and_then(callee) {
+                    called.push(name);
+                }
+            }
+            Stmt::If(s) => {
+                flow_sites(&s.body, aliases, called);
+                for clause in &s.elif_else_clauses {
+                    flow_sites(&clause.body, aliases, called);
+                }
+            }
+            Stmt::While(s) => {
+                flow_sites(&s.body, aliases, called);
+                flow_sites(&s.orelse, aliases, called);
+            }
+            Stmt::For(s) => {
+                flow_sites(&s.body, aliases, called);
+                flow_sites(&s.orelse, aliases, called);
+            }
+            Stmt::With(s) => flow_sites(&s.body, aliases, called),
+            Stmt::Try(s) => {
+                flow_sites(&s.body, aliases, called);
+                for handler in &s.handlers {
+                    let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
+                    flow_sites(&h.body, aliases, called);
+                }
+                flow_sites(&s.orelse, aliases, called);
+                flow_sites(&s.finalbody, aliases, called);
+            }
+            Stmt::Match(s) => {
+                for case in &s.cases {
+                    flow_sites(&case.body, aliases, called);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -304,10 +509,10 @@ impl<'a> Visitor<'a> for Calls<'_> {
     }
 }
 
-/// The regions [`Plan::regions`] forms from the functions `selected`
-/// (qualified name, first line) of the module `source`, by the same keys,
-/// or none when `source` does not parse.
-pub(crate) fn regions_of(source: &str, selected: &BTreeSet<crate::select::Key>) -> Vec<Vec<crate::select::Key>> {
+/// The plan of the module `source` and the units of its functions
+/// `selected` (qualified name, first line), or None when `source` does not
+/// parse.
+fn selected_units(source: &str, selected: &BTreeSet<crate::select::Key>) -> Option<(Plan, Vec<usize>)> {
     let publishes = Publishes {
         functions: true,
         classes: true,
@@ -315,17 +520,29 @@ pub(crate) fn regions_of(source: &str, selected: &BTreeSet<crate::select::Key>) 
         variables: true,
         foreign_relative_imports: true,
     };
-    let Some(plan) = Plan::new(source, "<regions>", publishes) else {
-        return Vec::new();
-    };
-    let key = |lift: &lift::Lift| (lift.qualname.clone(), line_of(&plan.source, lift.range.start) as u32);
+    let plan = Plan::new(source, "<regions>", publishes)?;
     let units: Vec<usize> = (0..plan.lifts.len())
         .map(|at| plan.top + at)
-        .filter(|unit| plan.lift(*unit).is_some_and(|lift| selected.contains(&key(lift))))
+        .filter(|unit| plan.lift(*unit).is_some_and(|lift| selected.contains(&key_of(&plan, lift))))
         .collect();
+    Some((plan, units))
+}
+
+/// A lift's key: its qualified name and first line.
+fn key_of(plan: &Plan, lift: &lift::Lift) -> crate::select::Key {
+    (lift.qualname.clone(), line_of(&plan.source, lift.range.start) as u32)
+}
+
+/// The regions [`Plan::regions`] forms from the functions `selected`
+/// (qualified name, first line) of the module `source`, by the same keys,
+/// or none when `source` does not parse.
+pub(crate) fn regions_of(source: &str, selected: &BTreeSet<crate::select::Key>) -> Vec<Vec<crate::select::Key>> {
+    let Some((plan, units)) = selected_units(source, selected) else {
+        return Vec::new();
+    };
     plan.regions(&units)
         .into_iter()
-        .map(|members| members.iter().filter_map(|unit| plan.lift(*unit)).map(key).collect())
+        .map(|members| members.iter().filter_map(|unit| plan.lift(*unit)).map(|lift| key_of(&plan, lift)).collect())
         .collect()
 }
 

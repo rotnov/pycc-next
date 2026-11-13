@@ -481,7 +481,24 @@ static int pycc_ext_exec_module(PyObject *module)
     if (pycc_ext_forward_install(&pycc_ext_mod, module) != 0) {
         exec_status = -1;
     } else {
-        exec_status = pycc_ext_module_exec();
+        /* And the hook arming the regions of the selected functions
+         * (regions.c), for the body only too. */
+        PyObject *regions = PyCFunction_NewEx(&pycc_ext_regions_def, module, NULL);
+
+        if (regions == NULL || PyDict_SetItemString(PyModule_GetDict(module), "__pycc_regions__", regions) != 0) {
+            exec_status = -1;
+        } else {
+            exec_status = pycc_ext_module_exec();
+            if (PyDict_GetItemString(PyModule_GetDict(module), "__pycc_regions__") == regions) {
+                PyObject *raised = PyErr_GetRaisedException();
+
+                if (PyDict_DelItemString(PyModule_GetDict(module), "__pycc_regions__") != 0) {
+                    PyErr_Clear();
+                }
+                PyErr_SetRaisedException(raised);
+            }
+        }
+        Py_XDECREF(regions);
         pycc_ext_forward_remove(module);
     }
     /* 3.15: the dict is watched once the body has run (global_sync.c). */

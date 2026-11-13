@@ -5,7 +5,8 @@ section 7 item 12), PR 3 (`pycc profile`, section 2.2; `src/profile.rs`), PR 4 (
 sections 2.1-2.4; `src/select.rs`, `src/fallback/selected.rs`), PR 5 (the chunk machinery
 deleted, section 7 items 1-5; `src/ext_build/module_code.rs`), PR 5a (selection by
 region), PR 8's first part (observed-type specialization), PR 6b (`--select module`
-deleted). Planned next: native calls inside a region ([selected-regions.md](selected-regions.md)). Tracking issue:
+deleted), native calls inside a region ([selected-regions.md](selected-regions.md) R1 and R2).
+Planned next: R2's code-size follow-ups, then the rest of selected-regions.md (R3-R6). Tracking issue:
 [#78](https://github.com/rotnov/pycc-next/issues/78). Roadmap: [v0.12](../roadmap/v0.12.md), continued in [v0.13](../ROADMAP.md#v013--compile-little-compile-well).
 
 This is how `pycc build ... --ext --non-strict` compiles untyped library code (pydantic,
@@ -348,6 +349,19 @@ not formed over all the candidates first: a first version did, and made every ho
 take its regions' cold members along. tomli's selection then grew from 19 functions to
 29 and pypng's from 8 to 19, as pruning could no longer drop one costly member of a
 region (selected-regions.md, section 5.2).
+
+**Native calls inside a region** (selected-regions.md R2). The module-function members of
+a region get native copies (`__pycc_rnative_*`, `pycc_ast::specialize_regions`): the
+parameters and results the prover shows to be `int` positions (or tuples with them) are
+native, and region calls are direct calls of the copies while the region's `intact` flag
+holds (`src/ext/module/regions.c`: a `PyDict_Watch` watcher on the module dict and a
+`PyFunction_AddWatcher` watcher on the members clear it). A copy that closes a cycle
+checks the recursion limit. A region also takes its *position-flow callees*: unselected
+functions it calls whose results the prover types as native positions
+(`Plan::flow_callees`), which a build reports as `compiled as a region's callee:` apart
+from the selection pass 3 checks. tomli's `loads()` goes from 2.82M to 2.59M
+instructions per call with the same 19-function selection; pypng's selection has method
+regions only, which stay generic.
 
 A function the winner leaves out of a set it was measured in is rejected ("faster
 without it", `measured.without`, with the selection's instructions in
