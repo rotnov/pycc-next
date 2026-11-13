@@ -1,8 +1,10 @@
 # Native calls inside a selected region
 
 Status: R1, R2 (with its code-size follow-ups), R3, R4 and R5 done (sections 5.2 and
-5.4-5.7), R5b and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
-part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
+5.4-5.7), R5b planned (section 5.1). R6, the CI confirmation: bench run 43418938409 at
+e579fe5 (v0.13.0's code) measures tomli's `loads()` at 1.81x / 1.56x CPython, so accept 2's
+tomli numbers (1.70x / 1.49x) are met. Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+part). Roadmap: [v0.13](../roadmap/v0.13.md), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
 native results. The type guard runs once, where the region is entered.

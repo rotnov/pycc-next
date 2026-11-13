@@ -56,9 +56,9 @@ classes, Python subclasses of compiled classes); strict refusals checked against
 `int | float` type; `pip install` through the `pycc.build` PEP 517 backend. Linux
 (x86_64, aarch64), macOS (arm64) and Windows (x86_64, MSVC). 10,000+ tests.
 
-**Speed** ([bench run 41427758082](https://github.com/rotnov/pycc-next/actions/runs/41427758082)
-at 147fac2, CPython 3.15.1: the CI benchmark workflow `bench.yml` on GitHub's ubuntu-24.04
-runner, AMD EPYC 9V45, 4 vCPUs; `python3 bench/run.py --runs 11`, median (min-max) of 11
+**Speed** ([bench run 43418938409](https://github.com/rotnov/pycc-next/actions/runs/43418938409)
+at e579fe5, CPython 3.15.2: the CI benchmark workflow `bench.yml` on GitHub's ubuntu-24.04
+runner, AMD EPYC 9V74, 4 vCPUs; `python3 bench/run.py --runs 11`, median (min-max) of 11
 interleaved fresh-process runs, process start included. The same unmodified programs built
 with Cython 3.3.0 (`cythonize -3`, default directives, so the annotations are honored;
 `-O2`) and mypyc (mypy 2.3.1, its defaults) run as `python -c "import prog"`; the Rust twins
@@ -67,18 +67,18 @@ Python programs' inputs are opaque to pycc-next):
 
 | program | CPython 3.15 | pycc-next | Cython | mypyc | Rust (`-O`) | vs CPython | vs Cython | vs mypyc | vs Rust |
 |---|---|---|---|---|---|---|---|---|---|
-| fib(32) | 0.166s (0.161-0.190) | 0.009s (0.009-0.009) | 0.099s (0.096-0.106) | 0.023s (0.022-0.023) | 0.005s (0.005-0.007) | **18.9x faster** | 11.25x faster | 2.57x faster | 1.62x slower |
-| mandelbrot | 1.415s (1.331-1.459) | 0.031s (0.030-0.031) | 0.091s (0.091-0.093) | 0.042s (0.040-0.043) | 0.030s (0.029-0.030) | **45.2x faster** | 2.91x faster | 1.33x faster | 1.05x slower |
-| nbody | 2.268s (2.196-2.339) | 0.045s (0.044-0.046) | 3.146s (3.115-3.299) | 1.802s (1.773-1.904) | 0.022s (0.022-0.023) | **50.4x faster** | 69.90x faster | 40.03x faster | 2.04x slower |
-| sieve | 0.631s (0.584-0.660) | 0.027s (0.027-0.028) | 0.515s (0.468-0.568) | 0.091s (0.084-0.097) | 0.011s (0.011-0.011) | **23.1x faster** | 18.86x faster | 3.35x faster | 2.49x slower |
-| spectral_norm | 0.651s (0.639-0.671) | 0.010s (0.010-0.010) | 0.715s (0.707-0.741) | 0.054s (0.053-0.056) | 0.007s (0.007-0.007) | **65.3x faster** | 71.71x faster | 5.39x faster | 1.41x slower |
-| collections_bfs | 0.647s (0.609-0.692) | 0.092s (0.090-0.094) | 0.638s (0.597-0.688) | 0.483s (0.470-0.586) | 0.032s (0.032-0.034) | **7.0x faster** | 6.92x faster | 5.24x faster | 2.84x slower |
+| fib(32) | 0.226s (0.222-0.241) | 0.011s (0.011-0.011) | 0.132s (0.132-0.177) | 0.029s (0.028-0.029) | 0.006s (0.006-0.006) | **20.7x faster** | 12.05x faster | 2.62x faster | 1.90x slower |
+| mandelbrot | 2.692s (2.094-2.758) | 0.036s (0.036-0.036) | 0.120s (0.118-0.120) | 0.052s (0.052-0.052) | 0.035s (0.035-0.036) | **74.8x faster** | 3.32x faster | 1.45x faster | 1.02x slower |
+| nbody | 3.728s (3.325-3.787) | 0.058s (0.058-0.059) | 4.870s (4.561-5.366) | 2.805s (2.342-2.982) | 0.028s (0.028-0.028) | **64.7x faster** | 84.46x faster | 48.64x faster | 2.05x slower |
+| sieve | 0.867s (0.798-0.919) | 0.034s (0.034-0.035) | 0.674s (0.632-0.724) | 0.114s (0.112-0.116) | 0.014s (0.014-0.014) | **25.6x faster** | 19.86x faster | 3.35x faster | 2.49x slower |
+| spectral_norm | 1.108s (1.049-1.125) | 0.013s (0.013-0.014) | 1.232s (1.045-1.251) | 0.076s (0.076-0.076) | 0.009s (0.009-0.010) | **82.5x faster** | 91.69x faster | 5.64x faster | 1.43x slower |
+| collections_bfs | 0.880s (0.848-0.930) | 0.111s (0.110-0.111) | 0.842s (0.762-0.875) | 0.661s (0.593-0.685) | 0.040s (0.039-0.040) | **7.9x faster** | 7.59x faster | 5.96x faster | 2.81x slower |
 
-Cython compiling plain typed Python (no `cdef`) is 0.7-1.7x CPython's speed except on
-mandelbrot (15.5x); with annotations ignored it is about the same, mandelbrot included.
-mypyc is the closer competitor on integer code (fib, sieve, mandelbrot within 1.3-3.4x of
-pycc-next). The run's job summary also has the arm64 leg (ubuntu-24.04-arm, Neoverse-N2,
-where pycc-next is 7.9-73.5x faster than CPython on these programs), the Cython-mode
+Cython compiling plain typed Python (no `cdef`) is 0.8-1.7x CPython's speed except on
+mandelbrot (22.5x); with annotations ignored it is about the same, mandelbrot included.
+mypyc is the closer competitor on integer code (mandelbrot, fib, sieve within 1.45-3.35x
+of pycc-next). The run's job summary also has the arm64 leg (ubuntu-24.04-arm, Neoverse-N2,
+where pycc-next is 7.9-74.2x faster than CPython on these programs), the Cython-mode
 table, and what did not compile with which tool and why. Numbers below cite the same run
 (x86_64) unless they say otherwise; instruction counts are from callgrind.
 
@@ -92,35 +92,36 @@ type (a `str` element replaced by an `int`), an `int | None` used as an `int` wi
 
 **Library code: faster where a profile shows it pays, at parity elsewhere.** Since v0.12 a
 non-strict `--ext` build compiles only the functions `pycc profile` measures as winners;
-the rest of the package runs as CPython bytecode ([compile-little](docs/design/compile-little.md)).
-At the v0.12.0 release (bench run 43192816730 at 5b7cc6c, ubuntu-24.04 / ubuntu-24.04-arm,
-medians of 15 interleaved runs for pydantic, 11 for the others): pydantic 2.14.2's
-`model_json_schema()` runs **1.20x / 1.23x** CPython's speed with 5 / 3 functions compiled,
-model definition 1.00x / 1.01x, round-trips 1.02x / 1.01x and the whole process 1.07x /
-1.07x, while its import is 0.99x / 0.99x (at parity, not faster). mistune 3.3.4's and
-pystache 0.6.8's imports and benchmarks run at CPython's speed (0.99x-1.01x), where whole-module builds ran their benchmarks at
-0.65x-0.89x.
-diff-match-patch's `diff_main` runs 14.98x / 16.18x faster. **pypng and tomli are slower
-than their whole-module builds** (bench run 41750538464, the last before the switch):
-pypng's five-filter read 2.02x / 1.95x (10.42x / 17.20x before) and tomli's `loads` 1.42x /
-1.31x (1.70x / 1.49x); bringing them back is a
-v0.13 target ([ROADMAP](docs/ROADMAP.md)). The numbers in the sections below that cite
-bench run 41427758082 are v0.11's whole-module builds.
+the rest of the package runs as CPython bytecode ([compile-little](docs/design/compile-little.md)),
+and since v0.13 the selected functions call each other natively inside a region
+([selected-regions](docs/design/selected-regions.md)). At the v0.13.0 release (bench run
+43418938409 at e579fe5, ubuntu-24.04 / ubuntu-24.04-arm, medians of 15 interleaved runs
+for pydantic, 11 for the others): diff-match-patch's `diff_main` runs 15.51x / 16.17x
+CPython's speed, pypng's five-filter read 13.94x / 16.98x and its PngSuite read 2.72x /
+2.88x (**below** the 3.10x / 3.69x of its whole-module build, bench run 41750538464), and
+tomli's `loads` 1.81x / 1.56x. pydantic 2.14.2's `model_json_schema()` runs **1.24x /
+1.22x** with 5 / 3 functions compiled and the whole process 1.07x / 1.05x, while model
+definition (1.01x / 0.99x), round-trips (1.00x / 0.99x) and the import (1.02x / 0.98x,
+inside the spread) are at parity, not faster. mistune 3.3.4's and pystache 0.6.8's
+imports and benchmarks run at CPython's speed (0.98x-1.01x): the profile leaves most of
+their code in CPython, where whole-module builds ran their benchmarks at 0.65x-0.89x. The
+numbers in the sections below that cite bench run 41427758082 are v0.11's whole-module
+builds.
 
-**Against Cython and mypyc on the same packages** (bench run 41427758082, ubuntu-24.04,
+**Against Cython and mypyc on the same packages** (bench run 43418938409, ubuntu-24.04,
 medians of 11; pydantic of 15): each tool builds the packages' modules unchanged, and is
 timed only where the package's own test suite passes against its build. pycc-next is
-faster than Cython on diff-match-patch (8.9x), pypng (6.3x and 2.1x) and tomli (1.28x),
-and **slower** than Cython on pystache (1.62x) and on pydantic (Cython, with annotations
-ignored, is 1.23x faster at model definition and 1.57x at `model_json_schema()`; import
-and round-trips about equal). **mypyc beats pycc-next on tomli** (14.5 ms against 20.1 ms
-for 100 `loads()`, 1.39x). mypyc does not compile diff-match-patch, pypng, mistune, pystache or pydantic
-(mypy errors in their unmodified sources), nor run `prefix_sum_np` (a numpy scalar where an
-`int` is annotated); Cython's builds of mistune fail its suite (at import), its default
-mode crashes on pydantic and fails one tomli test, so those numbers are Cython with
-annotations ignored. The arm64 leg (Neoverse-N2) shows the same: mypyc 1.44x faster than
-pycc-next on tomli, Cython 1.53x on pystache and 1.03-1.34x on pydantic's phases. The job
-summary lists every build with its reason.
+faster than Cython on diff-match-patch (13.47x), pypng (7.48x and 1.75x), tomli (1.40x)
+and pydantic (Cython with annotations ignored: 1.01x-1.05x per phase, 1.04x the whole
+process) and pystache's import (1.08x), and **slower** on pystache's benchmark (1.04x). **mypyc beats pycc-next on tomli** (19.10 ms against 25.40 ms for 100
+`loads()`, 1.33x). mypyc does not compile diff-match-patch, pypng, mistune, pystache or
+pydantic (mypy errors in their unmodified sources), nor run `prefix_sum_np` (a numpy
+scalar where an `int` is annotated); Cython's builds of mistune fail its suite (at
+import), its default mode crashes on pydantic and fails one tomli test, so those numbers
+are Cython with annotations ignored. The arm64 leg (Neoverse-N2) shows the same: mypyc
+1.35x faster than pycc-next on tomli, Cython 1.03x on pystache's benchmark, pycc-next
+1.00x-1.20x faster than Cython on pydantic's phases. The job summary lists every build
+with its reason.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
@@ -161,14 +162,14 @@ def relax(src: NDArray[np.float64], dst: NDArray[np.float64]) -> None:
 - Elements read as Python `float`/`int`/`bool`, not numpy scalars: see
   [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
-**Speed** ([bench run 41427758082](https://github.com/rotnov/pycc-next/actions/runs/41427758082),
-ubuntu-24.04, AMD EPYC 9V45, 4 vCPUs, CPython 3.15.1; kernel time without numpy's import,
+**Speed** ([bench run 43418938409](https://github.com/rotnov/pycc-next/actions/runs/43418938409),
+ubuntu-24.04, AMD EPYC 9V74, 4 vCPUs, CPython 3.15.2; kernel time without numpy's import,
 median (min-max) of 11 interleaved fresh-process runs):
 
 | program | CPython 3.15 + numpy | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| stencil2d (200x300 Jacobi, 120 sweeps) | 2.952s (2.901-3.209) | 0.005s (0.005-0.005) | 0.003s (0.003-0.003) | **635.2x faster** | 1.80x slower |
-| prefix_sum_np (400k `int64`, 25 rounds) | 1.981s (1.929-2.055) | 0.020s (0.020-0.022) | 0.007s (0.007-0.007) | **99.4x faster** | 2.79x slower |
+| stencil2d (200x300 Jacobi, 120 sweeps) | 3.992s (3.876-4.211) | 0.006s (0.006-0.006) | 0.003s (0.003-0.003) | **646.0x faster** | 2.13x slower |
+| prefix_sum_np (400k `int64`, 25 rounds) | 2.748s (2.664-2.885) | 0.022s (0.021-0.022) | 0.008s (0.008-0.008) | **127.4x faster** | 2.77x slower |
 
 An `int64` element joins `x += a[i]` and comparisons as a machine integer (an `int` is
 made of it only when the result leaves the inline range), so prefix_sum_np's running sum
