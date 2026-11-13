@@ -1,6 +1,7 @@
 # Native calls inside a selected region
 
-Status: R1 done, R4 measured and parked, R2, R3, R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
+Status: R1 done, R4 measured and parked, R2 replanned after a first attempt (section 5.3), R3,
+R5 and R6 planned (section 5.1). Part of [compile-little.md](compile-little.md) (section 2.8, PR 7's second
 part). Roadmap: [v0.13](../ROADMAP.md#v013--compile-little-compile-well), accept 2.
 
 This plan lets the selected functions of one region call each other with native arguments and
@@ -162,12 +163,27 @@ The call graph comes from the selected unit itself. A call in a selected body is
 A **region** is a connected component of region edges among the selected functions.
 
 A region is extended by its **position-flow callees**: an unselected function the region
-calls whose result flows into a local the region types natively. For tomli these are
+calls whose result flows into a local the region types natively. For tomli these are seven:
 `parse_literal_str`, `parse_one_line_basic_str`, `create_list_rule`,
-`parse_basic_str_escape` and `parse_multiline_str`. Pass 3 measures the region with these
-callees included. The rule is static: a callee joins only when its source is in the module, it
-is eligible (section 2.1), and every result that flows into the native local comes from a
-`return` the compiler can type.
+`parse_basic_str_escape`, `parse_basic_str_escape_multiline`, `parse_multiline_str` and
+`parse_hex_char` (the last one through the escape parsers). Pass 3 measures the region with
+these callees included. The rule is static and runs to a fixpoint:
+
+- a callee is a candidate when a member calls it through a region edge's binding rule (a
+  module global bound once by its own undecorated `def`), or through a local bound only to
+  such globals (4.2, B2), and the call's result, or the first item of a tuple result, is
+  bound to a local the member types natively (`pos = f(...)`, `pos, x = f(...)`,
+  `return f(...)` from a member whose result is native);
+- it joins when its source is in the module and it is eligible (section 2.1), and every
+  `return` that feeds that result is proven of the native type once the callee is typed as
+  a member (4.2). A callee whose returns cannot all be proven stays outside, and the
+  member's local stays `object`;
+- a callee that joins is a member: its own calls are examined the same way, so
+  `parse_hex_char` joins through `parse_basic_str_escape`.
+
+A position-flow callee is never an entry in pass 2's sense (it was not selected), but it is
+still called from bytecode it does not see, so it keeps its generic lift like every other
+member.
 
 Members called from outside the region (bytecode, Python callers, other regions) are the
 region's **entries**. Pass 2's `callees` counts tell which calls into a member come from
@@ -197,6 +213,35 @@ proven type is used.
   aliases, including names imported under `TYPE_CHECKING` from a package module's
   `Pos = int`) is the hint that orders the attempts. A result the compiler cannot prove keeps
   `object`, whatever the annotation says.
+- **What the prover knows** (added after R2's first attempt, 5.3). With only the rules above,
+  every `pos` chain in tomli starts unproven, and one unproven binding keeps the local
+  `object` everywhere it flows. Three facts start the chains without a checked conversion:
+  - **B1, exact `str` along region edges.** A parameter guarded exact `str` at entry is still
+    the same object in a callee reached through region edges when every edge passes the
+    caller's own unrebound parameter (or another value proven exact `str`). It stays a CPython
+    object (below), but the compiler knows its type exactly, so `s.index(t, i)`,
+    `s.find(t, i)`, `len(s)` and the other `str` operations whose result type CPython fixes
+    give a proven `int`. tomli's `skip_until` (`new_pos = src.index(expect, pos)`) needs this.
+  - **B2, a local bound only to members.** A local whose every binding reads a module global
+    that a region edge could call (each bound once by its own undecorated `def`, every one a
+    member) is called as a multi-way edge: the call compares the local with each member's
+    function object and calls that member's copy; anything else is a generic call. tomli's
+    `parse_basic_str` (`parse_escapes = parse_basic_str_escape` or
+    `parse_basic_str_escape_multiline`, then `pos, parsed_escape = parse_escapes(src, pos)`)
+    needs this. Only the intact flag (4.4) makes "anything else" unreachable while the
+    region runs, so the generic arm converts its result as a rebound callee's (4.4).
+  - **B3, `re.Match` positions.** `m.end()`, `m.start()` and `m.span()` are proven `int`
+    (a `tuple[int, int]`) when `m` is the result of `P.match(...)`, `P.fullmatch(...)` or
+    `P.search(...)` tested for truth, and `P` is a module global bound once (by an
+    assignment or an import) to an object that is an exact `re.Pattern` when the region is
+    formed at run time. The global's key is watched with the members' keys (4.4), so a
+    replaced pattern clears the intact flag and the region is not entered again; otherwise
+    the result is `object`. tomli's `parse_value` (`return datetime_match.end(), ...`)
+    needs this.
+
+  None of the three adds a check that can fail: each proof holds whenever the region is
+  intact, and an entry runs a copy only then. A conversion is emitted only on the generic arm
+  of a call whose callee was rebound while a region call is running (4.4).
 - **`str` and `frozenset` stay CPython objects.** The guard proves them exact, and their
   operations take the inline paths of generic bodies. Converting `src` to pycc's native
   `str` cost the earlier attempt 2.4M, and every slice of it that leaves the region (keys,
@@ -224,10 +269,24 @@ Each member gets a native copy `__pycc_rnative_<lift>`:
 
 A region edge compiles as a direct call of the callee's copy, checked first against the
 callee's cell, as section 2.8's direct calls are (one load and compare of the function
-object and its code object per call). `Py_EnterRecursiveCall` is asked once per invocation of
+object and its code object per call), or, equivalently, against the region's intact flag,
+which the same mutations clear (4.4). `Py_EnterRecursiveCall` is asked once per invocation of
 the calling copy, as for direct calls today, so `RecursionError` is raised where CPython raises
-it. A copy keeps its compiled frame, named as the original function. The `u2` variant shows
-the frame is not the cost.
+it. Only a copy that can close a cycle of region edges (a member that reaches itself, as
+`parse_value` does through `parse_array`) pays it; a copy no cycle passes through cannot
+recurse without leaving the region. A copy keeps its compiled frame, named as the original
+function. The `u2` variant shows the frame is not the cost.
+
+**Method edges stay generic in R2.** The intact flag sees module globals and function
+objects, not a subclass's override of a method or an instance attribute that shadows one, so
+a native `self.m(...)` edge would need a per-call check of the receiver's type and the
+method's cell. tomli's region has no method edge; pypng's (three `Reader` methods) is
+built as today. A later PR may add the per-call check with a measurement.
+
+**Watchers.** The dict watcher and the function watcher (4.4) are each registered once per
+process and shared by every pycc artifact loaded in it, through a capsule, as
+`src/ext/module/global_sync.c` shares its dict watcher. The function watcher's callback
+returns at once on `PyFunction_EVENT_CREATE`, which runs for every function CPython creates.
 
 Generic lifts are unchanged for every caller outside the region.
 
@@ -298,7 +357,8 @@ helps `m0` as well.
   for observed-type specializations.
   `int`s an operation makes are new objects in CPython as well, so they are not affected.
 - **A rebound member's mismatched result** raises `TypeError` (4.4). This needs a DEVIATIONS
-  row.
+  row. It is the only place R2 converts an object to a native type; B1-B3 (4.2) prove their
+  values instead, so an intact region never reaches it.
 - **Floats** are not passed natively (4.2), so NaN identity is unchanged.
 
 ### 4.7 Pass 3 measures a region as a unit
@@ -344,7 +404,7 @@ number stops the sequence for a measurement and a revision of this plan.
 | PR | change | tests | expected effect |
 |---|---|---|---|
 | R1 | Regions: formation from the selected unit (4.1, without the position-flow callees), `--report-fallbacks` lines `region: m: a, b, c (entries: ...)`, and pass 3 measuring and pruning regions as units (4.7) | unit tests of formation on a fixture module: an edge through a rebound global, a method edge, two components, a self-recursive function; prune tests with a two-member region; `package_check` reports tomli's region | no change in instructions (no code is generated differently); the five packages' selections unchanged or each change explained |
-| R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native, region edges as checked direct calls, `TypeError` on a rebound member's mismatched result; position-flow callees join the region; two DEVIATIONS rows | `tests/select_regions.rs` against CPython: tomli-shaped scanners and tuple-returning parsers; entry with `bool`, an `int` subclass and a big `int`; `mock.patch` of a member before a call (the generic path runs, result matches CPython for both result types) and from inside one (the `TypeError` row); the `intact` flag cleared by assignment, deletion, `dict.clear()` and a replaced `__code__` or `__defaults__` before a call (CPython's result, no `TypeError`); `RecursionError` depth; a rebound `pos` captured by a lambda or generator expression (late binding, 4.8); traceback function names; `is` of a returned position, matching the DEVIATIONS row | tomli `loads()` <= 2.66M per call locally (`u1`: 2.657M), wall >= 1.33x; `.text` growth reported (`u1`: +16%) |
+| R2 | Native `int` calls inside a region (4.2-4.4, 4.6): native copies, proven parameters and results, rebound parameters proven native; the prover's facts B1 (exact `str` along edges), B2 (a local bound only to members, dispatched on identity) and B3 (`re.Match` positions from a watched exact `re.Pattern` global); region edges as direct calls checked against the intact flag, which a shared `PyDict_Watch` watcher on the module dict and a shared `PyFunction_AddWatcher` watcher on the members clear; the recursion check on copies that close a cycle; method edges generic; captured locals never native; position-flow callees join the region (4.1); no checked conversion outside a rebound callee's generic arm; the two DEVIATIONS rows of 4.6 only if a test reaches them | `tests/select_regions.rs` against CPython: native edge results; a member global rebound after a first call, and `__code__` or `__defaults__` replaced, then called (CPython's result, no `TypeError`); the `RecursionError` depth; a member called from outside the region; B2 dispatching to each target and to a non-member; B3 with the pattern global replaced; a captured `pos` (late binding, 4.8); entry with `bool`, an `int` subclass and a big `int` | tomli `loads()` <= 2.66M per call locally (`u1`: 2.658M, `u1x`: 2.630M), wall >= 1.33x; pypng and pydantic not slower; `.text` growth reported |
 | R3 | Native `int` operands in the `str` word paths: `s[a:b]`, `s.startswith(t, a)`, and the literal comparison of `s[i]` (item 6) | `tests/tagged_words.rs` extended with native `int` operands, fast paths on and off, a `str` subclass receiver | about -80K: tomli <= 2.59M; `diff_bisect` (native `int` locals) not slower |
 | R4 | Character-class tests without a character object (4.5, item 7), in copies and generic bodies | membership against CPython: ASCII and non-ASCII `src`, the end of `src`, a set of more than 256 members, a set with a non-`str` member, a `set` and a `frozenset` subclass, a mask evicted in the loop | about -170K estimated (tomli <= 2.45M); a prototype on `m0` measured **-85K**, under the 120K of section 6: parked until R2 lands (5.1) |
 | R5 | The entry guard in the patched trampoline (`forward.c`), ahead of the generic frame and binding: exact types checked on the vectorcall arguments, the copy called directly, its result boxed (item 5) | entry with each guarded type and each miss; keyword calls and defaults take the generic path; `PYCC_NO_FAST_OPS=1` | per call from bytecode into a typed member, at least 100 instructions fewer (the earlier attempt's wrapper: about 160 per call); tomli unchanged (one entry per `loads()`); pypng `read()` measured |
@@ -404,6 +464,46 @@ Taken locally on CPython 3.15.0b4, x86-64, as section 3's.
   its own selected unit's regions are the ones that matter (4.7), and pruning removes
   those of the winner.
 
+### 5.3 R2's first attempt
+
+A first attempt at R2 stopped before any code was written, because the proof rule of 4.2 as
+first written ("a result the compiler cannot prove keeps `object`") leaves every `pos`
+chain in tomli unproven. Each chain starts at one of three bindings:
+
+1. `skip_until`: `new_pos = src.index(expect, pos)`. `src` is an `object` parameter, so its
+   method's result is an `object`.
+2. `parse_basic_str`: `pos, parsed_escape = parse_escapes(src, pos)`. The callee is a local
+   bound to one of two module functions, not a region edge.
+3. `parse_value`: `return datetime_match.end(), ...` (and the two other `re.Match` results).
+   The match comes from a module-global compiled pattern.
+
+With one type per local, solved to a fixpoint over the region, one unproven binding makes
+`pos` an `object` in its function, then in every caller that binds a result of it, until no
+position is native anywhere. The fix keeps the rule and teaches the prover the three facts
+B1-B3 (4.2). Writing checked conversions at the three sites instead (`int(x)` raising
+`TypeError` on any other type) was rejected: it adds a deviation where CPython would go on
+with whatever object the call returned.
+
+Measured locally as section 3's (CPython 3.15.0b4, x86-64, `PYTHONHASHSEED=0`, callgrind,
+`(I(21) - I(1)) / 20`), with the hand-written unit of section 3 rebuilt by main at 9129c742
+and section 7's hook:
+
+| variant | instructions per `loads()` |
+|---|---|
+| `m0`: main, the 19-function selection, generic bodies | 2,806,989 |
+| `m1`: `m0` plus the seven position-flow callees (4.1), generic | 2,734,044 |
+| `u1`: the hand-written region, checked `int` conversions at the three sites | 2,657,918 |
+| `u1x`: `u1` plus the seven position-flow callees as copies | 2,629,605 |
+
+- The checked conversions stand where B1-B3 will prove the values, so `u1` and `u1x` bound
+  what R2 can reach with the 19 functions and with the position-flow callees.
+- The copies are called about 1,414 times per `loads()`, 615 of them `skip_chars`.
+- About 50K of `u1`'s instructions are R3's: with `pos` native, `src[a:b]` builds a `slice`.
+
+The target stays 2.66M per `loads()`, and the stop rule of section 5 stands: if R2 as built
+measures above it, the implementation pull request is not opened, and the next step is a
+per-function breakdown and a revision of this plan.
+
 ## 6. Risks
 
 - **The margin is thin.** The projection beats the old build by about 2%, and part of it is an
@@ -418,6 +518,10 @@ Taken locally on CPython 3.15.0b4, x86-64, as section 3's.
   parameter or result.
 - **Rebinding during a call.** The `TypeError` path (4.4) is a deviation. Tests must show it
   is reached only by a rebinding made while a region call is running.
+- **Facts B1-B3 widen what the prover trusts.** Each holds only while the intact flag is
+  set: a missed watcher event (a member's dict key written through a path the watcher does
+  not see) would run a copy on a value it did not prove. The tests mutate every key and
+  function attribute the facts depend on before a call and check CPython's result.
 - **Annotation aliases.** Resolving `Pos` through `TYPE_CHECKING` imports reads another
   module's source. A wrong resolution only orders the attempts, since types are proven, but
   it costs build time.
