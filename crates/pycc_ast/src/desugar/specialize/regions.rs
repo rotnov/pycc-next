@@ -69,6 +69,11 @@ const NS: &str = "__pycc_fallback_ns";
 /// leading `__pycc_`.
 pub const REGION_COPY_PREFIX: &str = "__pycc_rnative_";
 
+/// The most regions one module arms: the length of the module unit's flag
+/// array (`PYCC_EXT_REGION_MAX`, `src/ext/module/module_ctx.c`, which a
+/// `pycc_codegen` test holds to this value). Regions past it get no copies.
+pub const REGION_MAX: usize = 64;
+
 /// A compiled module function that a region edge may call: its lift, the
 /// module global CPython binds it to (once, with its own undecorated
 /// `def`), its report name, and how many of its parameters a call may pass

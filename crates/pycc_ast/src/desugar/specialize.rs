@@ -843,7 +843,7 @@ fn loops(body: &[Stmt]) -> bool {
 mod attrs;
 mod call_sites;
 mod regions;
-pub use regions::{REGION_COPY_PREFIX, REGION_SLOW_PREFIX, RegionFunction, RegionInput, region_native_results, specialize_regions};
+pub use regions::{REGION_COPY_PREFIX, REGION_MAX, REGION_SLOW_PREFIX, RegionFunction, RegionInput, region_native_results, specialize_regions};
 mod escapes;
 mod evidence;
 use evidence::Evidence;

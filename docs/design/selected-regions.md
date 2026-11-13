@@ -440,17 +440,19 @@ acceptance numbers then apply to `m0`, measured again.
 - **R2, done.** Measured below (5.4): tomli's `loads()` at 2,591,280 instructions, under the
   2.66M target, at +77% `.text` for `_parser`.
 - **R2's code size, done.** Measured below (5.4): `_parser`'s `.text` +27% over main before
-  R2 (the plan allowed +30%), at 2,544,987 instructions per `loads()`. (a) An entry guard
+  R2 (the plan allowed +30%), at 2,543,978 instructions per `loads()`. (a) An entry guard
   unpacks its copy's tuple result, so the call takes the copy's multi-value twin, and the
-  guard builds the tuple; the compiler-generated functions nothing calls (a copy only
-  entries called, a twin no unpack calls, a conversion of a dropped arm) are not emitted
-  (`pycc_mir::unreferenced`). (b) The generic arm of each region call is a *slow call*
+  guard builds the tuple; a compiler-generated function nothing emitted calls (a copy only
+  entries called, a twin no unpack calls, a conversion of a dropped arm) is not emitted
+  (`pycc_mir::unreferenced`). An unpack's fallback counts as emitted, except a native
+  twin's call of its original, which codegen makes only when the original is kept. (b) The generic arm of each region call is a *slow call*
   shared by every site of its shape (the kinds of its arguments, their keywords and the
   result's conversion): `cold`, `noinline` and without a frame of its own
   (`regions/slow.rs`). (c) The intact flag is a byte compiled code loads and compares where
   it reads it (`pycc_ext_region_flags`). And (e), found by the breakdown below: the lift of
-  a member with a copy takes no multi-value twin, since its generic body runs only once
-  the region is closed or for arguments of other types (`pycc_mir::multi_return_object`).
+  a member with a copy takes no object multi-value twin: while its region is intact its
+  callers run the copy, and the lift runs only when a guard sends a call to the generic
+  path (`pycc_mir::multi_return_object`).
   (d) `loads`' copy, the only one with neither a native parameter nor a native result,
   stays: its `pos = 0` starts every position the prover proves, and without it no member
   has anything native (2.82M instructions, `m0`'s). The fixture's `parse` and `tails`
@@ -566,11 +568,11 @@ module's bytecode cache written before either count, so both runs import the sam
 | (c) the intact flag loaded inline | 2,570,885 | 1,069,767 B |
 | (a) guards take the copies' twins; unreferenced functions dropped | 2,563,533 | 925,799 B |
 | (b) slow calls for the generic arms | 2,544,682 | 907,751 B (+52%) |
-| (e) no multi-value twins for the lifts of members with copies | 2,544,987 (-1.8%) | 760,775 B (+27%) |
+| (e) no multi-value twins for the lifts of members with copies | 2,543,978 (-1.8%) | 760,807 B (+27%) |
 
 - After (a)-(c), `.text` stood at +52%. By symbol, the lifts' multi-value twins were
   143K of it: they double the generic bodies for a path an intact region never takes.
-  (e) dropped them, with no change in instructions.
+  (e) dropped them; instructions stayed level (2,544,682 before, 2,543,978 after).
 - Where `_parser`'s `.text` goes now, by symbol, against main before R2 (591,875 B of
   symbols there, 753,937 B here): the 24 generic lifts 245.5K (+66.2K: the seven
   position-flow callees' lifts 52.6K, the guards in the members' lifts about 13.6K), the

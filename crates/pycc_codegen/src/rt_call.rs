@@ -44,12 +44,16 @@ pub const EXT_REGION_FLAGS_SYMBOL: &str = "pycc_ext_region_flags";
 /// `src/ext/module/regions.c`); a region still pending has another.
 const REGION_INTACT: u64 = 1;
 
-/// The most regions a module arms (`PYCC_EXT_REGION_MAX`).
-const REGION_MAX: i64 = 64;
+/// The most regions a module arms (`pycc_hir::REGION_MAX`, the length of
+/// `PYCC_EXT_REGION_MAX`'s array).
+const REGION_MAX: i64 = pycc_hir::REGION_MAX as i64;
 
 /// `__pycc_region_intact(k)`: `pycc_ext_region_flags[k] == 1`, a load and a
 /// compare where the call stands. The flag is a plain byte: a call that may
-/// run Python, and so a watcher, makes LLVM read it again.
+/// run Python, and so a watcher, makes LLVM read it again. A plain load is
+/// enough because compiled code holds the GIL here, as the watchers that
+/// write the flags do (`src/ext/module/regions.c`); a free-threaded build
+/// would need an atomic load.
 fn emit_region_intact<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -65,6 +69,12 @@ fn emit_region_intact<'ctx>(
     let flags = module.get_global(EXT_REGION_FLAGS_SYMBOL).unwrap_or_else(|| {
         let global = module.add_global(flags_type, None, EXT_REGION_FLAGS_SYMBOL);
         global.set_linkage(inkwell::module::Linkage::External);
+        // The array is in this extension's own module unit (`PYCC_ENTRY`,
+        // hidden outside Windows), so the load is PC-relative, not
+        // through the GOT. COFF has no GOT to avoid.
+        if !cfg!(windows) {
+            global.set_visibility(inkwell::GlobalVisibility::Hidden);
+        }
         global
     });
     let i64_type = context.i64_type();
@@ -330,7 +340,12 @@ mod tests {
             panic!("a bool")
         };
         let ir = crate::compile::llvm_string_to_owned(module.print_to_string());
-        assert!(ir.contains("@pycc_ext_region_flags = external global [64 x i8]"), "{ir}");
+        let declaration = if cfg!(windows) {
+            "@pycc_ext_region_flags = external global [64 x i8]"
+        } else {
+            "@pycc_ext_region_flags = external hidden global [64 x i8]"
+        };
+        assert!(ir.contains(declaration), "{ir}");
         assert!(ir.contains("load i8, ptr getelementptr inbounds ([64 x i8], ptr @pycc_ext_region_flags, i64 0, i64 3)"), "{ir}");
         assert!(ir.contains("icmp eq i8"), "{ir}");
         assert!(!ir.contains("call"), "{ir}");
@@ -351,6 +366,15 @@ mod tests {
             args: vec![MirExpr::IntLiteral(64)],
         };
         emit_region_intact(&context, &builder, &module, &call);
+    }
+
+    #[test]
+    fn the_module_units_flag_array_has_one_byte_per_region() {
+        // Line endings as checked out on POSIX.
+        let unit = include_str!("../../../src/ext/module/module_ctx.c").replace('\r', "");
+        let define = format!("#define PYCC_EXT_REGION_MAX {}\n", pycc_hir::REGION_MAX);
+        assert!(unit.contains(&define), "module_ctx.c must `{}`", define.trim_end());
+        assert!(unit.contains("pycc_ext_region_flags[PYCC_EXT_REGION_MAX];"));
     }
 }
 

@@ -271,7 +271,8 @@ PYCC_ENTRY PyObject *pycc_ext_ns_getitem_cached(PyObject *ns, PyObject *k, PyccN
 /* The flags of the module's regions of selected functions (`regions.c`):
  * region `k`'s is 1 (`PYCC_REGION_INTACT`) while it is intact; a region
  * still pending is not. Compiled code loads `pycc_ext_region_flags[k]` and
- * compares it with 1 itself (`pycc_codegen::rt_call`, `__pycc_region_intact`). */
+ * compares it with 1 itself (`pycc_codegen::rt_call`, `__pycc_region_intact`).
+ * The length is `pycc_ast::REGION_MAX`, which a `pycc_codegen` test checks. */
 #define PYCC_EXT_REGION_MAX 64
 PYCC_ENTRY unsigned char pycc_ext_region_flags[PYCC_EXT_REGION_MAX];
 

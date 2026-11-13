@@ -16,9 +16,6 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextRange};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The most regions one module arms (`PYCC_EXT_REGION_MAX`, `regions.c`).
-const MAX_REGIONS: usize = 64;
-
 /// One region call to rewrite in a copy.
 #[derive(Debug, Clone)]
 struct CallRewrite {
@@ -98,7 +95,7 @@ pub(crate) fn plan(
     let mut copies = Vec::new();
     let mut planned = Vec::new();
     let mut convs = BTreeSet::new();
-    for (k, region) in regions.iter().enumerate().take(MAX_REGIONS) {
+    for (k, region) in regions.iter().enumerate().take(super::REGION_MAX) {
         let cycle = cyclic(region);
         let mut patterns: BTreeSet<String> = BTreeSet::new();
         for &m in region {

@@ -13,12 +13,13 @@
 //!
 //! A reference is a call (`MirExpr::Call`), a function value
 //! (`MirExpr::MakeClosure`) or a name (`MirExpr::Name`), and an unpacking
-//! call's twin (`MirStmt::AssignMulti`). Codegen calls the twin of an
-//! `AssignMulti` whenever the module has it, so its fallback, which calls
-//! the original, is a reference only when the twin is not in the module;
+//! call's twin and its fallback (`MirStmt::AssignMulti`). Codegen calls a
+//! native twin whenever the module has it, so the call of the original in
+//! its fallback names no reference then, though that call's arguments do;
 //! an original that is dropped is not looked up (`pycc_codegen::multi_out`).
+//! An object twin's fallback is always emitted and counts whole.
 
-use crate::{MirExpr, MirItem, MirModule, MirStmt};
+use crate::{AssignMulti, MirExpr, MirItem, MirModule, MirStmt};
 use std::collections::BTreeSet;
 
 /// The prefixes of the functions only compiled code calls, by name: a
@@ -87,12 +88,10 @@ fn names_in(body: &[MirStmt], functions: &BTreeSet<&str>, out: &mut Vec<String>)
     for stmt in body {
         if let MirStmt::AssignMulti(multi) = stmt {
             out.push(multi.twin.clone());
-            if !functions.contains(multi.twin.as_str()) {
-                names_in(&multi.fallback, functions, out);
-            }
             for expr in &multi.args {
                 expr_names(expr, out);
             }
+            fallback_names(multi, functions, out);
             continue;
         }
         for expr in stmt.exprs() {
@@ -102,6 +101,41 @@ fn names_in(body: &[MirStmt], functions: &BTreeSet<&str>, out: &mut Vec<String>)
             names_in(inner, functions, out);
         }
     }
+}
+
+/// The functions an `AssignMulti`'s fallback refers to, into `out`.
+///
+/// An object twin's (`crate::multi_return_object`) has no `args`: its
+/// fallback holds the call with its arguments and codegen always emits it
+/// (`pycc_codegen::multi_out`), so all of it counts. A native twin's
+/// fallback repeats `args` in a call of the original, which codegen makes
+/// only when the original is in the module; while the twin is, that call's
+/// callee is not a reference, but its arguments and the rest of the
+/// fallback still are.
+fn fallback_names(multi: &AssignMulti, functions: &BTreeSet<&str>, out: &mut Vec<String>) {
+    let native_twin = crate::multi_return_object::twin_arity(&multi.twin).is_none()
+        && functions.contains(multi.twin.as_str());
+    let Some((first, rest)) = multi.fallback.split_first() else {
+        return;
+    };
+    match first {
+        MirStmt::Assign { value, .. } if native_twin => {
+            let call = match value {
+                MirExpr::ObjUnpack { value, .. } => value,
+                value => value,
+            };
+            match call {
+                MirExpr::Call { callee, args, .. } if *callee == multi.original => {
+                    for arg in args {
+                        expr_names(arg, out);
+                    }
+                }
+                call => expr_names(call, out),
+            }
+        }
+        first => names_in(std::slice::from_ref(first), functions, out),
+    }
+    names_in(rest, functions, out);
 }
 
 fn expr_names(expr: &MirExpr, out: &mut Vec<String>) {
@@ -119,7 +153,7 @@ fn expr_names(expr: &MirExpr, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignMulti, Ty};
+    use crate::Ty;
 
     fn function(name: &str, body: Vec<MirStmt>) -> MirItem {
         MirItem::Function {
@@ -155,7 +189,10 @@ mod tests {
             twin: twin.to_string(),
             args: Vec::new(),
             temps: Vec::new(),
-            fallback: vec![MirStmt::ExprStmt(call(original))],
+            fallback: vec![MirStmt::Assign {
+                target: "t".to_string(),
+                value: call(original),
+            }],
         }))
     }
 
@@ -201,6 +238,78 @@ mod tests {
         assert_eq!(
             names(&module),
             ["f", "0gen_multi___pycc_rnative_a", "g", "__pycc_rnative_b"]
+        );
+    }
+
+    /// An unpacking whose call's arguments are only in its fallback.
+    fn unpack_with(original: &str, twin: &str, arg: &str, object: bool) -> MirStmt {
+        let made = MirExpr::Call {
+            callee: original.to_string(),
+            args: vec![call(arg)],
+            ty: Ty::Object,
+        };
+        let value = if object {
+            MirExpr::ObjUnpack {
+                value: Box::new(made),
+                arity: 2,
+            }
+        } else {
+            made
+        };
+        MirStmt::AssignMulti(Box::new(AssignMulti {
+            original: original.to_string(),
+            twin: twin.to_string(),
+            args: Vec::new(),
+            temps: Vec::new(),
+            fallback: vec![
+                MirStmt::Assign {
+                    target: "t".to_string(),
+                    value,
+                },
+                MirStmt::ExprStmt(call("__pycc_rconv_i")),
+            ],
+        }))
+    }
+
+    #[test]
+    fn a_fallbacks_arguments_and_rest_are_references() {
+        let mut module = MirModule {
+            items: vec![
+                // An object twin's fallback is always emitted: its call's
+                // arguments keep the slow call and the copy they name.
+                function(
+                    "f",
+                    vec![unpack_with("__pycc_lift1_g__", "0gen_multi2___pycc_lift1_g__", "__pycc_rslow1", true)],
+                ),
+                function("__pycc_lift1_g__", Vec::new()),
+                function("0gen_multi2___pycc_lift1_g__", Vec::new()),
+                function("__pycc_rslow1", Vec::new()),
+                // A native twin's fallback: the original is not called
+                // while the twin is there, but the arguments still count.
+                function(
+                    "h",
+                    vec![unpack_with("__pycc_rnative_c", "0gen_multi___pycc_rnative_c", "__pycc_rnative_d", false)],
+                ),
+                function("__pycc_rnative_c", Vec::new()),
+                function("0gen_multi___pycc_rnative_c", Vec::new()),
+                function("__pycc_rnative_d", Vec::new()),
+                function("__pycc_rconv_i", Vec::new()),
+            ],
+            class_defs: Default::default(),
+        };
+        drop_unreferenced(&mut module);
+        assert_eq!(
+            names(&module),
+            [
+                "f",
+                "__pycc_lift1_g__",
+                "0gen_multi2___pycc_lift1_g__",
+                "__pycc_rslow1",
+                "h",
+                "0gen_multi___pycc_rnative_c",
+                "__pycc_rnative_d",
+                "__pycc_rconv_i",
+            ]
         );
     }
 }

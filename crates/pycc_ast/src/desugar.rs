@@ -132,7 +132,7 @@ pub use object_except::object_except_handlers;
 pub use aug_target::desugar_computed_aug_target;
 pub use with_stmt::desugar_with;
 pub use specialize::{
-    BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, OBSERVED_TYPES, is_copy_tail_call, Observed, REGION_COPY_PREFIX, REGION_SLOW_PREFIX, RegionFunction,
+    BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, OBSERVED_TYPES, is_copy_tail_call, Observed, REGION_COPY_PREFIX, REGION_MAX, REGION_SLOW_PREFIX, RegionFunction,
     RegionInput, Specialized, region_native_results, specialize_observed, specialize_regions, specialize_untyped,
 };
 pub use ext_signatures::{
