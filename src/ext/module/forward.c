@@ -91,6 +91,9 @@ typedef struct PycFwdSlot {
     PyObject *(*entry)(PyObject *, PyObject *const *, Py_ssize_t);
     PyObject *(*entry_kw)(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
     PyObject *names;   /* `co_varnames` */
+    /* `names`' items where the tuple layout keeps them
+     * (`pycc_ext_seq_layout`), or NULL: the accessor is called then. */
+    PyObject *const *name_items;
     PyObject *klass;   /* the `__class__` cell's value, once read */
     PyObject *cell;    /* the `__class__` cell, or NULL */
     int argcount;
@@ -215,238 +218,6 @@ done:
     Py_XDECREF(kwdefaults);
     Py_XDECREF(ns);
 }
-
-/* Drops the forwarder's own traceback entry from the exception raised now,
- * when it is the newest one. */
-static void pycc_fwd_drop_entry(PycFwdSlot *slot)
-{
-    PyObject *exc = PyErr_GetRaisedException();
-    PyObject *tb, *frame, *code, *next;
-
-    if (exc == NULL) {
-        return;
-    }
-    if (slot->own_body) {
-        PyErr_SetRaisedException(exc);
-        return;
-    }
-    tb = PyException_GetTraceback(exc);
-    if (tb != NULL) {
-        frame = PyObject_GetAttrString(tb, "tb_frame");
-        code = frame != NULL ? PyObject_GetAttrString(frame, "f_code") : NULL;
-        if (code != NULL && code == slot->code) {
-            next = PyObject_GetAttrString(tb, "tb_next");
-            if (next != NULL) {
-                (void)PyException_SetTraceback(exc, next);
-                Py_DECREF(next);
-            }
-        }
-        Py_XDECREF(code);
-        Py_XDECREF(frame);
-        Py_DECREF(tb);
-    }
-    PyErr_Clear();
-    PyErr_SetRaisedException(exc);
-}
-
-/* Calls the compiled body with `n` arguments, its parameters in order. */
-static PyObject *pycc_fwd_target(PycFwdSlot *slot, PyObject *const *args, Py_ssize_t n)
-{
-    PyObject *result;
-
-    if (slot->entry == NULL && slot->entry_kw == NULL) {
-        return PyObject_Vectorcall(slot->target, args, (size_t)n, NULL);
-    }
-    /* What calling the builtin would check. */
-    if (Py_EnterRecursiveCall(" while calling a Python object")) {
-        return NULL;
-    }
-    result = slot->entry != NULL ? slot->entry(slot->self, args, n)
-                                 : slot->entry_kw(slot->self, args, n, NULL);
-    Py_LeaveRecursiveCall();
-    return result;
-}
-
-/* The call as the forwarder's own vectorcall makes it. */
-static PyObject *pycc_fwd_slow(PycFwdSlot *slot, PyObject *func, PyObject *const *args,
-                               size_t nargsf, PyObject *kwnames)
-{
-    PyObject *result = pycc_fwd_original(func, args, nargsf, kwnames);
-
-    if (result == NULL) {
-        pycc_fwd_drop_entry(slot);
-    }
-    return result;
-}
-
-/* The index of keyword `name` among the parameters a keyword can bind
- * (`co_varnames[posonly:argcount + kwonly]`), or -1. */
-static int pycc_fwd_keyword(PycFwdSlot *slot, PyObject *name)
-{
-    int i, end = slot->argcount + slot->kwonly;
-
-    for (i = slot->posonly; i < end; i++) {
-        if (PyTuple_GetItem(slot->names, i) == name) {
-            return i;
-        }
-    }
-    for (i = slot->posonly; i < end; i++) {
-        int equal = PyObject_RichCompareBool(PyTuple_GetItem(slot->names, i), name, Py_EQ);
-
-        if (equal < 0) {
-            PyErr_Clear();
-            return -1;
-        }
-        if (equal) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-/*
- * A call the fast path does not take: binds the arguments to the
- * forwarder's parameters and calls the compiled body with them in its
- * order (the class first, when the forwarder passes it, then the
- * parameters in source order: positional, `*args`, keyword-only,
- * `**kwargs`). Kept out of line, so the fast path stays a few cache lines.
- */
-static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const *args,
-                               size_t nargsf, PyObject *kwnames) __attribute__((noinline));
-static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const *args,
-                               size_t nargsf, PyObject *kwnames)
-{
-    PyObject *bound[PYCC_FWD_MAX_PARAMS];
-    PyObject *call[PYCC_FWD_MAX_PARAMS + 1];
-    PyObject *star = NULL, *starstar = NULL, *result;
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-    Py_ssize_t nkw;
-    int nparams = slot->argcount + slot->kwonly;
-    int i, n = 0;
-
-    if (PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE) != slot->code) {
-        return pycc_fwd_original(func, args, nargsf, kwnames);
-    }
-    nkw = kwnames != NULL ? PyTuple_Size(kwnames) : 0;
-    if (slot->cell != NULL && slot->klass == NULL) {
-        slot->klass = PyObject_GetAttrString(slot->cell, "cell_contents");
-        if (slot->klass == NULL) {
-            PyErr_Clear();
-            return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
-        }
-    }
-    /* Exactly the positional parameters, after the class. */
-    if (nkw == 0 && nargs == slot->argcount && slot->kwonly == 0 && !slot->varargs
-        && !slot->varkw) {
-        call[0] = slot->klass;
-        for (i = 0; i < nargs; i++) {
-            call[i + 1] = args[i];
-        }
-        return pycc_fwd_target(slot, call, nargs + 1);
-    }
-    if (nargs > slot->argcount && !slot->varargs) {
-        return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
-    }
-    for (i = 0; i < nparams; i++) {
-        bound[i] = i < nargs && i < slot->argcount ? args[i] : NULL;
-    }
-    for (i = 0; i < nkw; i++) {
-        PyObject *name = PyTuple_GetItem(kwnames, i);
-        int at = pycc_fwd_keyword(slot, name);
-
-        if (at >= 0 && bound[at] == NULL) {
-            bound[at] = args[nargs + i];
-            continue;
-        }
-        if (at >= 0 || !slot->varkw) {
-            Py_XDECREF(starstar);
-            return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
-        }
-        if (starstar == NULL && (starstar = PyDict_New()) == NULL) {
-            return NULL;
-        }
-        if (PyDict_GetItemWithError(starstar, name) != NULL || PyErr_Occurred()
-            || PyDict_SetItem(starstar, name, args[nargs + i]) != 0) {
-            PyErr_Clear();
-            Py_DECREF(starstar);
-            return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
-        }
-    }
-    {
-        PyObject *defaults = PYCC_FUNC_FIELD(func, PYCC_FUNC_DEFAULTS);
-        PyObject *kwdefaults = PYCC_FUNC_FIELD(func, PYCC_FUNC_KWDEFAULTS);
-
-        if (defaults != slot->defaults) {
-            /* `__defaults__` changed (or this is the first call): take the
-             * new items. The old tuple is kept until then, so its address
-             * cannot come back as another tuple's. */
-            Py_ssize_t count = defaults != NULL ? PyTuple_Size(defaults) : 0;
-
-            if (count > slot->argcount) {
-                return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
-            }
-            {
-                PyObject *old = slot->defaults;
-
-                slot->defaults = Py_XNewRef(defaults);
-                Py_XDECREF(old);
-            }
-            slot->ndefaults = count;
-        }
-        for (i = 0; i < nparams; i++) {
-            if (bound[i] != NULL) {
-                continue;
-            }
-            if (i < slot->argcount && i >= slot->argcount - slot->ndefaults) {
-                bound[i] = PyTuple_GetItem(slot->defaults, i - (slot->argcount - slot->ndefaults));
-            } else if (i >= slot->argcount && kwdefaults != NULL) {
-                bound[i] = PyDict_GetItemWithError(kwdefaults, PyTuple_GetItem(slot->names, i));
-                PyErr_Clear();
-            }
-            if (bound[i] == NULL) {
-                Py_XDECREF(starstar);
-                return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
-            }
-        }
-    }
-    if (slot->varargs) {
-        Py_ssize_t extra = nargs > slot->argcount ? nargs - slot->argcount : 0;
-
-        star = PyTuple_New(extra);
-        if (star == NULL) {
-            Py_XDECREF(starstar);
-            return NULL;
-        }
-        for (i = 0; i < extra; i++) {
-            Py_INCREF(args[slot->argcount + i]);
-            PyTuple_SetItem(star, i, args[slot->argcount + i]);
-        }
-    }
-    if (slot->varkw && starstar == NULL && (starstar = PyDict_New()) == NULL) {
-        Py_XDECREF(star);
-        return NULL;
-    }
-    if (slot->cell != NULL) {
-        call[n++] = slot->klass;
-    }
-    for (i = 0; i < slot->argcount; i++) {
-        call[n++] = bound[i];
-    }
-    if (star != NULL) {
-        call[n++] = star;
-    }
-    for (i = slot->argcount; i < nparams; i++) {
-        call[n++] = bound[i];
-    }
-    if (starstar != NULL) {
-        call[n++] = starstar;
-    }
-    result = pycc_fwd_target(slot, call, n);
-    Py_XDECREF(star);
-    Py_XDECREF(starstar);
-    return result;
-}
-
 /*
  * Every patched forwarder's slot, by its function (open addressing; the
  * functions are held by their slots, which are never freed): what lets a
@@ -518,72 +289,6 @@ static struct PycFwdSlot *pycc_fwd_slot_of(PyObject *func)
     return NULL;
 }
 
-/* How many calls `pycc_fwd_direct` made straight to a compiled body, which
- * the tests read with `ctypes` (`RUNTIME_COUNTERS` in
- * `src/ext_build/link.rs`). */
-static long long pycc_fwd_direct_calls = 0;
-
-long long pycc_ext_site_forward_calls(void)
-{
-    return pycc_fwd_direct_calls;
-}
-
-/* Whether a call of `slot`'s function passing `nargs` arguments
- * positionally, then the keyword arguments `kwnames` (or none), passes
- * exactly its parameters in their order: each keyword names, as the same
- * interned string, the parameter after the ones before it (`f(x, k=v)` for
- * `def f(x, k)`), as CPython's own calls name them. The arguments then are
- * the parameters as they stand, and the compiled body takes them as they
- * are: nothing to bind. A keyword that names its parameter by an equal but
- * other string, or out of order, is bound by `pycc_fwd_bind`. */
-static int pycc_fwd_in_order(const PycFwdSlot *slot, Py_ssize_t nargs, PyObject *kwnames)
-{
-    Py_ssize_t i, nkw = kwnames != NULL ? PyTuple_Size(kwnames) : 0;
-
-    if (!slot->simple || nargs + nkw != slot->argcount || (nkw > 0 && nargs < slot->posonly)) {
-        return 0;
-    }
-    for (i = 0; i < nkw; i++) {
-        if (PyTuple_GetItem(kwnames, i) != PyTuple_GetItem(slot->names, nargs + i)) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-/* `func(*args, **kw)` for the forwarder of `slot` (`pycc_fwd_slot_of(func)`),
- * `args[0]` its receiver, the last of the `n` arguments the values of the
- * keywords `kwnames` (or none): what its trampoline does for a call that
- * passes exactly its parameters in order (`pycc_fwd_call_in`), else the
- * vectorcall itself. */
-static PyObject *pycc_fwd_direct(struct PycFwdSlot *slot, PyObject *func, PyObject *const *args,
-                                 Py_ssize_t n, PyObject *kwnames)
-{
-    Py_ssize_t nkw = kwnames != NULL ? PyTuple_Size(kwnames) : 0;
-
-    if (func == slot->func && pycc_fwd_in_order(slot, n - nkw, kwnames)
-        && PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE) == slot->code) {
-        pycc_fwd_direct_calls++;
-        return pycc_fwd_target(slot, args, n);
-    }
-    return PyObject_Vectorcall(func, args, (size_t)(n - nkw), kwnames);
-}
-
-/* Trampoline `index`'s call: straight to the compiled body when the call
- * passes exactly the parameters in order (`pycc_fwd_in_order`), else
- * `pycc_fwd_bind`. */
-static PyObject *pycc_fwd_call_in(PyccExtModule *m, int index, PyObject *func,
-                                  PyObject *const *args, size_t nargsf, PyObject *kwnames)
-{
-    PycFwdSlot *slot = &m->fwd_slots[index];
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-
-    if (pycc_fwd_in_order(slot, nargs, kwnames)
-        && PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE) == slot->code) {
-        return pycc_fwd_target(slot, args, slot->argcount);
-    }
-    return pycc_fwd_bind(slot, func, args, nargsf, kwnames);
-}
 
 /* An int attribute of `code`, or -1. */
 static int pycc_fwd_code_int(PyObject *code, const char *name)
@@ -823,6 +528,9 @@ static int pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func, const 
         slot->cell = Py_NewRef(PyTuple_GetItem(closure, 0));
     }
     slot->names = Py_NewRef(info.varnames);
+    if (pycc_ext_seq_layout > 0 || (pycc_ext_seq_layout == 0 && pycc_ext_seq_probe() > 0)) {
+        slot->name_items = PYCC_TUPLE_ITEMS(slot->names);
+    }
     slot->func = Py_NewRef(func);
     slot->code = Py_NewRef(code);
     slot->target = Py_NewRef(target);

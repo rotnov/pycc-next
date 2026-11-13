@@ -244,9 +244,7 @@ pub(crate) fn emit_obj_subscript_expr<'ctx>(
     // A fresh native key (`o[str(i)]`) is copied by its packer, so it is
     // still this consumer's to release (`native_operand`).
     let native_index = crate::native_operand::hold(rt, index, index_scalar);
-    let namespace = matches!(base.as_ref(), MirExpr::Name { name, .. }
-        if name == crate::ext::FALLBACK_NS_NAME)
-        && matches!(index.as_ref(), MirExpr::StringLiteral(_));
+    let namespace = crate::operand_pin::is_namespace_read(base, index);
     let result = foreign_call::emit_subscript(
         context,
         builder,

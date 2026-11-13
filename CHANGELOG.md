@@ -69,6 +69,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   (-3.9%), below the whole-module build from before v0.12's switch (2.427M); `_parser`
   `.text` 770,951 -> 774,151 B; pypng's compiled code identical, pydantic's workload
   unchanged.
+- The fixed cost of calls into and inside a region (`docs/design/selected-regions.md`, R5).
+  A region copy's frame links onto its compiled caller's frame without checking for a
+  signature wrapper or forwarder, and every inline-linked frame unlinks from two words of
+  its own; a global read no longer takes a reference to the module's namespace; and a call
+  of a compiled method or function through its forwarder that leaves the later parameters
+  to their defaults calls the compiled body directly with the defaults the function holds
+  at that moment, where it was bound through the forwarder's generic path. tomli's
+  `loads()` with the 19-function selection: 2,374,136 -> 2,293,301 instructions per call
+  (-3.4%), `_parser` `.text` 774,151 -> 753,527 B; pypng's PngSuite decode, pydantic's
+  workload and diff-match-patch's `diff_main` not slower.
 
 ### Fixed
 

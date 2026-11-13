@@ -213,6 +213,11 @@ fn borrowed_while_running_code(expr: &MirExpr) -> Vec<&MirExpr> {
             Vec::new()
         }
         MirExpr::ObjMethodCall { base, .. } => vec![base],
+        // A global read (`__pycc_fallback_ns["name"]`) runs no code while
+        // its site's cache answers, and its helper holds the namespace
+        // itself on a miss (`pycc_ext_ns_getitem_cached`), so the
+        // namespace is read borrowed: no count traffic on each read.
+        MirExpr::ObjSubscript { base, index } if is_namespace_read(base, index) => Vec::new(),
         MirExpr::ObjAttrGet { .. }
         | MirExpr::ObjCompare { .. }
         | MirExpr::ObjLen { .. }
@@ -229,6 +234,13 @@ fn borrowed_while_running_code(expr: &MirExpr) -> Vec<&MirExpr> {
         | MirExpr::FString(_) => expr.children(),
         _ => Vec::new(),
     }
+}
+
+/// Whether `base[index]` is a global read of the module's namespace
+/// (`foreign_call::emit_subscript`'s `namespace`).
+pub(crate) fn is_namespace_read(base: &MirExpr, index: &MirExpr) -> bool {
+    matches!(base, MirExpr::Name { name, .. } if name == crate::ext::FALLBACK_NS_NAME)
+        && matches!(index, MirExpr::StringLiteral(_))
 }
 
 /// [`borrowed_while_running_code`] for a statement: an attribute or item

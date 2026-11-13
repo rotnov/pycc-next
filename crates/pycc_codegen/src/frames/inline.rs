@@ -92,18 +92,29 @@ const F_OWNER: (u64, u64) = (70, 74);
 /// `localsplus[0]` and `[1]`: the thread state, and the top it replaced.
 const F_TSTATE: (u64, u64) = (72, 80);
 const F_SAVED_TOP: (u64, u64) = (80, 88);
+/// pycc's own two words past the twelve CPython reads (`enter_frame`):
+/// the thread state a frame linked inline went onto (null when
+/// `pycc_ext_frame_enter` linked it), and the top it replaced. At the same
+/// offsets on every version, so the unlink reads them without the layout's
+/// select; in memory rather than kept as values through the body, where
+/// they would take registers a loop needs.
+pub(super) const FRAME_WORDS: u32 = 14;
+const F_LINKED_TSTATE: u64 = 96;
+const F_LINKED_TOP: u64 = 104;
 /// `PyThreadState.current_frame`, and `PyCodeObject.co_flags`.
 const TSTATE_CURRENT_FRAME: u64 = 72;
 const CODE_FLAGS: u64 = 48;
 /// The `co_flags` bit of a signature wrapper's or forwarder's code
 /// (`pycc_ast::ext_signatures::WRAPPER_FLAG`).
 const CO_SIGNATURE: u64 = 0x4000_0000;
-/// `PyccIFrame.owner` of a frame `pycc_ext_frame_enter` did not link.
-const OWNER_INACTIVE: u64 = 0x7F;
 
 /// Links `frame` for `info` onto the thread's frame chain, inline:
 /// `pycc_ext_frame_enter`'s work without the call once `info`'s code
-/// object exists (that first call makes it).
+/// object exists (that first call makes it). With `compiled_caller` (only
+/// compiled code calls the function, its own frame on top: `frames`'s
+/// `called_from_compiled`) the top is never a signature wrapper or a
+/// forwarder, so it is linked as it is, unchecked.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn link_frame<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -111,6 +122,7 @@ pub(super) fn link_frame<'ctx>(
     function: FunctionValue<'ctx>,
     frame: inkwell::values::PointerValue<'ctx>,
     info: GlobalValue<'ctx>,
+    compiled_caller: bool,
 ) -> Option<()> {
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i8_type = context.i8_type();
@@ -136,6 +148,9 @@ pub(super) fn link_frame<'ctx>(
     builder
         .build_call(state.frame_enter, &[frame.into(), info.into()], "")
         .ok()?;
+    builder
+        .build_store(field(context, builder, frame, F_LINKED_TSTATE), ptr.const_null())
+        .ok()?;
     builder.build_unconditional_branch(done).ok()?;
     builder.position_at_end(fast);
     let tstate = builder
@@ -147,10 +162,14 @@ pub(super) fn link_frame<'ctx>(
     let v315 = frames_v315(context, builder, state);
     let current = field(context, builder, tstate, TSTATE_CURRENT_FRAME);
     let top = load(current, "frame_top");
-    let has_top = builder.build_is_not_null(top, "frame_has_top").ok()?;
-    builder
-        .build_conditional_branch(has_top, check, link)
-        .ok()?;
+    if compiled_caller {
+        builder.build_unconditional_branch(link).ok()?;
+    } else {
+        let has_top = builder.build_is_not_null(top, "frame_has_top").ok()?;
+        builder
+            .build_conditional_branch(has_top, check, link)
+            .ok()?;
+    }
     // A signature wrapper or forwarder on top stands for this function:
     // link past it.
     builder.position_at_end(check);
@@ -256,6 +275,8 @@ pub(super) fn link_frame<'ctx>(
             top,
         )
         .ok()?;
+    store(F_LINKED_TSTATE, tstate.into());
+    store(F_LINKED_TOP, top.into());
     builder.build_store(current, frame).ok()?;
     builder.build_unconditional_branch(done).ok()?;
     builder.position_at_end(done);
@@ -263,7 +284,8 @@ pub(super) fn link_frame<'ctx>(
 }
 
 /// Unlinks the live frame before the return `terminator`, inline: the
-/// top it replaced goes back unless the frame is inactive or a frame
+/// top it replaced goes back, unless the frame was not linked inline (the
+/// first call, or one `pycc_ext_frame_enter` left inactive) or a frame
 /// object was made for it, which `pycc_ext_frame_exit` handles.
 pub(super) fn unlink_frame<'ctx>(
     context: &'ctx Context,
@@ -273,7 +295,6 @@ pub(super) fn unlink_frame<'ctx>(
     terminator: inkwell::values::InstructionValue<'ctx>,
 ) {
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let i8_type = context.i8_type();
     let Some(block) = terminator.get_parent() else {
         return;
     };
@@ -295,23 +316,17 @@ pub(super) fn unlink_frame<'ctx>(
     builder.position_at_end(ret);
     builder.insert_instruction(&terminator, None);
     builder.position_at_end(check);
-    let v315 = frames_v315(context, builder, &rt.frames);
-    let owner = builder
+    let tstate = builder
         .build_load(
-            i8_type,
-            layout_field(context, builder, live.frame, v315, F_OWNER),
-            "frame_owner",
+            ptr,
+            field(context, builder, live.frame, F_LINKED_TSTATE),
+            "frame_linked_tstate",
         )
         .expect("build_load should not fail")
-        .into_int_value();
+        .into_pointer_value();
     let inactive = builder
-        .build_int_compare(
-            inkwell::IntPredicate::EQ,
-            owner,
-            i8_type.const_int(OWNER_INACTIVE, false),
-            "frame_inactive",
-        )
-        .expect("build_int_compare should not fail");
+        .build_is_null(tstate, "frame_not_inline")
+        .expect("build_is_null should not fail");
     let object = builder
         .build_load(
             ptr,
@@ -338,19 +353,11 @@ pub(super) fn unlink_frame<'ctx>(
         .build_unconditional_branch(ret)
         .expect("build_unconditional_branch should not fail");
     builder.position_at_end(fast);
-    let tstate = builder
-        .build_load(
-            ptr,
-            layout_field(context, builder, live.frame, v315, F_TSTATE),
-            "frame_tstate",
-        )
-        .expect("build_load should not fail")
-        .into_pointer_value();
     let top = builder
         .build_load(
             ptr,
-            layout_field(context, builder, live.frame, v315, F_SAVED_TOP),
-            "frame_saved_top",
+            field(context, builder, live.frame, F_LINKED_TOP),
+            "frame_linked_top",
         )
         .expect("build_load should not fail");
     builder
