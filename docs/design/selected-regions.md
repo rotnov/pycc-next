@@ -666,7 +666,10 @@ test is then the index's small-`int` check, one unsigned compare with the length
 negative index, too, takes the per-test path), the byte and the bit: 14 instructions in
 the compiled loop.
 The copied words stay the set's answer whatever later happens to the cache, since a
-`frozenset` cannot change and the loop does not rebind the name.
+`frozenset` cannot change and the loop does not rebind the name. A parameter rebound only
+before the loop is prepared as it is bound at the loop; one a nested scope captures (and
+could rebind through `nonlocal`) is a cell and is not prepared (`tests/char_class_loops.rs`,
+`closure`). The `yield` guard is defensive: generators are not compiled today.
 
 Measured as 5.4 (the bytecode cache written before the counts):
 

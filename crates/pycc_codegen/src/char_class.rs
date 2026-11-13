@@ -32,7 +32,9 @@
 //! test (`foreign_compare::emit_contains`).
 //!
 //! A `while` loop whose test is such a membership test, of a `str` and a
-//! set that are parameters the loop never rebinds, checks both once
+//! set that are parameters the loop never rebinds (a parameter rebound
+//! before the loop is read as it is bound then; one a nested scope
+//! captures is a cell, not a slot, and is never prepared), checks both once
 //! before the loop ([`prepare_loop`]): an exact compact ASCII `s` and an
 //! exact usable `frozenset`, whose mask's two words it copies. Each test
 //! then reads the byte and its bit, with no type, state or cache check;
@@ -123,7 +125,8 @@ fn parameter<'e, 'ctx>(
 /// Before the `while` loop `test`/`body`, emitted at the current position
 /// (the loop's preheader): when `test` is `s[i] in c` (or `not in`) that
 /// [`emit`] takes, with `s` and `c` parameters that `body` only reads, and
-/// the loop cannot suspend (a generator's `yield`), reads `s`'s and `c`'s
+/// the loop cannot suspend (a generator's `yield`; a defensive guard, since
+/// generators are not compiled today), reads `s`'s and `c`'s
 /// facts once ([`Prepared`]) for the test to use. Returns whether it did;
 /// the caller then calls [`finish_loop`] after the loop's body.
 #[allow(clippy::too_many_arguments)]

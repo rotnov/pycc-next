@@ -14,7 +14,7 @@
 use pycc_scratch::ScratchDir;
 use std::process::{Command, Output};
 
-const SELECTED: [&str; 8] = ["skip", "until", "churn", "rebound", "grown", "local", "scan", "run"];
+const SELECTED: [&str; 9] = ["skip", "until", "churn", "rebound", "grown", "local", "closure", "scan", "run"];
 
 fn python() -> Command {
     Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
@@ -77,6 +77,14 @@ fn character_class_loops_are_prepared_once_and_match_cpython() {
             let body = function(&ir, prefix, name);
             assert!(body.contains("char_class_loop_slow"), "{prefix} {name}: {body}");
             assert!(body.contains("char_class_prepared_slow"), "{prefix} {name}: {body}");
+        }
+        // The lift always exists; a copy only if `closure` joins a region.
+        let has_closure = ir.lines().any(|l| l.starts_with("define ") && l.contains(prefix) && l.contains("_closure__("));
+        assert!(has_closure || prefix == "pyfn___pycc_rnative_lift", "{prefix}: no closure");
+        if has_closure {
+            // A set a nested scope can rebind (`nonlocal`) is a cell: never prepared.
+            let closure = function(&ir, prefix, "closure");
+            assert!(!closure.contains("char_class_loop"), "{prefix}: {closure}");
         }
         let rebound = function(&ir, prefix, "rebound");
         assert!(!rebound.contains("char_class_loop"), "{prefix}: {rebound}");

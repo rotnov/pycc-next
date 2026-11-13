@@ -96,9 +96,25 @@ def local(s: str, pos: int) -> int:
     return pos
 
 
+def closure(s: str, pos: int, chars) -> int:
+    # A nested scope rebinds the set through `nonlocal` while the loop
+    # runs: `chars` is a cell, and the loop is not prepared.
+    def swap():
+        nonlocal chars
+        chars = KEY if chars is WS else WS
+
+    try:
+        while s[pos] in chars:
+            pos += 1
+            swap()
+    except IndexError:
+        pass
+    return pos
+
+
 def spans(s, pos, chars):
-    # A generator: the loop that yields tests each character as it comes;
-    # the one that does not runs between two suspensions.
+    # A generator, run by CPython (generators are not compiled): the
+    # compiler's `yield` guard on prepared loops is defensive.
     try:
         while s[pos] in chars:
             yield pos
@@ -141,6 +157,7 @@ def scan(s: str, pos: int) -> list:
     out.append(rebound(s, pos, WS))
     out.append(grown(s, pos, growing))
     out.append(local(s, pos))
+    out.append(closure(s, pos, WS))
     return out
 
 
