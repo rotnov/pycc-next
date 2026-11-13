@@ -3,7 +3,8 @@
 # dispatches through a local bound to `esc_a` or `esc_b` (B2), `word`
 # takes its position from a match of the pattern global `WORD` (B3), and
 # `word` and `esc_b` are not selected: they join as position-flow callees.
-# `tails` reads `pos` from a lambda, so its `pos` stays an object.
+# `tails` reads `pos` from a lambda, so its `pos` stays an object; `size`
+# calls a parameter named `len`.
 import re
 
 WORD = re.compile(r"[a-z]+")
@@ -95,3 +96,16 @@ def tails(s: str) -> list:
     get = lambda: s[pos:]
     pos += 1
     return [n, w, get()]
+
+
+# `len` is a parameter here, not the builtin: `size` proves nothing.
+def size(s: str, len) -> int:
+    return len(s)
+
+
+def one(t):
+    return 1
+
+
+def sizes(s: str) -> int:
+    return size(s, len) + size(s, one)

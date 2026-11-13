@@ -25,7 +25,12 @@
  * the first registers them and keeps the table of watched keys in a capsule
  * in the interpreter's dict, where the others find it (as `global_sync.c`
  * shares its dict watcher). When no watcher can be had, no region is armed
- * and every member runs its generic body.
+ * and every member runs its generic body; the capsule then records the
+ * failure, so later artifacts do not register (and leak) watchers again.
+ *
+ * The callbacks run inside whatever CPython was doing, possibly with an
+ * exception set: each saves it first and restores it last, so the lookups
+ * that may clear an error of their own leave the caller's alone.
  */
 
 /* CPython's watcher APIs (non-limited, 3.12+), found at run time as in
@@ -42,6 +47,7 @@ typedef int (*pycc_region_func_cb_t)(int event, PyObject *func, PyObject *value)
 #define PYCC_REGION_FUNC_MODIFY_KWDEFAULTS 4
 #ifndef _WIN32
 extern int PyFunction_AddWatcher(pycc_region_func_cb_t callback) __attribute__((weak));
+extern int PyDict_ClearWatcher(int watcher_id) __attribute__((weak));
 #endif
 
 /* A region's flag: clear (never armed, or no longer intact), intact, or
@@ -64,6 +70,8 @@ typedef struct PyccRegionWatchEntry {
 } PyccRegionWatchEntry;
 
 typedef struct PyccRegionWatch {
+    /* Set when the watchers could not be registered: no region is armed. */
+    int failed;
     int dict_id;
     int (*watch)(int watcher_id, PyObject *dict);
     size_t capacity;
@@ -71,7 +79,7 @@ typedef struct PyccRegionWatch {
     PyccRegionWatchEntry *entries;
 } PyccRegionWatch;
 
-#define PYCC_REGION_WATCH_CAPSULE "pycc.region_watch.2"
+#define PYCC_REGION_WATCH_CAPSULE "pycc.region_watch.3"
 
 static PyccRegionWatch *pycc_region_watch = NULL;
 
@@ -87,10 +95,11 @@ static int pycc_region_same_key(PyObject *a, PyObject *b)
         return 1;
     }
     if (!PyUnicode_Check(b) || PyUnicode_GetLength(a) != PyUnicode_GetLength(b)) {
-        PyErr_Clear();
         return 0;
     }
     same = PyUnicode_Compare(a, b) == 0;
+    /* Two `str`s compare without failing; the caller saved any pending
+     * exception, so this clears nothing of anyone else's. */
     PyErr_Clear();
     return same;
 }
@@ -146,10 +155,12 @@ static void pycc_region_watch_event(PyccRegionWatch *w, PyObject *obj, PyObject 
 static int pycc_region_dict_event(int event, PyObject *dict, PyObject *key, PyObject *value)
 {
     PyccRegionWatch *w = pycc_region_watch;
+    PyObject *saved;
 
-    if (w == NULL) {
+    if (w == NULL || w->failed) {
         return 0;
     }
+    saved = PyErr_GetRaisedException();
     if (event == PYCC_REGION_DICT_ADDED || event == PYCC_REGION_DICT_MODIFIED) {
         pycc_region_watch_event(w, dict, key, value, 1, 0);
     } else if (event == PYCC_REGION_DICT_DELETED) {
@@ -158,36 +169,54 @@ static int pycc_region_dict_event(int event, PyObject *dict, PyObject *key, PyOb
         /* Cloned into, cleared or freed: every key of the dict. */
         pycc_region_watch_event(w, dict, NULL, NULL, 1, 1);
     }
+    PyErr_SetRaisedException(saved);
     return 0;
 }
 
 static int pycc_region_func_event(int event, PyObject *func, PyObject *value)
 {
     PyccRegionWatch *w = pycc_region_watch;
+    PyObject *saved;
 
     (void)value;
-    if (event == PYCC_REGION_FUNC_CREATE || w == NULL) {
+    if (event == PYCC_REGION_FUNC_CREATE || w == NULL || w->failed) {
         return 0;
     }
     if (event == PYCC_REGION_FUNC_DESTROY || event == PYCC_REGION_FUNC_MODIFY_CODE ||
         event == PYCC_REGION_FUNC_MODIFY_DEFAULTS || event == PYCC_REGION_FUNC_MODIFY_KWDEFAULTS) {
+        saved = PyErr_GetRaisedException();
         pycc_region_watch_event(w, func, NULL, NULL, 0, event == PYCC_REGION_FUNC_DESTROY);
+        PyErr_SetRaisedException(saved);
     }
     return 0;
 }
 
+/* Stores `w` in the interpreter's dict `idict` for the other artifacts. */
+static void pycc_region_watch_share(PyObject *idict, PyccRegionWatch *w)
+{
+    PyObject *capsule = PyCapsule_New(w, PYCC_REGION_WATCH_CAPSULE, NULL);
+
+    if (capsule == NULL || PyDict_SetItemString(idict, PYCC_REGION_WATCH_CAPSULE, capsule) != 0) {
+        /* This artifact keeps its table; another registers its own. */
+        PyErr_Clear();
+    }
+    Py_XDECREF(capsule);
+}
+
 /* The interpreter's shared watchers: found in its dict, or registered and
- * stored there. NULL (no exception set) when they cannot be had. */
+ * stored there. NULL (no exception set) when they cannot be had, or could
+ * not be had by an earlier artifact (the shared table is marked failed). */
 static PyccRegionWatch *pycc_region_watch_get(void)
 {
     PyObject *idict, *capsule;
     int (*add_dict)(pycc_region_dict_cb_t) = NULL;
     int (*watch)(int, PyObject *) = NULL;
     int (*add_func)(pycc_region_func_cb_t) = NULL;
+    int (*clear_dict)(int) = NULL;
     PyccRegionWatch *w;
 
     if (pycc_region_watch != NULL) {
-        return pycc_region_watch;
+        return pycc_region_watch->failed ? NULL : pycc_region_watch;
     }
     if ((Py_Version >> 16) < 0x030C) {
         return NULL;
@@ -201,7 +230,7 @@ static PyccRegionWatch *pycc_region_watch_get(void)
     if (capsule != NULL) {
         pycc_region_watch = (PyccRegionWatch *)PyCapsule_GetPointer(capsule, PYCC_REGION_WATCH_CAPSULE);
         PyErr_Clear();
-        return pycc_region_watch;
+        return pycc_region_watch == NULL || pycc_region_watch->failed ? NULL : pycc_region_watch;
     }
 #ifdef _WIN32
     {
@@ -213,14 +242,16 @@ static PyccRegionWatch *pycc_region_watch_get(void)
             add_dict = (int (*)(pycc_region_dict_cb_t))GetProcAddress(dll, "PyDict_AddWatcher");
             watch = (int (*)(int, PyObject *))GetProcAddress(dll, "PyDict_Watch");
             add_func = (int (*)(pycc_region_func_cb_t))GetProcAddress(dll, "PyFunction_AddWatcher");
+            clear_dict = (int (*)(int))GetProcAddress(dll, "PyDict_ClearWatcher");
         }
     }
 #else
     add_dict = PyDict_AddWatcher;
     watch = PyDict_Watch;
     add_func = PyFunction_AddWatcher;
+    clear_dict = PyDict_ClearWatcher;
 #endif
-    if (add_dict == NULL || watch == NULL || add_func == NULL) {
+    if (add_dict == NULL || watch == NULL || add_func == NULL || clear_dict == NULL) {
         return NULL;
     }
     w = (PyccRegionWatch *)PyMem_RawCalloc(1, sizeof *w);
@@ -230,19 +261,17 @@ static PyccRegionWatch *pycc_region_watch_get(void)
     w->watch = watch;
     w->dict_id = add_dict(pycc_region_dict_event);
     if (w->dict_id < 0 || add_func(pycc_region_func_event) < 0) {
-        /* A registered dict watcher stays: its callback finds no table. */
+        /* Gives the dict watcher back, and marks the table failed so later
+         * artifacts neither retry nor exhaust the interpreter's ids. */
         PyErr_Clear();
-        PyMem_RawFree(w);
-        return NULL;
+        if (w->dict_id >= 0 && clear_dict(w->dict_id) != 0) {
+            PyErr_Clear();
+        }
+        w->failed = 1;
     }
     pycc_region_watch = w;
-    capsule = PyCapsule_New(w, PYCC_REGION_WATCH_CAPSULE, NULL);
-    if (capsule == NULL || PyDict_SetItemString(idict, PYCC_REGION_WATCH_CAPSULE, capsule) != 0) {
-        /* This artifact keeps its watchers; another registers its own. */
-        PyErr_Clear();
-    }
-    Py_XDECREF(capsule);
-    return w;
+    pycc_region_watch_share(idict, w);
+    return w->failed ? NULL : w;
 }
 
 /* Adds one entry; 0, or -1 (no exception set) when out of memory. The key,

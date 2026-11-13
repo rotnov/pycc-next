@@ -29,11 +29,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   (-8.2%), `.text` 598K -> 1,059K; pypng's `read()` (method regions only) unchanged at
   143.01M; pydantic's workload unchanged within noise (its regions get no copies). Two
   new DEVIATIONS rows: an `int` passed between copies and returned unchanged is a new
-  object, and a member rebound while a region call runs can raise `TypeError` for the
-  rest of that call.
+  object, and a member rebound (or a pattern global replaced) while a region call runs
+  can raise `TypeError` for the rest of that call (`skip() returned str, the compiled
+  caller needs int`).
 
 ### Fixed
 
+- An exception escaping an observed-type or region copy no longer shows an extra
+  traceback frame at the function's `def` line (the entry guard's call of its copy
+  records no frame), and an observed-type copy's frame is named as the function, not
+  `_pycc_native_...`.
 - A profile-selected function's compiled body is specialized for a parameter's exact type
   when that type covers at least 95% of the calls pass 2 sampled, not only when it covers
   all of them (`profile::DOMINANT_PERCENT`, `docs/design/compile-little.md` section 2.5).

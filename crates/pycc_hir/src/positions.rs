@@ -37,6 +37,26 @@ pub struct SrcPos {
 }
 
 impl SrcPos {
+    /// The marker of a statement that records no traceback entry (line 0,
+    /// which no source line has): an entry guard's tail call into a native
+    /// copy (`pycc_ast::is_copy_tail_call`), whose own frame stands for the
+    /// function. Codegen clears the current position on it.
+    pub const NO_RECORD: Self = Self {
+        file: u32::MAX,
+        line: 0,
+        end_line: 0,
+        col: u32::MAX,
+        end_col: u32::MAX,
+        sites: u32::MAX,
+    };
+
+    /// Whether this marker records traceback entries (it is not
+    /// [`Self::NO_RECORD`]).
+    #[must_use]
+    pub fn records(self) -> bool {
+        self.line != 0
+    }
+
     /// `self` as a plain location, without its sites.
     #[must_use]
     pub fn location(self) -> Self {
@@ -261,6 +281,9 @@ fn register_sites(exprs: &[&pycc_ast::Expr]) -> u32 {
 pub(crate) fn stmt_position(stmt: &pycc_ast::Stmt) -> Option<SrcPos> {
     use pycc_ast::Stmt;
     let pos = stmt_location(stmt)?;
+    if pycc_ast::is_copy_tail_call(stmt) {
+        return Some(SrcPos::NO_RECORD);
+    }
     let own: Vec<&pycc_ast::Expr> = match stmt {
         Stmt::Expr(s) => vec![&s.value],
         Stmt::Return(s) => s.value.iter().map(AsRef::as_ref).collect(),

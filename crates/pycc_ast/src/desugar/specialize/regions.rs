@@ -93,6 +93,14 @@ pub(crate) struct Member<'a> {
     pub(crate) captured: BTreeSet<String>,
 }
 
+impl Member<'_> {
+    /// Whether `name` is a parameter or a local of the member, so that a
+    /// bare `name` in its body is not the builtin of that name.
+    pub(crate) fn binds(&self, name: &str) -> bool {
+        self.locals.contains(name) || self.params.iter().any(|p| p == name)
+    }
+}
+
 /// How a region call names its callee.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Edge {

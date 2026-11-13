@@ -249,10 +249,18 @@ const NATIVE_TWIN: &str = "0gen_multi_";
 pub(crate) fn frame_names(mangled: &str) -> (String, String) {
     // A native multi-value twin (`pycc_mir::multi_return::twin_name`) is
     // the function it twins, and a region's native copy
-    // (`__pycc_rnative_liftN_<name>__`, `pycc_ast::specialize_regions`) is
-    // the lifted body it copies.
+    // (`__pycc_rnative_liftN_<name>__`, `pycc_ast::specialize_regions`) and
+    // an observed-type copy (`_pycc_native_<name>`) are the lifted body
+    // they copy.
     let mangled = mangled.strip_prefix(NATIVE_TWIN).unwrap_or(mangled);
     let mangled = mangled.replacen(REGION_COPY_LIFT, "__pycc_lift", 1);
+    // An observed-type copy (`pycc_ast::specialize_observed`) is the
+    // function or method it specializes.
+    let native_method = format!(".{}", pycc_mir::NATIVE_PREFIX);
+    let mangled = mangled
+        .strip_prefix(pycc_mir::NATIVE_PREFIX)
+        .unwrap_or(&mangled)
+        .replacen(&native_method, ".", 1);
     let mut qualname = source_qualname(&pycc_hir::function_qualname(&mangled));
     if let Some(lifted) = lifted_method(&qualname) {
         qualname = lifted;
@@ -420,6 +428,12 @@ pub(crate) fn set_position<'ctx>(
     let Some(frame) = current.as_mut() else {
         return;
     };
+    if !pos.records() {
+        frame.statement = None;
+        frame.counters.clear();
+        frame.current = None;
+        return;
+    }
     if frame.file.is_none() {
         frame.file = Some(pos.file);
         frame.firstlineno = pos.line;

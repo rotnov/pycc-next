@@ -28,6 +28,9 @@ struct CallRewrite {
     local: Option<String>,
     /// The conversion the generic arm takes (`__pycc_rconv_<shape>`).
     conv: Option<String>,
+    /// The callee as the source spells it (the global, or the dispatch's
+    /// local), for the conversion's `TypeError`.
+    callee: String,
     /// For a callee returning a tuple with `int` items: which items are
     /// `int`s, for an unpack of the call (`split_sites`).
     ints: Option<Vec<bool>>,
@@ -91,7 +94,7 @@ pub(crate) fn plan(
         let cycle = cyclic(region);
         let mut patterns: BTreeSet<String> = BTreeSet::new();
         for &m in region {
-            patterns.extend(pattern_matches(&members[m].def.body, edges));
+            patterns.extend(super::prove::proven_patterns(m, members, edges, sigs));
             let mut calls = BTreeMap::new();
             for (site, edge) in edges.sites.get(&m).map(Vec::as_slice).unwrap_or_default() {
                 if !edges.binds(site, edge) {
@@ -117,6 +120,7 @@ pub(crate) fn plan(
                     (Edge::Dispatch(_), Expr::Name(n)) => Some(n.id.to_string()),
                     _ => None,
                 };
+                let callee = local.clone().unwrap_or_else(|| members[callees[0]].function.global.clone());
                 calls.insert(
                     key(site.range),
                     CallRewrite {
@@ -132,6 +136,7 @@ pub(crate) fn plan(
                             .collect(),
                         local,
                         conv,
+                        callee,
                         ints,
                     },
                 );
@@ -155,33 +160,6 @@ pub(crate) fn plan(
         ));
     }
     Plan { copies, regions: planned, convs }
-}
-
-/// The watched pattern globals `body` calls `match`, `search` or
-/// `fullmatch` of.
-fn pattern_matches(body: &[Stmt], edges: &Edges<'_>) -> BTreeSet<String> {
-    use ruff_python_ast::visitor::{self, Visitor};
-    struct Finder<'e, 'a> {
-        edges: &'e Edges<'a>,
-        found: BTreeSet<String>,
-    }
-    impl<'b> Visitor<'b> for Finder<'_, '_> {
-        fn visit_expr(&mut self, expr: &'b Expr) {
-            if let Expr::Call(c) = expr
-                && let Expr::Attribute(attr) = c.func.as_ref()
-                && matches!(attr.attr.as_str(), "match" | "search" | "fullmatch")
-                && let Some(p) = self.edges.pattern(&attr.value)
-            {
-                self.found.insert(p.to_string());
-            }
-            visitor::walk_expr(self, expr);
-        }
-    }
-    let mut finder = Finder { edges, found: BTreeSet::new() };
-    for stmt in body {
-        finder.visit_stmt(stmt);
-    }
-    finder.found
 }
 
 /// Where the names a region call's rewrite adds start: the call's closing
@@ -280,10 +258,7 @@ impl Transformer for Calls<'_> {
         let range = site.range;
         let mut chosen = Expr::Call(site.clone());
         if let Some(conv) = &rewrite.conv {
-            chosen = call_name(&format!("__pycc_rconv_{conv}"), vec![chosen], added(site));
-            if let Expr::Call(c) = &mut chosen {
-                c.range = range;
-            }
+            chosen = converted(conv, chosen, &rewrite.callee, site);
         }
         for target in rewrite.targets.iter().rev() {
             chosen = Expr::If(ExprIf {
@@ -417,15 +392,11 @@ fn split_sites(
         let generic: Vec<Stmt> = match usage {
             Use::Unpack => {
                 let ints = rewrite.ints.as_ref().expect("checked above");
-                generic_unpack(with_value(Expr::Call(site.clone())), ints, temps)
+                generic_unpack(with_value(Expr::Call(site.clone())), ints, &rewrite.callee, temps)
             }
             Use::Return => {
                 let conv = rewrite.conv.as_ref().expect("checked above");
-                let mut converted = call_name(&format!("__pycc_rconv_{conv}"), vec![Expr::Call(site.clone())], added(&site));
-                if let Expr::Call(c) = &mut converted {
-                    c.range = site.range;
-                }
-                vec![with_value(converted)]
+                vec![with_value(converted(conv, Expr::Call(site.clone()), &rewrite.callee, &site))]
             }
         };
         let mut chosen: Vec<Stmt> = generic;
@@ -471,12 +442,25 @@ fn split_sites(
     }
 }
 
-/// The generic arm of an unpack `assign` (`a, b = f(...)`): each `int`
-/// item (`ints`) is unpacked into a temporary and then converted. The
-/// target keeps the element's range; the temporary starts where the
-/// element ends (a comma, a parenthesis, a space or `=`, where no name
-/// starts), and the conversion's name where the statement ends.
-fn generic_unpack(mut assign: Stmt, ints: &[bool], temps: &mut usize) -> Vec<Stmt> {
+/// `value`, the generic arm's call of `site`, converted by
+/// `__pycc_rconv_<conv>`, which names `callee` in its `TypeError`.
+fn converted(conv: &str, value: Expr, callee: &str, site: &ExprCall) -> Expr {
+    let at = added(site);
+    let what = super::super::super::build::string(&format!("{callee}() returned "), at);
+    let mut converted = call_name(&format!("__pycc_rconv_{conv}"), vec![value, what], at);
+    if let Expr::Call(c) = &mut converted {
+        c.range = site.range;
+    }
+    converted
+}
+
+/// The generic arm of an unpack `assign` (`a, b = f(...)`, `f` spelled
+/// `callee`): each `int` item (`ints`) is unpacked into a temporary and
+/// then converted. The target keeps the element's range; the temporary
+/// starts where the element ends (a comma, a parenthesis, a space or `=`,
+/// where no name starts), and the conversion's name where the statement
+/// ends.
+fn generic_unpack(mut assign: Stmt, ints: &[bool], callee: &str, temps: &mut usize) -> Vec<Stmt> {
     let Stmt::Assign(a) = &mut assign else {
         unreachable!("an unpacking assignment")
     };
@@ -490,14 +474,17 @@ fn generic_unpack(mut assign: Stmt, ints: &[bool], temps: &mut usize) -> Vec<Stm
             let temp = format!("__pycc_ru{temps}");
             *temps += 1;
             let Expr::Name(name) = elt else { unreachable!("checked by split_sites") };
-            converts.push((name.id.to_string(), name.range, temp.clone()));
+            converts.push((name.id.to_string(), name.range, temp.clone(), i));
             name.id = temp.into();
             name.range = TextRange::empty(name.range.end());
         }
     }
     let mut out = vec![assign];
-    for (name, at, temp) in converts {
-        let mut assign = parse_helper(&format!("{name} = __pycc_rconv_i({temp})\n"), range);
+    for (name, at, temp, item) in converts {
+        let mut assign = parse_helper(
+            &format!("{name} = __pycc_rconv_i({temp}, '{callee}() returned a tuple whose item {item} is ')\n"),
+            range,
+        );
         if let Some(Stmt::Assign(a)) = assign.first_mut() {
             if let [Expr::Name(target)] = a.targets.as_mut_slice() {
                 target.range = at;
@@ -508,6 +495,9 @@ fn generic_unpack(mut assign: Stmt, ints: &[bool], temps: &mut usize) -> Vec<Stm
                 }
                 if let Some(Expr::Name(arg)) = c.arguments.args.first_mut() {
                     arg.range = TextRange::empty(at.end());
+                }
+                if let Some(text) = c.arguments.args.get_mut(1) {
+                    ruff_python_ast::relocate::relocate_expr(text, TextRange::empty(range.end()));
                 }
             }
         }
@@ -561,7 +551,8 @@ fn guard(lift: &mut StmtFunctionDef, copy: &Copy) {
     }
     let args: Vec<&str> = copy.params.iter().map(|(n, _)| n.as_str()).collect();
     let source = format!("if {}:\n    return {}({})\n", tests.join(" and "), copy.name, args.join(", "));
-    let guard = parse_helper(&source, lift.name.range());
+    let mut guard = parse_helper(&source, lift.name.range());
+    super::super::mark_tail_call(&mut guard);
     let at = usize::from(matches!(lift.body.first(), Some(Stmt::Expr(e)) if e.value.is_string_literal_expr()));
     for (offset, stmt) in guard.into_iter().enumerate() {
         lift.body.insert(at + offset, stmt);
@@ -569,18 +560,43 @@ fn guard(lift: &mut StmtFunctionDef, copy: &Copy) {
 }
 
 /// The conversion of the generic arm of a region call whose callee's copy
-/// returns `shape` (`i` an `int`, `o` an object, per item of a tuple).
+/// returns `shape` (`i` an `int`, `o` an object, per item of a tuple). Its
+/// second argument says what returned the value (`skip() returned `); a
+/// value of another type raises `TypeError` naming it (`skip() returned
+/// str, the compiled caller needs int`, docs/design/selected-regions.md
+/// section 4.4). An `int` (or `tuple`) subclass is converted to the plain
+/// type.
 fn conversion(shape: &str) -> String {
+    let b = super::super::BUILTINS;
+    let fail = |needs: &str| {
+        format!("    raise {b}.TypeError(what + {b}.type(x).__name__ + ', the compiled caller needs {needs}')\n")
+    };
     if shape == "i" {
-        return "def __pycc_rconv_i(x: int) -> int:\n    return x\n".to_string();
+        return format!(
+            "def __pycc_rconv_i(x: object, what: str) -> int:\n    if {b}.isinstance(x, {b}.int):\n        return x\n{}",
+            fail("int")
+        );
     }
     let names: Vec<String> = (0..shape.len()).map(|i| format!("a{i}")).collect();
     let types: Vec<&str> = shape.chars().map(|c| if c == 'i' { "int" } else { "object" }).collect();
+    let items: Vec<String> = shape
+        .chars()
+        .enumerate()
+        .map(|(i, c)| {
+            if c == 'i' {
+                format!("__pycc_rconv_i(a{i}, what + 'a tuple whose item {i} is ')")
+            } else {
+                format!("a{i}")
+            }
+        })
+        .collect();
+    let tuple = format!("tuple[{}]", types.join(", "));
     format!(
-        "def __pycc_rconv_{shape}(x: object) -> tuple[{}]:\n    {} = x\n    return {}\n",
-        types.join(", "),
+        "def __pycc_rconv_{shape}(x: object, what: str) -> {tuple}:\n    if {b}.isinstance(x, {b}.tuple) and {b}.len(x) == {n}:\n        {} = x\n        return {}\n{}",
         names.join(", "),
-        names.join(", ")
+        items.join(", "),
+        fail(&tuple),
+        n = shape.len(),
     )
 }
 

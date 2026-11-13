@@ -28,6 +28,7 @@
 use super::{Edge, Member};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{Expr, Number, Operator, Stmt, UnaryOp};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The kind of a copy's parameter.
@@ -58,8 +59,9 @@ pub(crate) enum Ty {
     Bot,
     Int,
     Str,
-    /// The result of a watched pattern's `match`, `search` or `fullmatch`.
-    Match,
+    /// The result of `match`, `search` or `fullmatch` of one of these
+    /// pattern globals.
+    Match(BTreeSet<String>),
     Obj,
     Tuple(Vec<Ty>),
 }
@@ -71,6 +73,7 @@ impl Ty {
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
                 Ty::Tuple(a.iter().zip(b).map(|(x, y)| x.join(y)).collect())
             }
+            (Ty::Match(a), Ty::Match(b)) => Ty::Match(a.union(b).cloned().collect()),
             (a, b) if a == b => a.clone(),
             _ => Ty::Obj,
         }
@@ -144,6 +147,9 @@ struct Found {
     passed: Vec<(usize, Vec<Ty>)>,
     /// Whether a local is a native `int`.
     native_local: bool,
+    /// The pattern globals whose matches' `start()` or `end()` it takes as
+    /// proven `int`s (B3): the ones the region must watch.
+    patterns: BTreeSet<String>,
 }
 
 /// The methods of an exact `str` whose result is an `int` whenever they
@@ -231,6 +237,12 @@ pub(crate) fn prove(members: &[Member<'_>], edges: &super::Edges<'_>) -> Option<
     None
 }
 
+/// The pattern globals member `at`'s copy relies on (B3): those whose
+/// matches' `start()` or `end()` it takes as proven `int`s with `sigs`.
+pub(crate) fn proven_patterns(at: usize, members: &[Member<'_>], edges: &super::Edges<'_>, sigs: &[Sig]) -> BTreeSet<String> {
+    analyze(at, members, edges, sigs).patterns
+}
+
 /// Whether member `at`'s body gives its copy anything native: a native
 /// parameter, result or local.
 pub(crate) fn useful(at: usize, members: &[Member<'_>], edges: &super::Edges<'_>, sigs: &[Sig]) -> bool {
@@ -241,7 +253,7 @@ pub(crate) fn useful(at: usize, members: &[Member<'_>], edges: &super::Edges<'_>
 }
 
 /// Whether `param` is used as an exact `str` would be: the receiver of a
-/// `str` method B1 types, or subscripted.
+/// `str` method B1 types.
 fn demands_str(body: &[Stmt], param: &str) -> bool {
     struct Demand<'p> {
         param: &'p str,
@@ -308,8 +320,9 @@ fn analyze(at: usize, members: &[Member<'_>], edges: &super::Edges<'_>, sigs: &[
         );
     }
     let captured = &member.captured;
+    let patterns = RefCell::new(BTreeSet::new());
     let env_ty = |types: &BTreeMap<&str, Ty>, e: &Expr| {
-        let env = Env { at, members, edges, sigs, types };
+        let env = Env { at, members, edges, sigs, types, patterns: &patterns };
         env.ty(e)
     };
     for _ in 0..32 {
@@ -360,7 +373,19 @@ fn analyze(at: usize, members: &[Member<'_>], edges: &super::Edges<'_>, sigs: &[
             demoted.insert(i);
         }
     }
-    let env = Env { at, members, edges, sigs, types: &types };
+    // What the last round proved is what the copy relies on.
+    patterns.borrow_mut().clear();
+    for (name, binding) in &bindings {
+        if !captured.contains(*name) {
+            match binding {
+                Binding::Value(e) | Binding::Item(e, ..) | Binding::Aug(_, _, e) => {
+                    env_ty(&types, e);
+                }
+                Binding::Opaque => {}
+            }
+        }
+    }
+    let env = Env { at, members, edges, sigs, types: &types, patterns: &patterns };
     let mut result = if super::terminates(&member.def.body) { Ty::Bot } else { Ty::Obj };
     for r in &returns {
         let t = match r {
@@ -385,7 +410,7 @@ fn analyze(at: usize, members: &[Member<'_>], edges: &super::Edges<'_>, sigs: &[
     let native_local = types
         .iter()
         .any(|(name, t)| *t == Ty::Int && !member.params.iter().any(|p| p == name));
-    Found { demoted, result, passed, native_local }
+    Found { demoted, result, passed, native_local, patterns: patterns.into_inner() }
 }
 
 /// `left op right` of two types.
@@ -558,6 +583,9 @@ struct Env<'e, 'a> {
     edges: &'e super::Edges<'a>,
     sigs: &'e [Sig],
     types: &'e BTreeMap<&'a str, Ty>,
+    /// Where [`Env::call`] records the pattern globals behind each match
+    /// whose `start()` or `end()` it types `int`.
+    patterns: &'e RefCell<BTreeSet<String>>,
 }
 
 impl Env<'_, '_> {
@@ -616,7 +644,7 @@ impl Env<'_, '_> {
         match call.func.as_ref() {
             Expr::Name(n)
                 if n.id.as_str() == "len"
-                    && !member.locals.contains("len")
+                    && !member.binds("len")
                     && args.args.len() == 1
                     && args.keywords.is_empty()
                     && !matches!(args.args[0], Expr::Starred(_)) =>
@@ -640,13 +668,14 @@ impl Env<'_, '_> {
                     {
                         Ty::Bot
                     }
-                    Ty::Match if matches!(method, "start" | "end") && args.args.is_empty() && args.keywords.is_empty() => {
+                    Ty::Match(from)
+                        if matches!(method, "start" | "end") && args.args.is_empty() && args.keywords.is_empty() =>
+                    {
+                        self.patterns.borrow_mut().extend(from);
                         Ty::Int
                     }
-                    _ if MATCH_METHODS.contains(&method)
-                        && self.edges.pattern(&attr.value).is_some() =>
-                    {
-                        Ty::Match
+                    _ if MATCH_METHODS.contains(&method) && self.edges.pattern(&attr.value).is_some() => {
+                        Ty::Match(self.edges.pattern(&attr.value).into_iter().map(str::to_string).collect())
                     }
                     _ => Ty::Obj,
                 }

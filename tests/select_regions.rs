@@ -4,8 +4,8 @@
 //! fall back to the generic bodies once anything they rely on changes -- a
 //! member global rebound, a member's `__code__` or `__defaults__` replaced,
 //! a dispatch target rebound, the pattern global replaced. Every path must
-//! behave as CPython: the same output and the same exceptions, including
-//! `RecursionError` on a cycle of copies.
+//! behave as CPython: the same output and the same exceptions, with the
+//! same traceback frames, and `RecursionError` on a deep cycle of copies.
 
 use pycc_scratch::ScratchDir;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,9 @@ const CALLS: &str = include_str!("fixtures/select_regions_calls.py");
 
 /// The selected functions: `word` and `esc_b` are left out, and join the
 /// region as its position-flow callees.
-const SELECTED: [&str; 8] = ["skip", "number", "value", "items", "parse", "escapes", "esc_a", "tails"];
+const SELECTED: [&str; 10] = [
+    "skip", "number", "value", "items", "parse", "escapes", "esc_a", "tails", "size", "sizes",
+];
 
 fn python() -> std::ffi::OsString {
     std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into())
@@ -74,7 +76,18 @@ fn region_copies_behave_as_cpython_until_and_after_what_they_rely_on_changes() {
         assert!(report.contains(&format!("specialized: `region {name}` runs natively")), "{name}: {report}");
     }
     assert!(!report.contains("not specialized"), "{report}");
-    for scenario in ["plain", "rebind", "code", "defaults", "dispatch", "pattern", "deep", "midrun-int"] {
+    for scenario in [
+        "plain",
+        "rebind",
+        "code",
+        "defaults",
+        "dispatch",
+        "pattern",
+        "deep",
+        "midrun-int",
+        "midrun-pattern-int",
+        "traceback",
+    ] {
         let expected = run(&scratch, &plain, scenario);
         assert_eq!(run(&scratch, &built, scenario), expected, "{scenario}");
     }
@@ -85,8 +98,21 @@ fn region_copies_behave_as_cpython_until_and_after_what_they_rely_on_changes() {
     assert_eq!(expected, "midrun ['ab', 'cd', 12]\nafter ['ab', 'cd', 12]\n");
     assert_eq!(
         run(&scratch, &built, "midrun-index"),
-        "midrun TypeError __pycc_rconv_i() argument 1 must be int, not Index\nafter ['ab', 'cd', 12]\n"
+        "midrun TypeError skip() returned Index, the compiled caller needs int\nafter ['ab', 'cd', 12]\n"
     );
+    // The same for the pattern global replaced while a call runs: the
+    // caller of the member whose result came from the new pattern raises.
+    let expected = run(&scratch, &plain, "midrun-pattern-index");
+    assert_eq!(expected, "midrun ['custom', 'custom', 12]\nafter ['custom', 'custom', 12]\n");
+    assert_eq!(
+        run(&scratch, &built, "midrun-pattern-index"),
+        "midrun TypeError value() returned a tuple whose item 0 is Index, the compiled caller needs int\n\
+         after ['custom', 'custom', 12]\n"
+    );
+    // docs/DEVIATIONS.md: a position a copy hands back unchanged is a new
+    // `int` object outside the small-int cache, the same one inside it.
+    assert_eq!(run(&scratch, &plain, "identity"), "identity True True True\n");
+    assert_eq!(run(&scratch, &built, "identity"), "identity True False True\n");
 }
 
 #[test]
@@ -102,6 +128,8 @@ fn the_scenarios_reach_what_they_test() {
     // `pos` is read by the lambda after `pos += 1`.
     assert!(out.contains("tails [2, 'xyz', '']\n"), "{out}");
     assert!(out.contains("skip-big 1180591620717411303424\n"), "{out}");
+    // A parameter named `len` is called, not the builtin.
+    assert!(out.contains("size 'x'\nsizes 3\n"), "{out}");
     let out = run(&scratch, &plain, "rebind");
     assert!(out.contains("parse []\n"), "{out}");
     let out = run(&scratch, &plain, "dispatch");
@@ -110,4 +138,15 @@ fn the_scenarios_reach_what_they_test() {
     assert!(out.contains("parse ['custom', [1, 'custom', [22, 'custom']], 'AAA', ['B'], 7]\n"), "{out}");
     let out = run(&scratch, &plain, "deep");
     assert!(out.contains("deep RecursionError"), "{out}");
+    // An exception escaping a region entry's copy, and one escaping
+    // through a chain of copies: one frame per Python call, none for an
+    // entry guard.
+    let out = run(&scratch, &plain, "traceback");
+    assert!(out.contains("entry IndexError [('frames', 72), ('items', 74)]\n"), "{out}");
+    assert!(
+        out.contains("chain ValueError [('frames', 72), ('parse', 88), ('value', 62), ('items', 76), ('value', 67), ('word', 29)]\n"),
+        "{out}"
+    );
+    let out = run(&scratch, &plain, "midrun-pattern-int");
+    assert!(out.contains("midrun ['custom', 'custom', 12]\n"), "{out}");
 }

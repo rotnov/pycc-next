@@ -91,7 +91,9 @@ fn collect(
     out: &mut BTreeSet<(u32, u32, u32, u32, u32)>,
 ) {
     for stmt in body {
-        if let MirStmt::Pos(p) = stmt {
+        if let MirStmt::Pos(p) = stmt
+            && p.records()
+        {
             out.insert((p.file, p.line, p.end_line, p.col, p.end_col));
             for (_, s) in sites.get(p.sites as usize).into_iter().flatten() {
                 out.insert((s.file, s.line, s.end_line, s.col, s.end_col));
