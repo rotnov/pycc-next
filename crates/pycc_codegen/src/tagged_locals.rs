@@ -211,6 +211,7 @@ fn char_load(value: &MirExpr) -> Option<(&MirExpr, &MirExpr)> {
     let base_name = matches!(base.as_ref(), MirExpr::Name { ty: Ty::Object, name } if name != crate::ext::FALLBACK_NS_NAME)
         && crate::heap_rc::is_borrowed_read(base);
     let index_simple = matches!(index.as_ref(), MirExpr::IntLiteral(_))
+        || crate::str_words::native_int_name(index)
         || (matches!(index.as_ref(), MirExpr::Name { ty: Ty::Object, .. }) && crate::heap_rc::is_borrowed_read(index));
     (base_name && index_simple).then_some((base.as_ref(), index.as_ref()))
 }
@@ -442,7 +443,8 @@ pub(crate) fn read_object<'ctx>(
 }
 
 /// The `i64` value of an `int` operand on `fast`'s path: a literal, a
-/// tagged local's word, or a compact `int` object read from a name.
+/// small native `int` local, a tagged local's word, or a compact `int`
+/// object read from a name.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn int_operand<'ctx>(
     context: &'ctx Context,
@@ -457,6 +459,15 @@ pub(crate) fn int_operand<'ctx>(
 ) -> IntValue<'ctx> {
     match operand {
         MirExpr::IntLiteral(literal) => context.i64_type().const_int(*literal as u64, true),
+        // A native `int` local's word: a small one is `v << 1 | 1`; a
+        // bool marker or a big `int` takes `fast`'s slow path. Reading a
+        // name makes no reference, so the slow path may read it again.
+        _ if crate::str_words::native_int_name(operand) => {
+            let Scalar::Int(word) = emit_expr(context, builder, module, rt, user_functions, locals, operand) else {
+                unreachable!("a native `int` name reads one word")
+            };
+            fast.small_word(word, name)
+        }
         _ => match tagged_read(rt, locals, operand) {
             Some(slot) => {
                 require_bound(context, builder, module, rt, operand, &slot);

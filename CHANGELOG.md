@@ -44,6 +44,17 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `_parser` with the 19-function selection: `.text` 1,075,175 -> 760,807 B (+27% over
   598,119 B before R2, was +80%), `loads()` 2,592,013 -> 2,543,978 instructions per call
   (-1.8%).
+- Native `int` positions in the `str` word paths (`docs/design/selected-regions.md`, R3).
+  In a region copy, `s[a:b]` whose bounds are native `int` locals, literals or their sums
+  and differences calls `pycc_ext_str_slice` directly for an exact `str`;
+  `s.startswith(t, a)` with a native `a` compares the bytes inline for compact ASCII text,
+  in place of a method call with a boxed position; and `c = s[pos]` with a native `pos`
+  makes `c` a tagged character, whose comparisons with one-character literals and
+  `frozenset` membership tests read the word. A big `int` position, a `str` subclass or
+  (for `startswith` and characters) non-ASCII text takes CPython's own operation, as before.
+  tomli's `loads()` with the 19-function selection: 2,543,791 -> 2,469,841 instructions per
+  call (-2.9%), `_parser` `.text` 760,807 -> 770,951 B; pypng's `read()` (143.01M) and
+  pydantic's workload unchanged.
 
 ### Fixed
 

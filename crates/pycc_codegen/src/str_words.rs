@@ -8,7 +8,10 @@
 //! Where the receiver is a local holding an exact `str` and every `int`
 //! operand is a small `int` -- a literal, a local holding one (tagged or a
 //! compact `int` object), or the sum or difference of two such -- these
-//! take a word path:
+//! take a word path. A region copy's position is a native `int` local
+//! instead (`docs/design/selected-regions.md` R3): its D-061 word is read
+//! as it is, and a sum or difference of native locals (`MirExpr::BinOp`)
+//! is computed from the leaves as an `object` one is.
 //!
 //! - `s[a:b]` (no step): `pycc_ext_str_slice` clamps the bounds as
 //!   `PySlice_AdjustIndices` does and returns what CPython's own slice
@@ -23,7 +26,9 @@
 //! them again on that path has no effect a program can see; an exact
 //! `str`'s `startswith` and slice cannot be overridden, and no `slice` or
 //! `int` object they would have received escapes. The sum `a + b` of two
-//! exact `int`s is the value CPython's `int.__add__` gives.
+//! exact `int`s is the value CPython's `int.__add__` gives. Reading a
+//! native `int` name makes no reference, so a big `int` word found on the
+//! word path is read again, not leaked, on CPython's.
 
 use super::*;
 use crate::fast_ops::Fast;
@@ -41,16 +46,25 @@ fn receiver(base: &MirExpr) -> bool {
     matches!(base, MirExpr::Name { ty: Ty::Object, name } if name != crate::ext::FALLBACK_NS_NAME)
 }
 
-/// An `int` literal or an `object` local.
+/// An `int` literal, an `object` local or a native `int` local.
 fn word_leaf(expr: &MirExpr) -> bool {
-    matches!(expr, MirExpr::IntLiteral(_)) || receiver(expr)
+    matches!(expr, MirExpr::IntLiteral(_)) || receiver(expr) || native_int_name(expr)
+}
+
+/// A read of a native `int` local (a region copy's `pos`,
+/// `docs/design/selected-regions.md` section 4.2): one D-061 word, which
+/// the word path reads as it is, a small one by its tag (`int_operand`).
+pub(crate) fn native_int_name(expr: &MirExpr) -> bool {
+    matches!(expr, MirExpr::Name { ty: Ty::Int, .. })
 }
 
 /// Whether `expr` is an `int` operand the word path computes: a leaf, or
-/// `leaf + leaf` / `leaf - leaf`.
+/// `leaf + leaf` / `leaf - leaf` of `object`s (`ObjBinOp`) or of native
+/// `int`s (`BinOp`).
 fn word_operand(expr: &MirExpr) -> bool {
     match expr {
-        MirExpr::ObjBinOp { op: BinOpKind::Add | BinOpKind::Sub, left, right, .. } => {
+        MirExpr::ObjBinOp { op: BinOpKind::Add | BinOpKind::Sub, left, right, .. }
+        | MirExpr::BinOp { op: BinOpKind::Add | BinOpKind::Sub, left, right, ty: Ty::Int } => {
             word_leaf(left) && word_leaf(right)
         }
         _ => word_leaf(expr),
@@ -113,7 +127,7 @@ fn emit_word_operand<'ctx>(
         value
     };
     match expr {
-        MirExpr::ObjBinOp { op, left, right, .. } => {
+        MirExpr::ObjBinOp { op, left, right, .. } | MirExpr::BinOp { op, left, right, .. } => {
             let a = leaf(left, &format!("{name}_left"));
             let b = leaf(right, &format!("{name}_right"));
             // Both below 2**62 in magnitude: the `i64` cannot wrap.
